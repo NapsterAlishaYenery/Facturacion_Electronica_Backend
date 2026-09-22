@@ -1,0 +1,76 @@
+gitignore
+# Dependencias
+node_modules/
+package-lock.json
+yarn.lock
+
+# Variables de entorno (NUNCA subir)
+.env
+.env.local
+.env.*.local
+
+# Certificados digitales (CRÍTICO - nunca subir)
+certs/
+*.p12
+*.pfx
+*.pem
+*.key
+*.crt
+*.cer
+
+# Archivos generados por el sistema
+# Ignorar las fotos de uploads pero mantener la carpeta en el repo
+uploads/*
+!.gitkeep
+
+uploads/
+temp/
+tmp/
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# XML generados (contienen datos de facturas)
+generated/
+xml-output/
+*.xml
+!*.example.xml
+
+# PDFs generados
+pdf-output/
+*.pdf
+
+# Backups
+backups/
+*.sql
+*.dump
+
+# Sequelize
+.sequelizerc.local
+src/db/migrations/*.js.map
+
+# IDE y editores
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Build y dist
+dist/
+build/
+coverage/
+.nyc_output/
+
+# Caché
+.cache/
+.parcel-cache/
+.eslintcache
+
+# Sistema operativo
+desktop.ini
+$RECYCLE.BIN/
