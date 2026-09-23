@@ -7,6 +7,9 @@ const cookieParser = require('cookie-parser');
 require('dotenv').config();
 const path = require('path');
 
+// Importar las relaciones de los modelos desde el index
+require('./models'); 
+
 // Importar conexión a base de datos (Sequelize + SQL Server)
 const sequelize = require('./config/database');
 
