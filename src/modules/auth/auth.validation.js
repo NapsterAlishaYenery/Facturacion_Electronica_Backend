@@ -62,7 +62,41 @@ const loginSchema = Joi.object({
         })
 });
 
+// ------------------------------------------------------------
+// Schema: actualizar perfil propio
+// ------------------------------------------------------------
+const updateProfileSchema = Joi.object({
+    firstName: Joi.string().min(2).max(80).optional(),
+    middleName: Joi.string().max(80).optional().allow(null, ''),
+    lastName: Joi.string().min(2).max(80).optional(),
+    secondLastName: Joi.string().max(80).optional().allow(null, '')
+}).min(1).messages({
+    'object.min': 'At least one field is required to update'
+});
+
+// ------------------------------------------------------------
+// Schema: cambiar contraseña
+// ------------------------------------------------------------
+const changePasswordSchema = Joi.object({
+    currentPassword: Joi.string().min(1).max(100).required()
+        .messages({
+            'any.required': 'Current password is required'
+        }),
+    newPassword: Joi.string()
+        .min(8)
+        .max(100)
+        .pattern(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/)
+        .required()
+        .messages({
+            'string.min': 'New password must be at least 8 characters',
+            'string.pattern.base': 'New password must contain uppercase, lowercase and a number',
+            'any.required': 'New password is required'
+        })
+});
+
 module.exports = {
     registerCompanySchema,
-    loginSchema
+    loginSchema,
+    updateProfileSchema,
+    changePasswordSchema
 };

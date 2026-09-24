@@ -5,12 +5,14 @@ const router = express.Router();
 // Middlewares
 const authMiddleware = require('../../shared/middlewares/auth.middleware');
 const validate = require('../../shared/middlewares/validate.middleware');
-const { loginLimiter, registerLimiter } = require('../../shared/middlewares/rateLimit.middleware');
+const { loginLimiter, registerLimiter, writeLimiter } = require('../../shared/middlewares/rateLimit.middleware');
 
 // Validaciones
 const {
     registerCompanySchema,
-    loginSchema
+    loginSchema,
+    updateProfileSchema,
+    changePasswordSchema
 } = require('./auth.validation');
 
 // Controlador
@@ -48,6 +50,22 @@ router.post('/logout',
 router.get('/me',
     authMiddleware,
     authController.me
+);
+
+// Actualizar perfil propio
+router.patch('/me',
+    authMiddleware,
+    writeLimiter,
+    validate(updateProfileSchema),
+    authController.updateMe
+);
+
+// Cambiar contraseña
+router.patch('/change-password',
+    authMiddleware,
+    writeLimiter,
+    validate(changePasswordSchema),
+    authController.changePassword
 );
 
 // ============================================================

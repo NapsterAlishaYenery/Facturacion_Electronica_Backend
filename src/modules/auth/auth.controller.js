@@ -106,9 +106,47 @@ const me = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// PATCH /api/auth/me
+// ------------------------------------------------------------
+const updateMe = catchAsync(async (req, res) => {
+    const reqInfo = {
+        ip: req.ip,
+        userAgent: req.get('user-agent')
+    };
+
+    const updatedUser = await authService.updateProfile(req.user.id, req.body, reqInfo);
+
+    res.json({
+        success: true,
+        message: 'Profile updated successfully',
+        data: { user: updatedUser }
+    });
+});
+
+// ------------------------------------------------------------
+// PATCH /api/auth/change-password
+// ------------------------------------------------------------
+const changePassword = catchAsync(async (req, res) => {
+    const { currentPassword, newPassword } = req.body;
+    const reqInfo = {
+        ip: req.ip,
+        userAgent: req.get('user-agent')
+    };
+
+    await authService.changePassword(req.user.id, currentPassword, newPassword, reqInfo);
+
+    res.json({
+        success: true,
+        message: 'Password changed successfully'
+    });
+});
+
 module.exports = {
     registerCompany,
     login,
     logout,
-    me
+    me,
+    updateMe,
+    changePassword
 };

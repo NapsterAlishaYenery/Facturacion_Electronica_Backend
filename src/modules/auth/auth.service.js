@@ -3,7 +3,7 @@
 // Contiene TODA la lógica de negocio del módulo auth
 // Nunca toca req ni res
 // ============================================================
-
+const { hashPassword } = require('../../shared/utils/password');
 const { Op } = require('sequelize');
 const sequelize = require('../../config/database');
 const { User, Company, Subscription, Plan, AuditLog } = require('../../models');
@@ -225,9 +225,109 @@ function sanitizeUser(user) {
     return data;
 }
 
+// ------------------------------------------------------------
+// Actualizar perfil propio
+// ------------------------------------------------------------
+async function updateProfile(userId, updates, reqInfo = {}) {
+    // 1. Buscar el usuario
+    const user = await User.findByPk(userId);
+    if (!user) {
+        throw new AppError('User not found', 404, 'USER_NOT_FOUND');
+    }
+
+    // 2. Guardar el estado anterior para audit
+    const before = {
+        firstName: user.firstName,
+        middleName: user.middleName,
+        lastName: user.lastName,
+        secondLastName: user.secondLastName
+    };
+
+    // 3. Aplicar solo los campos permitidos
+    const allowedFields = ['firstName', 'middleName', 'lastName', 'secondLastName'];
+    const updateData = {};
+    for (const field of allowedFields) {
+        if (updates[field] !== undefined) {
+            updateData[field] = updates[field];
+        }
+    }
+
+    if (Object.keys(updateData).length === 0) {
+        throw new AppError('No valid fields to update', 400, 'NO_FIELDS_TO_UPDATE');
+    }
+
+    // 4. Actualizar
+    await user.update(updateData);
+
+    // 5. Audit log
+    try {
+        await AuditLog.create({
+            companyId: user.companyId,
+            userId: user.id,
+            action: 'user.profile_updated',
+            entity: 'user',
+            entityId: user.id,
+            before,
+            after: updateData,
+            ip: reqInfo.ip || null,
+            userAgent: reqInfo.userAgent || null
+        });
+    } catch (err) {
+        // Ignorar errores de audit
+    }
+
+    return sanitizeUser(user);
+}
+
+// ------------------------------------------------------------
+// Cambiar contraseña
+// ------------------------------------------------------------
+async function changePassword(userId, currentPassword, newPassword, reqInfo = {}) {
+    // 1. Buscar el usuario
+    const user = await User.findByPk(userId);
+    if (!user) {
+        throw new AppError('User not found', 404, 'USER_NOT_FOUND');
+    }
+
+    // 2. Verificar que la contraseña actual sea correcta
+    const isValid = await user.validatePassword(currentPassword);
+    if (!isValid) {
+        throw new AppError('Current password is incorrect', 401, 'INVALID_CURRENT_PASSWORD');
+    }
+
+    // 3. Verificar que la nueva no sea igual a la actual
+    if (currentPassword === newPassword) {
+        throw new AppError('New password must be different from current password', 400, 'SAME_PASSWORD');
+    }
+
+    // 4. Hashear la nueva contraseña manualmente y actualizar directo
+    const newHash = await hashPassword(newPassword);
+
+    await user.update({ passwordHash: newHash });
+
+    // 5. Audit log
+    try {
+        await AuditLog.create({
+            companyId: user.companyId,
+            userId: user.id,
+            action: 'user.password_changed',
+            entity: 'user',
+            entityId: user.id,
+            ip: reqInfo.ip || null,
+            userAgent: reqInfo.userAgent || null
+        });
+    } catch (err) {
+        // Ignorar errores de audit
+    }
+
+    return { success: true };
+}
+
 module.exports = {
     registerCompany,
     login,
     logout,
-    getCurrentUser
+    getCurrentUser,
+    updateProfile,
+    changePassword
 };
