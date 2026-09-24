@@ -56,7 +56,7 @@ function errorMiddleware(err, req, res, next) {
 // Normaliza cualquier tipo de error a { statusCode, code, message, details }
 // ------------------------------------------------------------
 function normalizeError(err) {
-    // 1. Errores personalizados (los que lanzamos con AppError)
+    // 1. Errores personalizados
     if (err instanceof AppError) {
         return {
             statusCode: err.statusCode,
@@ -65,13 +65,51 @@ function normalizeError(err) {
         };
     }
 
-    // 2. Errores de validación de Sequelize (fallan validaciones del modelo)
-    if (err instanceof ValidationError) {
-        const details = err.errors.map(e => ({
+    // 2. Errores de PostgreSQL: unique constraint (prioridad antes de ValidationError)
+    // Sequelize a veces envuelve el UniqueConstraintError en ValidationError
+    if (err.name === 'SequelizeUniqueConstraintError' || err.parent?.code === '23505') {
+        const details = err.errors?.map(e => ({
+            field: e.path,
+            value: e.value,
+            message: e.message
+        })) || [];
+        return {
+            statusCode: 409,
+            code: 'DUPLICATE_ENTRY',
+            message: 'A record with this value already exists',
+            details
+        };
+    }
+
+    // 3. Errores de foreign key
+    if (err.name === 'SequelizeForeignKeyConstraintError' || err.parent?.code === '23503') {
+        return {
+            statusCode: 400,
+            code: 'FOREIGN_KEY_ERROR',
+            message: 'Referenced record does not exist'
+        };
+    }
+
+    // 4. Errores de not null (PostgreSQL 23502)
+    if (err.parent?.code === '23502') {
+        return {
+            statusCode: 400,
+            code: 'VALIDATION_ERROR',
+            message: 'Missing required field',
+            details: [{
+                field: err.parent.column,
+                message: `Column ${err.parent.column} cannot be null`
+            }]
+        };
+    }
+
+    // 5. Errores de validación de Sequelize
+    if (err instanceof ValidationError || err.name === 'SequelizeValidationError') {
+        const details = err.errors?.map(e => ({
             field: e.path,
             message: e.message,
             type: e.type
-        }));
+        })) || [];
         return {
             statusCode: 400,
             code: 'VALIDATION_ERROR',
@@ -80,7 +118,7 @@ function normalizeError(err) {
         };
     }
 
-    // 3. Errores de unique constraint (ej: RNC duplicado)
+    // 6. Errores de unique constraint (validación de Sequelize, no de PG)
     if (err instanceof UniqueConstraintError) {
         const details = err.errors.map(e => ({
             field: e.path,
@@ -95,7 +133,7 @@ function normalizeError(err) {
         };
     }
 
-    // 4. Errores de foreign key (ej: referencia a empresa inexistente)
+    // 7. Errores de foreign key (validación de Sequelize)
     if (err instanceof ForeignKeyConstraintError) {
         return {
             statusCode: 400,
@@ -104,7 +142,7 @@ function normalizeError(err) {
         };
     }
 
-    // 5. Errores de JWT (por si el authMiddleware no los capturó)
+    // 8. Errores de JWT
     if (err.name === 'JsonWebTokenError') {
         return {
             statusCode: 401,
@@ -120,7 +158,7 @@ function normalizeError(err) {
         };
     }
 
-    // 6. Error 404 para rutas no encontradas
+    // 9. Error 404
     if (err.statusCode === 404 || err.status === 404) {
         return {
             statusCode: 404,
@@ -129,7 +167,7 @@ function normalizeError(err) {
         };
     }
 
-    // 7. Errores con statusCode propio (ej: de librerías externas)
+    // 10. Errores con statusCode propio
     if (err.statusCode || err.status) {
         return {
             statusCode: err.statusCode || err.status,
@@ -138,7 +176,7 @@ function normalizeError(err) {
         };
     }
 
-    // 8. Error genérico (bug no controlado)
+    // 11. Error genérico (bug)
     return {
         statusCode: 500,
         code: 'INTERNAL_ERROR',
