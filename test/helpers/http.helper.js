@@ -24,6 +24,7 @@ function request(path, options = {}) {
             res.on('end', () => {
                 resolve({
                     status: res.statusCode,
+                    headers: res.headers,   // ← Añadido: headers de respuesta
                     body: data ? JSON.parse(data) : null
                 });
             });
