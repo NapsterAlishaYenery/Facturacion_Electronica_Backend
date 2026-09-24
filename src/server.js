@@ -1,4 +1,4 @@
-// Dependencias principales y de seguridad
+// Dependencias principales y middleware de seguridad
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -8,7 +8,7 @@ require('dotenv').config();
 const path = require('path');
 
 // Importar las relaciones de los modelos desde el index
-require('./models'); 
+require('./models');
 
 // Importar conexión a base de datos (Sequelize + SQL Server)
 const sequelize = require('./config/database');
@@ -16,6 +16,9 @@ const sequelize = require('./config/database');
 // Importar rutas (las agregaremos gradualmente)
 const authRoutes = require('./modules/auth/auth.routes');
 const ecfRoutes = require('./modules/ecf/ecf.routes');
+
+//Importar Middlewatres globales propios
+const { errorMiddleware, notFoundMiddleware } = require('./shared/middlewares/error.middleware');
 
 // Crear el server
 const app = express();
@@ -58,15 +61,11 @@ app.get('/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/ecf', ecfRoutes);
 
+
 // Middleware global de errores
-app.use((err, req, res, next) => {
-    console.error("Global Server Error:", err.message);
-    // No exponer detalles internos en producción
-    const message = process.env.NODE_ENV === 'production'
-        ? "Internal server error"
-        : err.message;
-    res.status(500).json({ error: message });
-});
+// ... después de todas las rutas
+app.use(notFoundMiddleware);
+app.use(errorMiddleware);
 
 // Configurar puerto
 const port = process.env.PORT || 4001;
