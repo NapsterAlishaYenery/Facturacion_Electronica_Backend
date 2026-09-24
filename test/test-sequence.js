@@ -1,7 +1,7 @@
 require('dotenv').config();
-const sequelize = require('./src/config/database');
-const Sequence = require('./src/models/sequence.model');
-const Company = require('./src/models/company.model');
+const sequelize = require('../src/config/database');
+const Sequence = require('../src/models/sequence.model');
+const Company = require('../src/models/company.model');
 
 (async () => {
     try {

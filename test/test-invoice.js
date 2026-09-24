@@ -1,9 +1,9 @@
 require('dotenv').config();
-const sequelize = require('./src/config/database');
-const Invoice = require('./src/models/invoice.model');
-const InvoiceLine = require('./src/models/invoiceLine.model');
-const Company = require('./src/models/company.model');
-const Sequence = require('./src/models/sequence.model');
+const sequelize = require('../src/config/database');
+const Invoice = require('../src/models/invoice.model');
+const InvoiceLine = require('../src/models/invoiceLine.model');
+const Company = require('../src/models/company.model');
+const Sequence = require('../src/models/sequence.model');
 
 (async () => {
     try {
