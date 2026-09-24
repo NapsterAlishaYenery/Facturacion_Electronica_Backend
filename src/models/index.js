@@ -14,6 +14,7 @@ const Sequence = require('./sequence.model');
 const Invoice = require('./invoice.model');
 const InvoiceLine = require('./invoiceLine.model');
 const AuditLog = require('./auditLog.model');
+const PasswordReset = require('./passwordReset.model');
 
 // ============================================================
 // Company (1) ─── (N) Subscription
@@ -181,6 +182,21 @@ AuditLog.belongsTo(User, {
 });
 
 // ============================================================
+// User (1) ─── (N) PasswordReset
+// FK: password_resets.user_id → users.id (CASCADE)
+// ============================================================
+User.hasMany(PasswordReset, {
+    foreignKey: 'userId',
+    as: 'passwordResets',
+    onDelete: 'CASCADE',
+    onUpdate: 'CASCADE'
+});
+PasswordReset.belongsTo(User, {
+    foreignKey: 'userId',
+    as: 'user'
+});
+
+// ============================================================
 // Exportar todos los modelos con sus asociaciones registradas
 // ============================================================
 module.exports = {
@@ -192,5 +208,6 @@ module.exports = {
     Sequence,
     Invoice,
     InvoiceLine,
-    AuditLog
+    AuditLog,
+    PasswordReset
 };

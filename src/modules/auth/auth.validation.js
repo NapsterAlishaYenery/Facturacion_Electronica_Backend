@@ -94,9 +94,49 @@ const changePasswordSchema = Joi.object({
         })
 });
 
+// ------------------------------------------------------------
+// Schema: solicitar reset de contraseña
+// ------------------------------------------------------------
+const forgotPasswordSchema = Joi.object({
+    email: Joi.string().email().max(150).required()
+        .messages({
+            'string.email': 'Email must be valid',
+            'any.required': 'Email is required'
+        })
+});
+
+// ------------------------------------------------------------
+// Schema: resetear contraseña con código
+// ------------------------------------------------------------
+const resetPasswordSchema = Joi.object({
+    email: Joi.string().email().max(150).required(),
+    code: Joi.string().length(6).pattern(/^\d{6}$/).required()
+        .messages({
+            'string.length': 'Code must be 6 digits',
+            'string.pattern.base': 'Code must be 6 numeric digits',
+            'any.required': 'Code is required'
+        }),
+    newPassword: Joi.string()
+        .min(8)
+        .max(100)
+        .pattern(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/)
+        .required()
+        .messages({
+            'string.min': 'Password must be at least 8 characters',
+            'string.pattern.base': 'Password must contain uppercase, lowercase and a number'
+        })
+});
+
+// ------------------------------------------------------------
+// Schema: refresh token (no requiere body, viene en cookie)
+// ------------------------------------------------------------
+// No se necesita schema, viene en la cookie.
+
 module.exports = {
     registerCompanySchema,
     loginSchema,
     updateProfileSchema,
-    changePasswordSchema
+    changePasswordSchema,
+    forgotPasswordSchema,
+    resetPasswordSchema
 };

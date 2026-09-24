@@ -5,6 +5,7 @@
 
 const authService = require('./auth.service');
 const catchAsync = require('../../shared/utils/catchAsync');
+const { AppError } = require('../../shared/middlewares/error.middleware');
 
 // ------------------------------------------------------------
 // Opciones de las cookies
@@ -142,11 +143,79 @@ const changePassword = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// POST /api/auth/forgot-password
+// ------------------------------------------------------------
+const forgotPassword = catchAsync(async (req, res) => {
+    const { email } = req.body;
+    const reqInfo = {
+        ip: req.ip,
+        userAgent: req.get('user-agent')
+    };
+
+    await authService.forgotPassword(email, reqInfo);
+
+    // Respuesta genérica: NO revelar si el email existe o no
+    res.json({
+        success: true,
+        message: 'If the email exists, a reset code has been sent.'
+    });
+});
+
+// ------------------------------------------------------------
+// POST /api/auth/reset-password
+// ------------------------------------------------------------
+const resetPassword = catchAsync(async (req, res) => {
+    const { email, code, newPassword } = req.body;
+    const reqInfo = {
+        ip: req.ip,
+        userAgent: req.get('user-agent')
+    };
+
+    await authService.resetPassword(email, code, newPassword, reqInfo);
+
+    res.json({
+        success: true,
+        message: 'Password reset successfully. You can now login with your new password.'
+    });
+});
+
+// ------------------------------------------------------------
+// POST /api/auth/refresh
+// ------------------------------------------------------------
+const refresh = catchAsync(async (req, res) => {
+    // Leer refresh token desde cookie
+    const refreshToken = req.cookies?.refresh_token;
+
+    if (!refreshToken) {
+        throw new AppError('No refresh token provided', 401, 'NO_REFRESH_TOKEN');
+    }
+
+    const result = await authService.refreshAccessToken(refreshToken);
+
+    // Setear nuevo access token
+    res.cookie('access_token', result.accessToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        path: '/',
+        maxAge: 15 * 60 * 1000
+    });
+
+    res.json({
+        success: true,
+        message: 'Token refreshed'
+    });
+});
+
 module.exports = {
     registerCompany,
     login,
     logout,
     me,
     updateMe,
-    changePassword
+    changePassword,
+    forgotPassword,
+    resetPassword,
+    refresh
 };

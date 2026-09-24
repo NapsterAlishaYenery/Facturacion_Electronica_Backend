@@ -323,11 +323,164 @@ async function changePassword(userId, currentPassword, newPassword, reqInfo = {}
     return { success: true };
 }
 
+// ------------------------------------------------------------
+// Solicitar reset de contraseña
+// ------------------------------------------------------------
+async function forgotPassword(email, reqInfo = {}) {
+    // 1. Buscar el usuario
+    const user = await User.findByEmail(email);
+
+    // Por seguridad: no revelar si el email existe o no
+    // Devolver siempre "success" aunque no exista
+    if (!user || !user.isActive) {
+        return { sent: true };
+    }
+
+    // 2. Invalidar códigos anteriores no usados
+    const { PasswordReset } = require('../../models');
+    await PasswordReset.update(
+        { usedAt: new Date() },
+        { where: { userId: user.id, usedAt: null } }
+    );
+
+    // 3. Generar nuevo código
+    const { generate6DigitCode } = require('../../shared/utils/codes');
+    const code = generate6DigitCode();
+
+    // 4. Expira en 15 minutos
+    const expiresAt = new Date();
+    expiresAt.setMinutes(expiresAt.getMinutes() + 15);
+
+    // 5. Guardar en BD
+    await PasswordReset.create({
+        userId: user.id,
+        code,
+        expiresAt
+    });
+
+    // 6. Enviar email (por ahora solo log en consola)
+    console.log('\n🔐 PASSWORD RESET CODE');
+    console.log(`   Email: ${user.email}`);
+    console.log(`   Code: ${code}`);
+    console.log(`   Expires at: ${expiresAt.toISOString()}`);
+    console.log('');
+
+    // TODO: Integrar con nodemailer o Resend en producción
+
+    // 7. Audit log
+    try {
+        await AuditLog.create({
+            companyId: user.companyId,
+            userId: user.id,
+            action: 'user.password_reset_requested',
+            entity: 'user',
+            entityId: user.id,
+            ip: reqInfo.ip || null,
+            userAgent: reqInfo.userAgent || null
+        });
+    } catch (err) {
+        // Ignorar errores de audit
+    }
+
+    return { sent: true };
+}
+
+// ------------------------------------------------------------
+// Resetear contraseña con código
+// ------------------------------------------------------------
+async function resetPassword(email, code, newPassword, reqInfo = {}) {
+    const { PasswordReset } = require('../../models');
+
+    // 1. Buscar el usuario
+    const user = await User.findByEmail(email);
+    if (!user || !user.isActive) {
+        throw new AppError('Invalid or expired code', 400, 'INVALID_RESET_CODE');
+    }
+
+    // 2. Buscar el código
+    const reset = await PasswordReset.findOne({
+        where: {
+            userId: user.id,
+            code,
+            usedAt: null
+        },
+        order: [['createdAt', 'DESC']]
+    });
+
+    if (!reset) {
+        throw new AppError('Invalid or expired code', 400, 'INVALID_RESET_CODE');
+    }
+
+    // 3. Verificar expiración
+    if (new Date() > reset.expiresAt) {
+        throw new AppError('Invalid or expired code', 400, 'INVALID_RESET_CODE');
+    }
+
+    // 4. Hashear la nueva contraseña
+    const newHash = await hashPassword(newPassword);
+
+    // 5. Actualizar en transacción
+    await sequelize.transaction(async (t) => {
+        await user.update({ passwordHash: newHash }, { transaction: t });
+        await reset.update({ usedAt: new Date() }, { transaction: t });
+    });
+
+    // 6. Audit log
+    try {
+        await AuditLog.create({
+            companyId: user.companyId,
+            userId: user.id,
+            action: 'user.password_reset_completed',
+            entity: 'user',
+            entityId: user.id,
+            ip: reqInfo.ip || null,
+            userAgent: reqInfo.userAgent || null
+        });
+    } catch (err) {
+        // Ignorar errores de audit
+    }
+
+    return { success: true };
+}
+
+// ------------------------------------------------------------
+// Refrescar access token
+// ------------------------------------------------------------
+async function refreshAccessToken(refreshToken) {
+    const { verifyRefreshToken, signAccessToken } = require('../../shared/utils/jwt');
+
+    // 1. Verificar el refresh token (lanza error si es inválido o expiró)
+    let payload;
+    try {
+        payload = verifyRefreshToken(refreshToken);
+    } catch (err) {
+        throw new AppError('Invalid or expired refresh token', 401, 'INVALID_REFRESH_TOKEN');
+    }
+
+    // 2. Buscar el usuario
+    const user = await User.findByPk(payload.userId);
+    if (!user || !user.isActive) {
+        throw new AppError('User not found or inactive', 401, 'USER_NOT_FOUND');
+    }
+
+    // 3. Generar nuevo access token
+    const accessToken = signAccessToken({
+        userId: user.id,
+        role: user.role,
+        companyId: user.companyId
+    });
+
+    return { accessToken };
+}
+
 module.exports = {
     registerCompany,
     login,
     logout,
     getCurrentUser,
     updateProfile,
-    changePassword
+    changePassword,
+    forgotPassword,
+    resetPassword,
+    refreshAccessToken
 };

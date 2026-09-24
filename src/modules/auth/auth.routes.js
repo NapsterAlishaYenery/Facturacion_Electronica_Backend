@@ -5,14 +5,21 @@ const router = express.Router();
 // Middlewares
 const authMiddleware = require('../../shared/middlewares/auth.middleware');
 const validate = require('../../shared/middlewares/validate.middleware');
-const { loginLimiter, registerLimiter, writeLimiter } = require('../../shared/middlewares/rateLimit.middleware');
+const {
+    loginLimiter,
+    registerLimiter,
+    forgotPasswordLimiter,
+    writeLimiter
+} = require('../../shared/middlewares/rateLimit.middleware');
 
 // Validaciones
 const {
     registerCompanySchema,
     loginSchema,
     updateProfileSchema,
-    changePasswordSchema
+    changePasswordSchema,
+    forgotPasswordSchema,
+    resetPasswordSchema
 } = require('./auth.validation');
 
 // Controlador
@@ -22,37 +29,48 @@ const authController = require('./auth.controller');
 // Rutas públicas
 // ============================================================
 
-// Registro de empresa + dueño
 router.post('/register-company',
     registerLimiter,
     validate(registerCompanySchema),
     authController.registerCompany
 );
 
-// Login
 router.post('/login',
     loginLimiter,
     validate(loginSchema),
     authController.login
 );
 
+router.post('/forgot-password',
+    forgotPasswordLimiter,
+    validate(forgotPasswordSchema),
+    authController.forgotPassword
+);
+
+router.post('/reset-password',
+    writeLimiter,
+    validate(resetPasswordSchema),
+    authController.resetPassword
+);
+
+router.post('/refresh',
+    authController.refresh
+);
+
 // ============================================================
 // Rutas autenticadas
 // ============================================================
 
-// Logout
 router.post('/logout',
     authMiddleware,
     authController.logout
 );
 
-// Obtener usuario actual
 router.get('/me',
     authMiddleware,
     authController.me
 );
 
-// Actualizar perfil propio
 router.patch('/me',
     authMiddleware,
     writeLimiter,
@@ -60,7 +78,6 @@ router.patch('/me',
     authController.updateMe
 );
 
-// Cambiar contraseña
 router.patch('/change-password',
     authMiddleware,
     writeLimiter,
