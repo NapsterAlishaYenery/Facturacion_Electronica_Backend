@@ -1,0 +1,47 @@
+// ============================================================
+// Middleware de multi-tenant
+// Inyecta el companyId correcto según el rol del usuario
+// Debe usarse DESPUÉS de authMiddleware
+//
+// Reglas:
+// - admin: req.tenantCompanyId = null (puede ver todo)
+// - company_admin / operator: req.tenantCompanyId = req.user.companyId
+//
+// Los servicios usan req.tenantCompanyId para filtrar por empresa.
+// ============================================================
+
+function tenantMiddleware(req, res, next) {
+    // 1. Verificar que authMiddleware se haya ejecutado antes
+    if (!req.user) {
+        return res.status(500).json({
+            success: false,
+            error: {
+                code: 'MIDDLEWARE_MISCONFIGURED',
+                message: 'tenantMiddleware requires authMiddleware to run first.'
+            }
+        });
+    }
+
+    // 2. Inyectar el companyId según el rol
+    if (req.user.role === 'admin') {
+        // El admin ve todo. No tiene restricción de tenant.
+        req.tenantCompanyId = null;
+    } else {
+        // company_admin y operator solo ven su empresa
+        if (!req.user.companyId) {
+            return res.status(403).json({
+                success: false,
+                error: {
+                    code: 'NO_COMPANY_ASSIGNED',
+                    message: 'User is not assigned to any company.'
+                }
+            });
+        }
+        req.tenantCompanyId = req.user.companyId;
+    }
+
+    // 3. Continuar
+    next();
+}
+
+module.exports = tenantMiddleware;
