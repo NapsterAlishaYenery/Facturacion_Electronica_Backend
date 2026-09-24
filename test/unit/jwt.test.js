@@ -6,13 +6,13 @@ const {
     signRefreshToken,
     verifyAccessToken,
     verifyRefreshToken
-} = require('../src/shared/utils/jwt');
+} = require('../../src/shared/utils/jwt');
 
 const {
     hashPassword,
     comparePassword,
     checkPasswordStrength
-} = require('../src/shared/utils/password');
+} = require('../../src/shared/utils/password');
 
 (async () => {
     console.log('--- JWT Tests ---');

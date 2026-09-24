@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const authMiddleware = require('../../shared/middlewares/auth.middleware');
+const roleMiddleware = require('../../shared/middlewares/role.middleware');
 
 // Aquí irán las rutas de auth (login, registro, etc.)
 router.get('/ping', (req, res) => {

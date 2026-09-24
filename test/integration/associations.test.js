@@ -1,5 +1,5 @@
 require('dotenv').config();
-const sequelize = require('../src/config/database');
+const sequelize = require('../../src/config/database');
 const {
     Company,
     Plan,
@@ -10,7 +10,7 @@ const {
     Invoice,
     InvoiceLine,
     AuditLog
-} = require('../src/models'); // ← Importa el index.js, no los modelos individuales
+} = require('../../src/models'); // ← Importa el index.js, no los modelos individuales
 
 (async () => {
     try {

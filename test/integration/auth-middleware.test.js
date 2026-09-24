@@ -1,7 +1,7 @@
 require('dotenv').config();
-const sequelize = require('../src/config/database');
-const { User } = require('../src/models');
-const { signAccessToken } = require('../src/shared/utils/jwt');
+const sequelize = require('../../src/config/database');
+const { User } = require('../../src//models');
+const { signAccessToken } = require('../../src/shared/utils/jwt');
 const http = require('http');
 
 const BASE_URL = 'http://localhost:4001';
