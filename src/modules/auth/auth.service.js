@@ -473,6 +473,258 @@ async function refreshAccessToken(refreshToken) {
     return { accessToken };
 }
 
+
+// ------------------------------------------------------------
+// Listar usuarios (admin ve todos, company_admin ve los de su empresa)
+// ------------------------------------------------------------
+async function listUsers(reqUser, filters = {}) {
+    const where = {};
+
+    // Si es company_admin, forzar filtro por su empresa
+    if (reqUser.role === 'company_admin') {
+        where.companyId = reqUser.companyId;
+    } else if (reqUser.role === 'admin' && filters.companyId) {
+        where.companyId = filters.companyId;
+    }
+
+    // Filtros opcionales
+    if (filters.role) where.role = filters.role;
+    if (filters.isActive !== undefined) where.isActive = filters.isActive;
+
+    // Búsqueda por email o nombre
+    const { Op } = require('sequelize');
+    if (filters.search) {
+        where[Op.or] = [
+            { email: { [Op.iLike]: `%${filters.search}%` } },
+            { firstName: { [Op.iLike]: `%${filters.search}%` } },
+            { lastName: { [Op.iLike]: `%${filters.search}%` } }
+        ];
+    }
+
+    const { count, rows } = await User.findAndCountAll({
+        where,
+        attributes: { exclude: ['passwordHash'] },
+        include: [{
+            model: Company,
+            as: 'company',
+            attributes: ['id', 'rnc', 'name']
+        }],
+        order: [['createdAt', 'DESC']],
+        limit: filters.limit || 50,
+        offset: filters.offset || 0
+    });
+
+    return {
+        users: rows,
+        total: count,
+        limit: filters.limit || 50,
+        offset: filters.offset || 0
+    };
+}
+
+// ------------------------------------------------------------
+// Crear usuario (admin puede cualquier rol; company_admin solo operator)
+// ------------------------------------------------------------
+async function createUser(reqUser, userData, reqInfo = {}) {
+    const data = { ...userData };
+
+    // Verificaciones según el rol de quien crea
+    if (reqUser.role === 'company_admin') {
+        // Forzar rol operator y su propia empresa
+        data.role = 'operator';
+        data.companyId = reqUser.companyId;
+    } else if (reqUser.role === 'admin') {
+        // Admin: validar reglas de negocio
+        if (data.role === 'admin' && data.companyId) {
+            throw new AppError('Admin users cannot belong to a company', 400, 'INVALID_ROLE_COMPANY');
+        }
+        if (['company_admin', 'operator'].includes(data.role) && !data.companyId) {
+            throw new AppError('Company users must have a company assigned', 400, 'COMPANY_REQUIRED');
+        }
+    } else {
+        throw new AppError('Insufficient permissions', 403, 'FORBIDDEN');
+    }
+
+    // Verificar si el email ya existe
+    const existing = await User.findOne({ where: { email: data.email.toLowerCase().trim() } });
+    if (existing) {
+        throw new AppError('A user with this email already exists', 409, 'EMAIL_ALREADY_EXISTS');
+    }
+
+    // Crear el usuario
+    const user = await User.create({
+        email: data.email.toLowerCase().trim(),
+        password: data.password,
+        firstName: data.firstName,
+        middleName: data.middleName || null,
+        lastName: data.lastName,
+        secondLastName: data.secondLastName || null,
+        role: data.role,
+        companyId: data.companyId || null
+    });
+
+    // Audit log
+    try {
+        await AuditLog.create({
+            companyId: user.companyId,
+            userId: reqUser.id,
+            action: 'user.created',
+            entity: 'user',
+            entityId: user.id,
+            after: {
+                email: user.email,
+                role: user.role,
+                companyId: user.companyId
+            },
+            ip: reqInfo.ip || null,
+            userAgent: reqInfo.userAgent || null
+        });
+    } catch (err) {
+        // Ignorar errores de audit
+    }
+
+    return sanitizeUser(user);
+}
+
+// ------------------------------------------------------------
+// Actualizar usuario (admin o company_admin)
+// ------------------------------------------------------------
+async function updateUser(reqUser, targetUserId, updates, reqInfo = {}) {
+    // 1. Buscar el usuario objetivo
+    const targetUser = await User.findByPk(targetUserId);
+    if (!targetUser) {
+        throw new AppError('User not found', 404, 'USER_NOT_FOUND');
+    }
+
+    // 2. Verificar permisos
+    if (reqUser.role === 'company_admin') {
+        // Solo puede editar usuarios de su empresa
+        if (targetUser.companyId !== reqUser.companyId) {
+            throw new AppError('You can only edit users from your own company', 403, 'FORBIDDEN');
+        }
+        // No puede cambiar el rol
+        // No puede editarse a sí mismo isActive (evitar auto-bloqueo)
+        if (targetUser.id === reqUser.id && updates.isActive === false) {
+            throw new AppError('You cannot deactivate yourself', 400, 'CANNOT_DEACTIVATE_SELF');
+        }
+    }
+
+    // 3. Admin no puede desactivarse a sí mismo
+    if (reqUser.role === 'admin' && targetUser.id === reqUser.id && updates.isActive === false) {
+        throw new AppError('You cannot deactivate yourself', 400, 'CANNOT_DEACTIVATE_SELF');
+    }
+
+    // 4. Filtrar campos permitidos
+    const allowedFields = ['firstName', 'middleName', 'lastName', 'secondLastName', 'isActive'];
+    const updateData = {};
+    for (const field of allowedFields) {
+        if (updates[field] !== undefined) {
+            updateData[field] = updates[field];
+        }
+    }
+
+    if (Object.keys(updateData).length === 0) {
+        throw new AppError('No valid fields to update', 400, 'NO_FIELDS_TO_UPDATE');
+    }
+
+    // 5. Guardar estado anterior para audit
+    const before = {
+        firstName: targetUser.firstName,
+        middleName: targetUser.middleName,
+        lastName: targetUser.lastName,
+        secondLastName: targetUser.secondLastName,
+        isActive: targetUser.isActive
+    };
+
+    // 6. Actualizar
+    await targetUser.update(updateData);
+
+    // 7. Audit log
+    try {
+        await AuditLog.create({
+            companyId: targetUser.companyId,
+            userId: reqUser.id,
+            action: 'user.updated',
+            entity: 'user',
+            entityId: targetUser.id,
+            before,
+            after: updateData,
+            ip: reqInfo.ip || null,
+            userAgent: reqInfo.userAgent || null
+        });
+    } catch (err) {
+        // Ignorar errores de audit
+    }
+
+    return sanitizeUser(targetUser);
+}
+
+// ------------------------------------------------------------
+// Eliminar usuario (admin: hard delete; company_admin: soft delete)
+// ------------------------------------------------------------
+async function deleteUser(reqUser, targetUserId, reqInfo = {}) {
+    // 1. Buscar el usuario objetivo
+    const targetUser = await User.findByPk(targetUserId);
+    if (!targetUser) {
+        throw new AppError('User not found', 404, 'USER_NOT_FOUND');
+    }
+
+    // 2. No puede borrarse a sí mismo
+    if (targetUser.id === reqUser.id) {
+        throw new AppError('You cannot delete yourself', 400, 'CANNOT_DELETE_SELF');
+    }
+
+    // 3. Verificar permisos
+    if (reqUser.role === 'company_admin') {
+        if (targetUser.companyId !== reqUser.companyId) {
+            throw new AppError('You can only delete users from your own company', 403, 'FORBIDDEN');
+        }
+
+        // Soft delete: solo desactivar
+        await targetUser.update({ isActive: false });
+
+        // Audit
+        try {
+            await AuditLog.create({
+                companyId: targetUser.companyId,
+                userId: reqUser.id,
+                action: 'user.deactivated',
+                entity: 'user',
+                entityId: targetUser.id,
+                ip: reqInfo.ip || null,
+                userAgent: reqInfo.userAgent || null
+            });
+        } catch (err) { /* ignorar */ }
+
+        return { deleted: false, deactivated: true };
+    }
+
+    // 4. Admin: hard delete
+    const before = {
+        email: targetUser.email,
+        role: targetUser.role,
+        companyId: targetUser.companyId
+    };
+
+    await targetUser.destroy();
+
+    // Audit (con companyId del admin porque el usuario ya no existe)
+    try {
+        await AuditLog.create({
+            companyId: reqUser.companyId,
+            userId: reqUser.id,
+            action: 'user.deleted',
+            entity: 'user',
+            entityId: targetUserId,
+            before,
+            ip: reqInfo.ip || null,
+            userAgent: reqInfo.userAgent || null
+        });
+    } catch (err) { /* ignorar */ }
+
+    return { deleted: true, deactivated: false };
+}
+
 module.exports = {
     registerCompany,
     login,
@@ -482,5 +734,9 @@ module.exports = {
     changePassword,
     forgotPassword,
     resetPassword,
-    refreshAccessToken
+    refreshAccessToken,
+    listUsers,
+    createUser,
+    updateUser,
+    deleteUser
 };

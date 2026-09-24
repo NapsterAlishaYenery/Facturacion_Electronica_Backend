@@ -208,6 +208,117 @@ const refresh = catchAsync(async (req, res) => {
     });
 });
 
+
+// ------------------------------------------------------------
+// GET /api/auth/users (admin)
+// ------------------------------------------------------------
+const listUsers = catchAsync(async (req, res) => {
+    const result = await authService.listUsers(req.user, req.query);
+
+    res.json({
+        success: true,
+        data: result
+    });
+});
+
+// ------------------------------------------------------------
+// POST /api/auth/users (admin)
+// ------------------------------------------------------------
+const createUser = catchAsync(async (req, res) => {
+    const reqInfo = { ip: req.ip, userAgent: req.get('user-agent') };
+    const user = await authService.createUser(req.user, req.body, reqInfo);
+
+    res.status(201).json({
+        success: true,
+        message: 'User created successfully',
+        data: { user }
+    });
+});
+
+// ------------------------------------------------------------
+// PATCH /api/auth/users/:id/activate (admin)
+// ------------------------------------------------------------
+const toggleUserActive = catchAsync(async (req, res) => {
+    const reqInfo = { ip: req.ip, userAgent: req.get('user-agent') };
+    const { isActive } = req.body;
+
+    const user = await authService.updateUser(req.user, req.params.id, { isActive }, reqInfo);
+
+    res.json({
+        success: true,
+        message: `User ${isActive ? 'activated' : 'deactivated'} successfully`,
+        data: { user }
+    });
+});
+
+// ------------------------------------------------------------
+// DELETE /api/auth/users/:id (admin)
+// ------------------------------------------------------------
+const deleteUser = catchAsync(async (req, res) => {
+    const reqInfo = { ip: req.ip, userAgent: req.get('user-agent') };
+    const result = await authService.deleteUser(req.user, req.params.id, reqInfo);
+
+    res.json({
+        success: true,
+        message: result.deleted ? 'User deleted' : 'User deactivated',
+        data: result
+    });
+});
+
+// ------------------------------------------------------------
+// GET /api/auth/company/users (company_admin)
+// ------------------------------------------------------------
+const listCompanyUsers = catchAsync(async (req, res) => {
+    const result = await authService.listUsers(req.user, req.query);
+
+    res.json({
+        success: true,
+        data: result
+    });
+});
+
+// ------------------------------------------------------------
+// POST /api/auth/company/users (company_admin)
+// ------------------------------------------------------------
+const createCompanyUser = catchAsync(async (req, res) => {
+    const reqInfo = { ip: req.ip, userAgent: req.get('user-agent') };
+    const user = await authService.createUser(req.user, req.body, reqInfo);
+
+    res.status(201).json({
+        success: true,
+        message: 'Operator created successfully',
+        data: { user }
+    });
+});
+
+// ------------------------------------------------------------
+// PATCH /api/auth/company/users/:id (company_admin)
+// ------------------------------------------------------------
+const updateCompanyUser = catchAsync(async (req, res) => {
+    const reqInfo = { ip: req.ip, userAgent: req.get('user-agent') };
+    const user = await authService.updateUser(req.user, req.params.id, req.body, reqInfo);
+
+    res.json({
+        success: true,
+        message: 'User updated successfully',
+        data: { user }
+    });
+});
+
+// ------------------------------------------------------------
+// DELETE /api/auth/company/users/:id (company_admin)
+// ------------------------------------------------------------
+const deleteCompanyUser = catchAsync(async (req, res) => {
+    const reqInfo = { ip: req.ip, userAgent: req.get('user-agent') };
+    const result = await authService.deleteUser(req.user, req.params.id, reqInfo);
+
+    res.json({
+        success: true,
+        message: result.deleted ? 'User deleted' : 'User deactivated',
+        data: result
+    });
+});
+
 module.exports = {
     registerCompany,
     login,
@@ -217,5 +328,13 @@ module.exports = {
     changePassword,
     forgotPassword,
     resetPassword,
-    refresh
+    refresh,
+    listUsers,
+    createUser,
+    toggleUserActive,
+    deleteUser,
+    listCompanyUsers,
+    createCompanyUser,
+    updateCompanyUser,
+    deleteCompanyUser
 };
