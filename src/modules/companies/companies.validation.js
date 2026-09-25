@@ -36,7 +36,28 @@ const listCompaniesQuerySchema = Joi.object({
     limit: Joi.number().integer().min(1).max(100).default(50)
 });
 
+// ------------------------------------------------------------
+// Schema: admin actualiza cualquier empresa
+// ------------------------------------------------------------
+const updateCompanyByIdSchema = Joi.object({
+    name: Joi.string().min(2).max(200).optional(),
+    tradeName: Joi.string().max(200).optional().allow(null, ''),
+    email: Joi.string().email().max(150).optional().allow(null, '')
+        .messages({
+            'string.email': 'Email must be valid'
+        }),
+    phone: Joi.string().max(30).optional().allow(null, ''),
+    address: Joi.string().max(300).optional().allow(null, ''),
+    economicActivity: Joi.string().max(200).optional().allow(null, ''),
+    // Campos exclusivos del admin
+    dgiiEnvironment: Joi.string().valid('testecf', 'production').optional(),
+    isActive: Joi.boolean().optional()
+}).min(1).messages({
+    'object.min': 'At least one field is required to update'
+});
+
 module.exports = {
     updateMyCompanySchema,
-    listCompaniesQuerySchema
+    listCompaniesQuerySchema,
+    updateCompanyByIdSchema
 };

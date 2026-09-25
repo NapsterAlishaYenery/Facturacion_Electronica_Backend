@@ -282,9 +282,75 @@ async function getCompanyById(companyId) {
     };
 }
 
+// ------------------------------------------------------------
+// Actualizar cualquier empresa (solo admin)
+// ------------------------------------------------------------
+async function updateCompanyById(companyId, updates, reqUser, reqInfo = {}) {
+    // 1. Buscar la empresa
+    const company = await Company.findByPk(companyId);
+    if (!company) {
+        throw new AppError('Company not found', 404, 'COMPANY_NOT_FOUND');
+    }
+
+    // 2. Guardar estado anterior para audit
+    const before = {
+        name: company.name,
+        tradeName: company.tradeName,
+        email: company.email,
+        phone: company.phone,
+        address: company.address,
+        economicActivity: company.economicActivity,
+        dgiiEnvironment: company.dgiiEnvironment,
+        isActive: company.isActive
+    };
+
+    // 3. Filtrar campos permitidos (doble protección)
+    const allowedFields = [
+        'name', 'tradeName', 'email', 'phone', 'address', 'economicActivity',
+        'dgiiEnvironment', 'isActive'
+    ];
+    const updateData = {};
+    for (const field of allowedFields) {
+        if (updates[field] !== undefined) {
+            updateData[field] = updates[field];
+        }
+    }
+
+    if (Object.keys(updateData).length === 0) {
+        throw new AppError('No valid fields to update', 400, 'NO_FIELDS_TO_UPDATE');
+    }
+
+    // 4. Actualizar
+    await company.update(updateData);
+
+    const safeCompany = await Company.findByPk(company.id, {
+        attributes: { exclude: ['certificatePassword'] }
+    });
+
+    // 5. Audit log
+    try {
+        await AuditLog.create({
+            companyId: safeCompany.id,
+            userId: reqUser.id, 
+            action: 'company.updated_by_admin',
+            entity: 'company',
+            entityId: safeCompany.id,
+            before,
+            after: updateData,
+            ip: reqInfo.ip || null,
+            userAgent: reqInfo.userAgent || null
+        });
+    } catch (err) {
+        // Ignorar errores de audit
+    }
+
+    return safeCompany;
+}
+
 module.exports = {
     getMyCompany,
     updateMyCompany,
     listCompanies,
-    getCompanyById
+    getCompanyById,
+    updateCompanyById
 };

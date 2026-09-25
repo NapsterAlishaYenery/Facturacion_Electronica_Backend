@@ -17,7 +17,8 @@ const {
 // Validaciones
 const {
     updateMyCompanySchema,
-    listCompaniesQuerySchema
+    listCompaniesQuerySchema,
+    updateCompanyByIdSchema
 } = require('./companies.validation');
 
 // Controlador
@@ -76,10 +77,18 @@ router.get('/:id',
     companiesController.getCompanyById
 );
 
+// PATCH /api/companies/:id — Actualizar cualquiera
+router.patch('/:id',
+    authMiddleware,
+    roleMiddleware('admin'),
+    writeLimiter,
+    validate(updateCompanyByIdSchema),
+    companiesController.updateCompanyById
+);
+
 // ============================================================
 // Endpoints planeados (implementación pendiente)
 // ============================================================
-// PATCH  /api/companies/:id                   → actualizar cualquiera (admin)
 // PATCH  /api/companies/:id/activate          → activar/desactivar (admin)
 // DELETE /api/companies/:id                   → borrar (admin)
 

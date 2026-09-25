@@ -65,9 +65,33 @@ const getCompanyById = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// PATCH /api/companies/:id (admin)
+// ------------------------------------------------------------
+const updateCompanyById = catchAsync(async (req, res) => {
+    const reqInfo = {
+        ip: req.ip,
+        userAgent: req.get('user-agent')
+    };
+
+    const company = await companiesService.updateCompanyById(
+        req.params.id,
+        req.body,
+        req.user,
+        reqInfo
+    );
+
+    res.json({
+        success: true,
+        message: 'Company updated successfully',
+        data: { company }
+    });
+});
+
 module.exports = {
     getMyCompany,
     updateMyCompany,
     listCompanies,
-    getCompanyById
+    getCompanyById,
+    updateCompanyById
 };
