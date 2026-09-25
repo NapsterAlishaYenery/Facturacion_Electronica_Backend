@@ -11,8 +11,10 @@ const roleMiddleware = require('../../shared/middlewares/role.middleware');
 const validate = require('../../shared/middlewares/validate.middleware');
 const { writeLimiter } = require('../../shared/middlewares/rateLimit.middleware');
 
-// Validaciones (se usarán cuando se implementen los endpoints)
-const companiesValidation = require('./companies.validation');
+// Validaciones
+const {
+    updateMyCompanySchema
+} = require('./companies.validation');
 
 // Controlador
 const companiesController = require('./companies.controller');
@@ -39,10 +41,18 @@ router.get('/me',
     companiesController.getMyCompany
 );
 
+// PATCH /api/companies/me — Actualizar mi empresa
+router.patch('/me',
+    authMiddleware,
+    roleMiddleware('company_admin'),
+    writeLimiter,
+    validate(updateMyCompanySchema),
+    companiesController.updateMyCompany
+);
+
 // ============================================================
 // Endpoints planeados (implementación pendiente)
 // ============================================================
-// PATCH  /api/companies/me                    → actualizar mi empresa
 // GET    /api/companies                       → listar todas (admin)
 // GET    /api/companies/:id                   → ver una (admin)
 // PATCH  /api/companies/:id                   → actualizar cualquiera (admin)

@@ -71,6 +71,77 @@ async function getMyCompany(companyId) {
     };
 }
 
+// ------------------------------------------------------------
+// Actualizar mi empresa
+// ------------------------------------------------------------
+async function updateMyCompany(companyId, updates, reqUser, reqInfo = {}) {
+    // 1. Verificar que el usuario tenga empresa
+    if (!companyId) {
+        throw new AppError(
+            'You do not belong to any company',
+            400,
+            'NO_COMPANY_ASSIGNED'
+        );
+    }
+
+    // 2. Buscar la empresa
+    const company = await Company.findByPk(companyId);
+    if (!company) {
+        throw new AppError('Company not found', 404, 'COMPANY_NOT_FOUND');
+    }
+
+    // 3. Verificar que esté activa (no se puede editar una suspendida)
+    if (!company.isActive) {
+        throw new AppError('Company is inactive', 403, 'COMPANY_INACTIVE');
+    }
+
+    // 4. Guardar estado anterior para audit (solo campos editables)
+    const before = {
+        name: company.name,
+        tradeName: company.tradeName,
+        email: company.email,
+        phone: company.phone,
+        address: company.address,
+        economicActivity: company.economicActivity
+    };
+
+    // 5. Filtrar campos permitidos (doble protección)
+    const allowedFields = ['name', 'tradeName', 'email', 'phone', 'address', 'economicActivity'];
+    const updateData = {};
+    for (const field of allowedFields) {
+        if (updates[field] !== undefined) {
+            updateData[field] = updates[field];
+        }
+    }
+
+    if (Object.keys(updateData).length === 0) {
+        throw new AppError('No valid fields to update', 400, 'NO_FIELDS_TO_UPDATE');
+    }
+
+    // 6. Actualizar
+    await company.update(updateData);
+
+    // 7. Audit log
+    try {
+        await AuditLog.create({
+            companyId: company.id,
+            userId: reqUser.id,
+            action: 'company.updated',
+            entity: 'company',
+            entityId: company.id,
+            before,
+            after: updateData,
+            ip: reqInfo.ip || null,
+            userAgent: reqInfo.userAgent || null
+        });
+    } catch (err) {
+        // Ignorar errores de audit
+    }
+
+    return company;
+}
+
 module.exports = {
-    getMyCompany
+    getMyCompany,
+    updateMyCompany
 };
