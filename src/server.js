@@ -17,6 +17,7 @@ const sequelize = require('./config/database');
 const authRoutes = require('./modules/auth/auth.routes');
 const ecfRoutes = require('./modules/ecf/ecf.routes');
 const companiesRoutes = require('./modules/companies/companies.routes');
+const sequencesRoutes = require('./modules/sequences/sequences.routes');
 
 //Importar Middlewatres globales propios
 const { errorMiddleware, notFoundMiddleware } = require('./shared/middlewares/error.middleware');
@@ -62,6 +63,7 @@ app.get('/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/ecf', ecfRoutes);
 app.use('/api/companies', companiesRoutes);
+app.use('/api/sequences', sequencesRoutes);
 
 
 // Middleware global de errores
