@@ -21,6 +21,13 @@ async function getMyCompany(companyId) {
 
     // 1. Buscar la empresa
     const company = await Company.findByPk(companyId, {
+        attributes: {
+            exclude: [
+                'certificatePasswordEncrypted',
+                'certificateIv',
+                'certificateAuthTag'
+            ]
+        },
         include: [
             {
                 model: Subscription,
@@ -85,7 +92,16 @@ async function updateMyCompany(companyId, updates, reqUser, reqInfo = {}) {
     }
 
     // 2. Buscar la empresa
-    const company = await Company.findByPk(companyId);
+    const company = await Company.findByPk(companyId, {
+        attributes: {
+            exclude: [
+                'certificatePasswordEncrypted',
+                'certificateIv',
+                'certificateAuthTag'
+            ]
+        }
+    });
+    
     if (!company) {
         throw new AppError('Company not found', 404, 'COMPANY_NOT_FOUND');
     }
@@ -174,7 +190,11 @@ async function listCompanies(filters = {}) {
     const { count, rows } = await Company.findAndCountAll({
         where,
         attributes: {
-            exclude: ['certificatePassword'] // Nunca exponer la contraseña del certificado
+            exclude: [
+                'certificatePasswordEncrypted',
+                'certificateIv',
+                'certificateAuthTag'
+            ]
         },
         include: [{
             model: Subscription,
@@ -232,7 +252,11 @@ async function getCompanyById(companyId) {
     // 1. Buscar la empresa con sus relaciones
     const company = await Company.findByPk(companyId, {
         attributes: {
-            exclude: ['certificatePassword']
+            exclude: [
+                'certificatePasswordEncrypted',
+                'certificateIv',
+                'certificateAuthTag'
+            ]
         },
         include: [{
             model: Subscription,
@@ -324,14 +348,20 @@ async function updateCompanyById(companyId, updates, reqUser, reqInfo = {}) {
     await company.update(updateData);
 
     const safeCompany = await Company.findByPk(company.id, {
-        attributes: { exclude: ['certificatePassword'] }
+        attributes: {
+            exclude: [
+                'certificatePasswordEncrypted',
+                'certificateIv',
+                'certificateAuthTag'
+            ]
+        }
     });
 
     // 5. Audit log
     try {
         await AuditLog.create({
             companyId: safeCompany.id,
-            userId: reqUser.id, 
+            userId: reqUser.id,
             action: 'company.updated_by_admin',
             entity: 'company',
             entityId: safeCompany.id,
@@ -353,7 +383,13 @@ async function updateCompanyById(companyId, updates, reqUser, reqInfo = {}) {
 async function toggleCompanyActive(companyId, isActive, reqUser, reqInfo = {}) {
     // 1. Buscar la empresa
     const company = await Company.findByPk(companyId, {
-        attributes: { exclude: ['certificatePassword'] }
+        attributes: {
+            exclude: [
+                'certificatePasswordEncrypted',
+                'certificateIv',
+                'certificateAuthTag'
+            ]
+        }
     });
     if (!company) {
         throw new AppError('Company not found', 404, 'COMPANY_NOT_FOUND');

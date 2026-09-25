@@ -130,11 +130,14 @@ async function loginAndGetCookie(email, password) {
         test('usersCount is 2', getRes.body?.data?.stats?.usersCount === 2, `got ${getRes.body?.data?.stats?.usersCount}`);
         test('sequencesCount is 0', getRes.body?.data?.stats?.sequencesCount === 0);
 
-        // ============================================================
-        // TEST 4: NO expone certificatePassword
-        // ============================================================
-        console.log('\n--- Test 4: NO expone certificatePassword ---');
-        test('certificatePassword undefined', getRes.body?.data?.company?.certificatePassword === undefined);
+        // TEST 4: NO expone campos sensibles del certificado
+        console.log('\n--- Test 4: NO expone campos sensibles del certificado ---');
+        test('certificatePasswordEncrypted undefined',
+            getRes.body?.data?.company?.certificatePasswordEncrypted === undefined);
+        test('certificateIv undefined',
+            getRes.body?.data?.company?.certificateIv === undefined);
+        test('certificateAuthTag undefined',
+            getRes.body?.data?.company?.certificateAuthTag === undefined);
         test('certificatePath accessible', getRes.body?.data?.company?.certificatePath === null);
 
         // ============================================================

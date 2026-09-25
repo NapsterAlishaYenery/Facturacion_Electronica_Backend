@@ -137,7 +137,7 @@ async function loginAndGetCookie(email, password) {
         });
 
         // ============================================================
-        // TEST 4: campos prohibidos se ignoran (rnc, certificatePassword)
+        // TEST 4: campos prohibidos se ignoran (rnc, certificatePasswordEncrypted, etc.)
         // ============================================================
         console.log('\n--- Test 4: campos prohibidos ignorados ---');
         const badRes = await request(`/api/companies/${testCompanyId}`, {
@@ -149,14 +149,25 @@ async function loginAndGetCookie(email, password) {
             body: JSON.stringify({
                 name: 'Attempt',
                 rnc: '999999999',
-                certificatePassword: 'hacked',
-                certificatePath: '/hacked/path'
+                certificatePasswordEncrypted: 'hacked',
+                certificatePassword: 'also-hacked',  // ← nombre viejo, también debe ignorarse
+                certificatePath: '/hacked/path',
+                certificateIv: 'hacked-iv',
+                certificateAuthTag: 'hacked-tag'
             })
         });
         test('status 200', badRes.status === 200);
         test('name updated', badRes.body?.data?.company?.name === 'Attempt');
         test('rnc NOT changed', badRes.body?.data?.company?.rnc === testRnc);
-        test('certificatePassword undefined', badRes.body?.data?.company?.certificatePassword === undefined);
+        test('certificatePasswordEncrypted undefined',
+            badRes.body?.data?.company?.certificatePasswordEncrypted === undefined);
+        test('certificateIv undefined',
+            badRes.body?.data?.company?.certificateIv === undefined);
+        test('certificateAuthTag undefined',
+            badRes.body?.data?.company?.certificateAuthTag === undefined);
+        test('certificatePath NOT changed',
+            badRes.body?.data?.company?.certificatePath !== '/hacked/path');
+
 
         // ============================================================
         // TEST 5: body vacío → 400

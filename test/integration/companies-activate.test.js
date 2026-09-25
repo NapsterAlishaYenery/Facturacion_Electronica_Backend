@@ -212,13 +212,16 @@ async function loginAndGetCookie(email, password) {
         });
         test('status 401', noAuthRes.status === 401);
 
-        // ============================================================
-        // TEST 11: certificatePassword NO expuesto
-        // ============================================================
-        console.log('\n--- Test 11: certificatePassword NO expuesto ---');
-        test('certificatePassword undefined', deactivateRes.body?.data?.company?.certificatePassword === undefined);
-        test('certificatePassword undefined (activate)', activateRes.body?.data?.company?.certificatePassword === undefined);
-
+        // TEST 11: certificatePasswordEncrypted NO expuesto
+        console.log('\n--- Test 11: certificatePasswordEncrypted NO expuesto ---');
+        test('certificatePasswordEncrypted undefined',
+            deactivateRes.body?.data?.company?.certificatePasswordEncrypted === undefined);
+        test('certificateIv undefined',
+            deactivateRes.body?.data?.company?.certificateIv === undefined);
+        test('certificateAuthTag undefined',
+            deactivateRes.body?.data?.company?.certificateAuthTag === undefined);
+        test('certificatePasswordEncrypted undefined (activate)',
+            activateRes.body?.data?.company?.certificatePasswordEncrypted === undefined);
     } catch (error) {
         console.error('❌ Test error:', error.message);
         console.error(error.stack);

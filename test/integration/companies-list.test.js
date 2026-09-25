@@ -127,7 +127,12 @@ async function loginAndGetCookie(email, password) {
         test('includes company3', rncs.includes(testRnc3));
 
         // Verificar que NO expone password del certificado
-        test('does NOT expose certificatePassword', items.every(c => c.certificatePassword === undefined));
+        test('does NOT expose certificatePasswordEncrypted',
+            items.every(c => c.certificatePasswordEncrypted === undefined));
+        test('does NOT expose certificateIv',
+            items.every(c => c.certificateIv === undefined));
+        test('does NOT expose certificateAuthTag',
+            items.every(c => c.certificateAuthTag === undefined));
 
         // Verificar que incluye subscription
         const company1Item = items.find(c => c.rnc === testRnc1);

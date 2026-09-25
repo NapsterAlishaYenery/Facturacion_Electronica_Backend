@@ -60,10 +60,25 @@ const Company = sequelize.define('Company', {
         allowNull: true,
         field: 'certificate_path'
     },
-    certificatePassword: {
-        type: DataTypes.STRING(200),
+    certificatePasswordEncrypted: {
+        type: DataTypes.STRING(500),  // ← ampliado porque el cifrado añade iv:authTag:encrypted
         allowNull: true,
-        field: 'certificate_password'
+        field: 'certificate_password_encrypted'
+    },
+    certificateIv: {
+        type: DataTypes.STRING(50),
+        allowNull: true,
+        field: 'certificate_iv'
+    },
+    certificateAuthTag: {
+        type: DataTypes.STRING(50),
+        allowNull: true,
+        field: 'certificate_auth_tag'
+    },
+    certificateUploadedAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
+        field: 'certificate_uploaded_at'
     },
     certificateExpiresAt: {
         type: DataTypes.DATE,
