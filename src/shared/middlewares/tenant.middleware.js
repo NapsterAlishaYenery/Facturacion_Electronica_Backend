@@ -10,6 +10,36 @@
 // Los servicios usan req.tenantCompanyId para filtrar por empresa.
 // ============================================================
 
+
+// ============================================================
+// Middleware de multi-tenant (RESERVADO - NO SE USA ACTUALMENTE)
+// ============================================================
+//
+// HISTORIA:
+// Fue creado para inyectar req.tenantCompanyId según el rol del
+// usuario, pero finalmente NO se adoptó este enfoque.
+//
+// SUSTITUTO ACTUAL:
+// Cada servicio verifica el aislamiento multi-tenant manualmente.
+// Ejemplo en companies.service.js, función listCompanies:
+//
+//     if (reqUser.role === 'company_admin') {
+//         where.companyId = reqUser.companyId;
+//     }
+//
+// Ventaja del enfoque actual:
+// - Es más explícito y fácil de debuggear.
+// - No requiere recordar inyectar el middleware en cada ruta.
+// - El filtro vive cerca de la query SQL que lo usa.
+//
+// CUÁNDO REUTILIZARLO:
+// Si en el futuro hay una ruta que necesite aplicar el filtro
+// de tenant de forma sistemática (ej: reportes globales que
+// siempre excluyan ciertos tenants), este middleware sirve.
+//
+// Se mantiene el archivo para evitar perder el diseño original.
+// ============================================================
+
 function tenantMiddleware(req, res, next) {
     // 1. Verificar que authMiddleware se haya ejecutado antes
     if (!req.user) {

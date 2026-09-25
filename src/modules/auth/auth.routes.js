@@ -10,6 +10,7 @@ const {
     loginLimiter,
     registerLimiter,
     forgotPasswordLimiter,
+    readLimiter,
     writeLimiter
 } = require('../../shared/middlewares/rateLimit.middleware');
 
@@ -73,6 +74,7 @@ router.post('/logout',
 
 router.get('/me',
     authMiddleware,
+    readLimiter,
     authController.me
 );
 
@@ -99,6 +101,7 @@ router.patch('/change-password',
 router.get('/company/users',
     authMiddleware,
     roleMiddleware('company_admin'),
+    readLimiter,
     validate(listUsersQuerySchema, 'query'),
     authController.listCompanyUsers
 );
@@ -133,6 +136,7 @@ router.delete('/company/users/:id',
 router.get('/users',
     authMiddleware,
     roleMiddleware('admin'),
+    readLimiter,
     validate(listUsersQuerySchema, 'query'),
     authController.listUsers
 );

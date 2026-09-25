@@ -141,7 +141,92 @@ async function updateMyCompany(companyId, updates, reqUser, reqInfo = {}) {
     return company;
 }
 
+// ------------------------------------------------------------
+// Listar TODAS las empresas (solo admin)
+// ------------------------------------------------------------
+async function listCompanies(filters = {}) {
+    const where = {};
+
+    // Filtros opcionales
+    if (filters.isActive !== undefined) {
+        where.isActive = filters.isActive;
+    }
+
+    if (filters.dgiiEnvironment) {
+        where.dgiiEnvironment = filters.dgiiEnvironment;
+    }
+
+    // Búsqueda por RNC o nombre (case-insensitive)
+    if (filters.search) {
+        where[Op.or] = [
+            { rnc: { [Op.iLike]: `%${filters.search}%` } },
+            { name: { [Op.iLike]: `%${filters.search}%` } },
+            { tradeName: { [Op.iLike]: `%${filters.search}%` } }
+        ];
+    }
+
+    // Paginación
+    const page = Number(filters.page) || 1;
+    const limit = Number(filters.limit) || 50;
+    const offset = (page - 1) * limit;
+
+    // Query con conteo
+    const { count, rows } = await Company.findAndCountAll({
+        where,
+        attributes: {
+            exclude: ['certificatePassword'] // Nunca exponer la contraseña del certificado
+        },
+        include: [{
+            model: Subscription,
+            as: 'subscriptions',
+            where: { status: ['trial', 'active', 'past_due'] },
+            required: false,
+            limit: 1,
+            order: [['createdAt', 'DESC']],
+            include: [{
+                model: Plan,
+                as: 'plan',
+                attributes: ['id', 'code', 'name', 'priceDop', 'priceUsd', 'invoicesPerMonth']
+            }]
+        }],
+        order: [['createdAt', 'DESC']],
+        limit,
+        offset,
+        distinct: true  // Necesario con includes para contar correctamente
+    });
+
+    const totalPages = Math.ceil(count / limit);
+
+    // Normalizar la respuesta (quitar el array crudo de subscriptions)
+    const companies = rows.map((company) => {
+        const data = company.toJSON();
+        const subscriptions = data.subscriptions || [];
+        const currentSubscription = subscriptions.length > 0 ? subscriptions[0] : null;
+
+        delete data.subscriptions;
+
+        return {
+            ...data,
+            subscription: currentSubscription,
+            plan: currentSubscription?.plan || null
+        };
+    });
+
+    return {
+        items: companies,
+        pagination: {
+            page,
+            limit,
+            totalItems: count,
+            totalPages,
+            hasNextPage: page < totalPages,
+            hasPrevPage: page > 1
+        }
+    };
+}
+
 module.exports = {
     getMyCompany,
-    updateMyCompany
+    updateMyCompany,
+    listCompanies
 };

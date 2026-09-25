@@ -25,7 +25,18 @@ const updateMyCompanySchema = Joi.object({
     'object.min': 'At least one field is required to update'
 });
 
+// ------------------------------------------------------------
+// Schema: listar empresas (solo admin)
+// ------------------------------------------------------------
+const listCompaniesQuerySchema = Joi.object({
+    isActive: Joi.boolean().optional(),
+    dgiiEnvironment: Joi.string().valid('testecf', 'production').optional(),
+    search: Joi.string().max(100).optional().allow(''),
+    page: Joi.number().integer().min(1).default(1),
+    limit: Joi.number().integer().min(1).max(100).default(50)
+});
 
 module.exports = {
-    updateMyCompanySchema
+    updateMyCompanySchema,
+    listCompaniesQuerySchema
 };

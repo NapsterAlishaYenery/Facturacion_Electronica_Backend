@@ -9,11 +9,15 @@ const router = express.Router();
 const authMiddleware = require('../../shared/middlewares/auth.middleware');
 const roleMiddleware = require('../../shared/middlewares/role.middleware');
 const validate = require('../../shared/middlewares/validate.middleware');
-const { writeLimiter } = require('../../shared/middlewares/rateLimit.middleware');
+const {
+    writeLimiter,
+    readLimiter
+} = require('../../shared/middlewares/rateLimit.middleware');
 
 // Validaciones
 const {
-    updateMyCompanySchema
+    updateMyCompanySchema,
+    listCompaniesQuerySchema
 } = require('./companies.validation');
 
 // Controlador
@@ -38,6 +42,7 @@ router.get('/ping', (req, res) => {
 // GET /api/companies/me — Ver mi empresa
 router.get('/me',
     authMiddleware,
+    readLimiter,
     companiesController.getMyCompany
 );
 
@@ -51,9 +56,21 @@ router.patch('/me',
 );
 
 // ============================================================
+// Rutas de admin (TODAS las empresas)
+// ============================================================
+
+// GET /api/companies — Listar todas
+router.get('/',
+    authMiddleware,
+    roleMiddleware('admin'),
+    readLimiter,
+    validate(listCompaniesQuerySchema, 'query'),
+    companiesController.listCompanies
+);
+
+// ============================================================
 // Endpoints planeados (implementación pendiente)
 // ============================================================
-// GET    /api/companies                       → listar todas (admin)
 // GET    /api/companies/:id                   → ver una (admin)
 // PATCH  /api/companies/:id                   → actualizar cualquiera (admin)
 // PATCH  /api/companies/:id/activate          → activar/desactivar (admin)

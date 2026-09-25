@@ -41,7 +41,20 @@ const updateMyCompany = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// GET /api/companies (admin)
+// ------------------------------------------------------------
+const listCompanies = catchAsync(async (req, res) => {
+    const result = await companiesService.listCompanies(req.query);
+
+    res.json({
+        success: true,
+        data: result
+    });
+});
+
 module.exports = {
     getMyCompany,
-    updateMyCompany
+    updateMyCompany,
+    listCompanies
 };

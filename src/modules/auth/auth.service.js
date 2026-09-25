@@ -498,8 +498,8 @@ async function listUsers(reqUser, filters = {}) {
     }
 
     // Paginación basada en page/limit
-    const page = filters.page || 1;
-    const limit = filters.limit || 50;
+    const page = Number(filters.page) || 1;
+    const limit = Number(filters.limit) || 50;
     const offset = (page - 1) * limit;
 
     const { count, rows } = await User.findAndCountAll({
