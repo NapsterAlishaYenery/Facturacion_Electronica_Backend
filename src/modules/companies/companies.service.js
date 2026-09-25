@@ -4,7 +4,8 @@
 // ============================================================
 
 const { Op } = require('sequelize');
-const { Company, User, Subscription, Plan, Sequence, AuditLog } = require('../../models');
+const sequelize = require('../../config/database');
+const { Company, User, Subscription, Plan, Sequence, Invoice, AuditLog } = require('../../models');
 const { AppError } = require('../../shared/middlewares/error.middleware');
 
 // ------------------------------------------------------------
@@ -101,7 +102,7 @@ async function updateMyCompany(companyId, updates, reqUser, reqInfo = {}) {
             ]
         }
     });
-    
+
     if (!company) {
         throw new AppError('Company not found', 404, 'COMPANY_NOT_FOUND');
     }
@@ -430,11 +431,96 @@ async function toggleCompanyActive(companyId, isActive, reqUser, reqInfo = {}) {
     return company;
 }
 
+// ------------------------------------------------------------
+// Borrar empresa (solo admin, hard delete)
+// ------------------------------------------------------------
+async function deleteCompany(companyId, reqUser, reqInfo = {}) {
+    // 1. Buscar la empresa
+    const company = await Company.findByPk(companyId, {
+        attributes: {
+            exclude: [
+                'certificatePasswordEncrypted',
+                'certificateIv',
+                'certificateAuthTag'
+            ]
+        }
+    });
+
+    if (!company) {
+        throw new AppError('Company not found', 404, 'COMPANY_NOT_FOUND');
+    }
+
+    // 2. Verificar que NO tenga facturas emitidas
+    const invoicesCount = await Invoice.count({
+        where: { companyId }
+    });
+
+    if (invoicesCount > 0) {
+        throw new AppError(
+            `Cannot delete company with ${invoicesCount} issued invoice(s). Deactivate it instead using PATCH /api/companies/${companyId}/activate with { isActive: false }.`,
+            409,
+            'COMPANY_HAS_INVOICES'
+        );
+    }
+
+    // 3. Guardar datos para audit
+    const before = {
+        id: company.id,
+        rnc: company.rnc,
+        name: company.name,
+        tradeName: company.tradeName,
+        email: company.email,
+        isActive: company.isActive,
+        dgiiEnvironment: company.dgiiEnvironment
+    };
+
+    // 4. Borrar en transacción
+    await sequelize.transaction(async (t) => {
+        const usersCount = await User.count({ where: { companyId }, transaction: t });
+        const sequencesCount = await Sequence.count({ where: { companyId }, transaction: t });
+        const subscriptionsCount = await Subscription.count({ where: { companyId }, transaction: t });
+
+        // Audit log ANTES del destroy
+        await AuditLog.create({
+            companyId: company.id,
+            userId: reqUser.id,
+            action: 'company.deleted',
+            entity: 'company',
+            entityId: company.id,
+            before,
+            after: {
+                deleted: true,
+                stats: {
+                    usersCount,
+                    sequencesCount,
+                    subscriptionsCount
+                }
+            },
+            ip: reqInfo.ip || null,
+            userAgent: reqInfo.userAgent || null
+        }, { transaction: t });
+
+        // Destroy con cascade
+        await company.destroy({ transaction: t });
+    });
+
+    return {
+        deleted: true,
+        before,
+        cascadeDeleted: {
+            users: true,
+            subscriptions: true,
+            sequences: true
+        }
+    };
+}
+
 module.exports = {
     getMyCompany,
     updateMyCompany,
     listCompanies,
     getCompanyById,
     updateCompanyById,
-    toggleCompanyActive
+    toggleCompanyActive,
+    deleteCompany
 };

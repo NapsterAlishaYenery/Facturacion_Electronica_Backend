@@ -32,8 +32,8 @@ router.get('/ping', (req, res) => {
     res.json({
         module: 'companies',
         status: 'ok',
-        ready: false,
-        message: 'Module mounted. Endpoints pending implementation.'
+        ready: true,
+        message: 'Module fully implemented.'
     });
 });
 
@@ -95,9 +95,12 @@ router.patch('/:id',
     companiesController.updateCompanyById
 );
 
-// ============================================================
-// Endpoints planeados (implementación pendiente)
-// ============================================================
-// DELETE /api/companies/:id                   → borrar (admin)
+// DELETE /api/companies/:id — Borrar
+router.delete('/:id',
+    authMiddleware,
+    roleMiddleware('admin'),
+    writeLimiter,
+    companiesController.deleteCompany
+);
 
 module.exports = router;

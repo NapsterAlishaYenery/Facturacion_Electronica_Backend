@@ -113,11 +113,34 @@ const toggleCompanyActive = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// DELETE /api/companies/:id (admin)
+// ------------------------------------------------------------
+const deleteCompany = catchAsync(async (req, res) => {
+    const reqInfo = {
+        ip: req.ip,
+        userAgent: req.get('user-agent')
+    };
+
+    const result = await companiesService.deleteCompany(
+        req.params.id,
+        req.user,
+        reqInfo
+    );
+
+    res.json({
+        success: true,
+        message: 'Company deleted successfully',
+        data: result
+    });
+});
+
 module.exports = {
     getMyCompany,
     updateMyCompany,
     listCompanies,
     getCompanyById,
     updateCompanyById,
-    toggleCompanyActive
+    toggleCompanyActive,
+    deleteCompany
 };
