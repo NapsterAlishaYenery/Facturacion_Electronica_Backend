@@ -90,6 +90,15 @@ function normalizeError(err) {
         };
     }
 
+    // 3.5. Errores de UUID inválido / cast error (PostgreSQL 22P02)
+    if (err.parent?.code === '22P02' || err.name === 'SequelizeDatabaseError') {
+        return {
+            statusCode: 400,
+            code: 'INVALID_ID_FORMAT',
+            message: 'Invalid ID format. Must be a valid UUID.'
+        };
+    }
+
     // 4. Errores de not null (PostgreSQL 23502)
     if (err.parent?.code === '23502') {
         return {

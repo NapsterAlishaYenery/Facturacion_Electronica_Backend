@@ -68,10 +68,17 @@ router.get('/',
     companiesController.listCompanies
 );
 
+// GET /api/companies/:id — Ver una específica
+router.get('/:id',
+    authMiddleware,
+    roleMiddleware('admin'),
+    readLimiter,
+    companiesController.getCompanyById
+);
+
 // ============================================================
 // Endpoints planeados (implementación pendiente)
 // ============================================================
-// GET    /api/companies/:id                   → ver una (admin)
 // PATCH  /api/companies/:id                   → actualizar cualquiera (admin)
 // PATCH  /api/companies/:id/activate          → activar/desactivar (admin)
 // DELETE /api/companies/:id                   → borrar (admin)

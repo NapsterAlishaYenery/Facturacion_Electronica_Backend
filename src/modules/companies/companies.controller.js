@@ -53,8 +53,21 @@ const listCompanies = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// GET /api/companies/:id (admin)
+// ------------------------------------------------------------
+const getCompanyById = catchAsync(async (req, res) => {
+    const result = await companiesService.getCompanyById(req.params.id);
+
+    res.json({
+        success: true,
+        data: result
+    });
+});
+
 module.exports = {
     getMyCompany,
     updateMyCompany,
-    listCompanies
+    listCompanies,
+    getCompanyById
 };

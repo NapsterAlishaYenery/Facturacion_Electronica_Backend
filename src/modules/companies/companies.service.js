@@ -225,8 +225,66 @@ async function listCompanies(filters = {}) {
     };
 }
 
+// ------------------------------------------------------------
+// Ver una empresa específica (solo admin)
+// ------------------------------------------------------------
+async function getCompanyById(companyId) {
+    // 1. Buscar la empresa con sus relaciones
+    const company = await Company.findByPk(companyId, {
+        attributes: {
+            exclude: ['certificatePassword']
+        },
+        include: [{
+            model: Subscription,
+            as: 'subscriptions',
+            where: { status: ['trial', 'active', 'past_due'] },
+            required: false,
+            limit: 1,
+            order: [['createdAt', 'DESC']],
+            include: [{
+                model: Plan,
+                as: 'plan',
+                attributes: ['id', 'code', 'name', 'priceDop', 'priceUsd', 'invoicesPerMonth', 'maxUsers', 'maxSequences', 'features']
+            }]
+        }]
+    });
+
+    if (!company) {
+        throw new AppError('Company not found', 404, 'COMPANY_NOT_FOUND');
+    }
+
+    // 2. Contar usuarios activos
+    const usersCount = await User.count({
+        where: { companyId, isActive: true }
+    });
+
+    // 3. Contar secuencias activas
+    const sequencesCount = await Sequence.count({
+        where: { companyId, isActive: true }
+    });
+
+    // 4. Extraer la suscripción actual
+    const subscriptions = company.subscriptions || [];
+    const currentSubscription = subscriptions.length > 0 ? subscriptions[0] : null;
+
+    // 5. Construir la respuesta
+    const companyData = company.toJSON();
+    delete companyData.subscriptions;
+
+    return {
+        company: companyData,
+        subscription: currentSubscription,
+        plan: currentSubscription?.plan || null,
+        stats: {
+            usersCount,
+            sequencesCount
+        }
+    };
+}
+
 module.exports = {
     getMyCompany,
     updateMyCompany,
-    listCompanies
+    listCompanies,
+    getCompanyById
 };
