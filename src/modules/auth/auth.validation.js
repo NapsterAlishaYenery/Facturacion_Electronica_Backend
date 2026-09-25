@@ -186,8 +186,8 @@ const listUsersQuerySchema = Joi.object({
     role: Joi.string().valid('admin', 'company_admin', 'operator').optional(),
     isActive: Joi.boolean().optional(),
     companyId: Joi.string().uuid().optional(),
+    page: Joi.number().integer().min(1).default(1),
     limit: Joi.number().integer().min(1).max(100).default(50),
-    offset: Joi.number().integer().min(0).default(0),
     search: Joi.string().max(100).optional().allow('')
 });
 

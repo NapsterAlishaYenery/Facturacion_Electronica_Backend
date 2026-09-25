@@ -480,19 +480,15 @@ async function refreshAccessToken(refreshToken) {
 async function listUsers(reqUser, filters = {}) {
     const where = {};
 
-    // Si es company_admin, forzar filtro por su empresa
     if (reqUser.role === 'company_admin') {
         where.companyId = reqUser.companyId;
     } else if (reqUser.role === 'admin' && filters.companyId) {
         where.companyId = filters.companyId;
     }
 
-    // Filtros opcionales
     if (filters.role) where.role = filters.role;
     if (filters.isActive !== undefined) where.isActive = filters.isActive;
 
-    // Búsqueda por email o nombre
-    const { Op } = require('sequelize');
     if (filters.search) {
         where[Op.or] = [
             { email: { [Op.iLike]: `%${filters.search}%` } },
@@ -500,6 +496,11 @@ async function listUsers(reqUser, filters = {}) {
             { lastName: { [Op.iLike]: `%${filters.search}%` } }
         ];
     }
+
+    // Paginación basada en page/limit
+    const page = filters.page || 1;
+    const limit = filters.limit || 50;
+    const offset = (page - 1) * limit;
 
     const { count, rows } = await User.findAndCountAll({
         where,
@@ -510,15 +511,22 @@ async function listUsers(reqUser, filters = {}) {
             attributes: ['id', 'rnc', 'name']
         }],
         order: [['createdAt', 'DESC']],
-        limit: filters.limit || 50,
-        offset: filters.offset || 0
+        limit,
+        offset
     });
 
+    const totalPages = Math.ceil(count / limit);
+
     return {
-        users: rows,
-        total: count,
-        limit: filters.limit || 50,
-        offset: filters.offset || 0
+        items: rows,
+        pagination: {
+            page,
+            limit,
+            totalItems: count,
+            totalPages,
+            hasNextPage: page < totalPages,
+            hasPrevPage: page > 1
+        }
     };
 }
 

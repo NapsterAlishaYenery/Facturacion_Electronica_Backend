@@ -34,12 +34,10 @@ async function loginAndGetCookie(email, password) {
         // ============================================================
         // SETUP: crear admin, company, company_admin
         // ============================================================
-        // Limpieza
         await Company.destroy({ where: { rnc: '130999444' } });
         await User.destroy({ where: { email: 'admin-mgmt@expedinap.com' } });
         await User.destroy({ where: { email: 'owner-mgmt@expedinap.com' } });
 
-        // Crear admin (directamente en BD)
         const adminUser = await User.create({
             email: 'admin-mgmt@expedinap.com',
             password: 'AdminPass123',
@@ -49,7 +47,6 @@ async function loginAndGetCookie(email, password) {
         });
         testAdminId = adminUser.id;
 
-        // Crear company + company_admin
         const companyRes = await request('/api/auth/register-company', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -66,7 +63,6 @@ async function loginAndGetCookie(email, password) {
         testCompanyId = companyRes.body?.data?.company?.id;
         testCompanyAdminId = companyRes.body?.data?.user?.id;
 
-        // Login
         adminCookie = await loginAndGetCookie('admin-mgmt@expedinap.com', 'AdminPass123');
         companyAdminCookie = await loginAndGetCookie('owner-mgmt@expedinap.com', 'OwnerPass123');
 
@@ -80,8 +76,10 @@ async function loginAndGetCookie(email, password) {
             headers: { Cookie: adminCookie }
         });
         test('status 200', listRes.status === 200, `got ${listRes.status}`);
-        test('has users array', Array.isArray(listRes.body?.data?.users));
-        test('has total', typeof listRes.body?.data?.total === 'number');
+        test('has items array', Array.isArray(listRes.body?.data?.items));
+        test('has pagination object', typeof listRes.body?.data?.pagination === 'object');
+        test('has totalItems', typeof listRes.body?.data?.pagination?.totalItems === 'number');
+        test('has page', listRes.body?.data?.pagination?.page === 1);
 
         // ============================================================
         // COMPANY_ADMIN: GET /company/users
@@ -91,9 +89,11 @@ async function loginAndGetCookie(email, password) {
             headers: { Cookie: companyAdminCookie }
         });
         test('status 200', listCompanyRes.status === 200, `got ${listCompanyRes.status}`);
-        test('only own company users', listCompanyRes.body?.data?.users?.every(
+        test('has items array', Array.isArray(listCompanyRes.body?.data?.items));
+        test('only own company users', listCompanyRes.body?.data?.items?.every(
             u => u.companyId === testCompanyId
         ));
+        test('has pagination', typeof listCompanyRes.body?.data?.pagination === 'object');
 
         // ============================================================
         // ADMIN: POST /users — crear operator
@@ -186,9 +186,8 @@ async function loginAndGetCookie(email, password) {
             firstName: 'Foreign',
             lastName: 'User',
             role: 'operator',
-            companyId: testCompanyId  // ← reutilizamos, pero forzamos verificación
+            companyId: testCompanyId
         });
-        // Ahora creamos otra empresa para hacer el test real
         const otherCompany = await Company.create({ rnc: '130999555', name: 'Other Company' });
         const foreignUser2 = await User.create({
             email: 'foreign2@expedinap.com',
@@ -209,7 +208,6 @@ async function loginAndGetCookie(email, password) {
         });
         test('status 403', foreignUpdateRes.status === 403, `got ${foreignUpdateRes.status}`);
 
-        // Limpiar el usuario y empresa ajenos
         await foreignUser.destroy();
         await foreignUser2.destroy();
         await otherCompany.destroy();
@@ -225,7 +223,6 @@ async function loginAndGetCookie(email, password) {
         test('status 200', deleteRes.status === 200, `got ${deleteRes.status}`);
         test('deactivated, not deleted', deleteRes.body?.data?.deactivated === true);
 
-        // Verificar que está inactivo pero existe
         const stillExists = await User.findByPk(testOperatorId);
         test('user still exists', !!stillExists);
         test('user is inactive', stillExists?.isActive === false);
@@ -284,7 +281,6 @@ async function loginAndGetCookie(email, password) {
         console.error('❌ Test error:', error.message);
         console.error(error.stack);
     } finally {
-        // Limpieza
         try {
             if (testCompanyId) {
                 const users = await User.findAll({ where: { companyId: testCompanyId } });
