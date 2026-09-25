@@ -18,7 +18,8 @@ const {
 const {
     updateMyCompanySchema,
     listCompaniesQuerySchema,
-    updateCompanyByIdSchema
+    updateCompanyByIdSchema,
+    toggleCompanyActiveSchema
 } = require('./companies.validation');
 
 // Controlador
@@ -40,14 +41,12 @@ router.get('/ping', (req, res) => {
 // Rutas de usuario autenticado (mi empresa)
 // ============================================================
 
-// GET /api/companies/me — Ver mi empresa
 router.get('/me',
     authMiddleware,
     readLimiter,
     companiesController.getMyCompany
 );
 
-// PATCH /api/companies/me — Actualizar mi empresa
 router.patch('/me',
     authMiddleware,
     roleMiddleware('company_admin'),
@@ -77,6 +76,16 @@ router.get('/:id',
     companiesController.getCompanyById
 );
 
+// PATCH /api/companies/:id/activate — Activar/desactivar
+// IMPORTANTE: va ANTES de /:id PATCH para evitar que "activate" sea capturado como :id
+router.patch('/:id/activate',
+    authMiddleware,
+    roleMiddleware('admin'),
+    writeLimiter,
+    validate(toggleCompanyActiveSchema),
+    companiesController.toggleCompanyActive
+);
+
 // PATCH /api/companies/:id — Actualizar cualquiera
 router.patch('/:id',
     authMiddleware,
@@ -89,7 +98,6 @@ router.patch('/:id',
 // ============================================================
 // Endpoints planeados (implementación pendiente)
 // ============================================================
-// PATCH  /api/companies/:id/activate          → activar/desactivar (admin)
 // DELETE /api/companies/:id                   → borrar (admin)
 
 module.exports = router;

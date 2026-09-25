@@ -347,10 +347,58 @@ async function updateCompanyById(companyId, updates, reqUser, reqInfo = {}) {
     return safeCompany;
 }
 
+// ------------------------------------------------------------
+// Activar/desactivar empresa (solo admin)
+// ------------------------------------------------------------
+async function toggleCompanyActive(companyId, isActive, reqUser, reqInfo = {}) {
+    // 1. Buscar la empresa
+    const company = await Company.findByPk(companyId, {
+        attributes: { exclude: ['certificatePassword'] }
+    });
+    if (!company) {
+        throw new AppError('Company not found', 404, 'COMPANY_NOT_FOUND');
+    }
+
+    // 2. Idempotencia: si ya está en el estado deseado, no hacer nada
+    //    (pero sí retornar la empresa por consistencia)
+    if (company.isActive === isActive) {
+        return company;
+    }
+
+    // 3. Guardar estado anterior
+    const before = {
+        isActive: company.isActive
+    };
+
+    // 4. Actualizar
+    await company.update({ isActive });
+
+    // 5. Audit log con acción específica
+    const action = isActive ? 'company.activated' : 'company.deactivated';
+    try {
+        await AuditLog.create({
+            companyId: company.id,
+            userId: reqUser.id,
+            action,
+            entity: 'company',
+            entityId: company.id,
+            before,
+            after: { isActive },
+            ip: reqInfo.ip || null,
+            userAgent: reqInfo.userAgent || null
+        });
+    } catch (err) {
+        // Ignorar errores de audit
+    }
+
+    return company;
+}
+
 module.exports = {
     getMyCompany,
     updateMyCompany,
     listCompanies,
     getCompanyById,
-    updateCompanyById
+    updateCompanyById,
+    toggleCompanyActive
 };

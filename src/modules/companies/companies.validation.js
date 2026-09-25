@@ -56,8 +56,20 @@ const updateCompanyByIdSchema = Joi.object({
     'object.min': 'At least one field is required to update'
 });
 
+// ------------------------------------------------------------
+// Schema: activar/desactivar empresa (solo admin)
+// ------------------------------------------------------------
+const toggleCompanyActiveSchema = Joi.object({
+    isActive: Joi.boolean().required()
+        .messages({
+            'any.required': 'isActive is required',
+            'boolean.base': 'isActive must be a boolean'
+        })
+});
+
 module.exports = {
     updateMyCompanySchema,
     listCompaniesQuerySchema,
-    updateCompanyByIdSchema
+    updateCompanyByIdSchema,
+    toggleCompanyActiveSchema
 };

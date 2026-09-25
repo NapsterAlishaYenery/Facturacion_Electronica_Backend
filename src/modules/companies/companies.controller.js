@@ -88,10 +88,36 @@ const updateCompanyById = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// PATCH /api/companies/:id/activate (admin)
+// ------------------------------------------------------------
+const toggleCompanyActive = catchAsync(async (req, res) => {
+    const reqInfo = {
+        ip: req.ip,
+        userAgent: req.get('user-agent')
+    };
+
+    const { isActive } = req.body;
+
+    const company = await companiesService.toggleCompanyActive(
+        req.params.id,
+        isActive,
+        req.user,
+        reqInfo
+    );
+
+    res.json({
+        success: true,
+        message: `Company ${isActive ? 'activated' : 'deactivated'} successfully`,
+        data: { company }
+    });
+});
+
 module.exports = {
     getMyCompany,
     updateMyCompany,
     listCompanies,
     getCompanyById,
-    updateCompanyById
+    updateCompanyById,
+    toggleCompanyActive
 };
