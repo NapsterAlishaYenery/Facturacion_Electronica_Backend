@@ -444,10 +444,96 @@ async function toggleMySequenceActive(companyId, sequenceId, isActive, reqUser, 
     return buildSequenceResponse(sequence);
 }
 
+// ------------------------------------------------------------
+// Borrar secuencia (company_admin)
+// Regla DGII: solo se puede borrar si NO se ha usado
+// ------------------------------------------------------------
+async function deleteMySequence(companyId, sequenceId, reqUser, reqInfo = {}) {
+    if (!companyId) {
+        throw new AppError(
+            'You do not belong to any company',
+            400,
+            'NO_COMPANY_ASSIGNED'
+        );
+    }
+
+    // 1. Buscar la secuencia (aislamiento multi-tenant)
+    const sequence = await Sequence.findOne({
+        where: { id: sequenceId, companyId }
+    });
+
+    if (!sequence) {
+        throw new AppError('Sequence not found', 404, 'SEQUENCE_NOT_FOUND');
+    }
+
+    // 2. Verificar que no se haya usado
+    const currentNumber = Number(sequence.currentNumber);
+    const startNumber = Number(sequence.startNumber);
+    const hasBeenUsed = currentNumber > startNumber - 1;
+
+    if (hasBeenUsed) {
+        throw new AppError(
+            'Cannot delete a sequence that has already been used. Deactivate it instead.',
+            409,
+            'SEQUENCE_HAS_INVOICES'
+        );
+    }
+
+    // 3. Verificar que no tenga facturas asociadas (doble check)
+    const invoicesCount = await Invoice.count({
+        where: { sequenceId: sequence.id }
+    });
+
+    if (invoicesCount > 0) {
+        throw new AppError(
+            `Cannot delete a sequence with ${invoicesCount} invoice(s) associated. Deactivate it instead.`,
+            409,
+            'SEQUENCE_HAS_INVOICES'
+        );
+    }
+
+    // 4. Guardar datos para audit antes del delete
+    const before = {
+        id: sequence.id,
+        type: sequence.type,
+        prefix: sequence.prefix,
+        startNumber,
+        endNumber: Number(sequence.endNumber),
+        currentNumber,
+        expiresAt: sequence.expiresAt,
+        isActive: sequence.isActive
+    };
+
+    // 5. Borrar la secuencia
+    await sequence.destroy();
+
+    // 6. Audit log (con companyId y userId del usuario que borra)
+    try {
+        await AuditLog.create({
+            companyId,
+            userId: reqUser.id,
+            action: 'sequence.deleted',
+            entity: 'sequence',
+            entityId: sequenceId,
+            before,
+            ip: reqInfo.ip || null,
+            userAgent: reqInfo.userAgent || null
+        });
+    } catch (err) {
+        // Ignorar errores de audit
+    }
+
+    return {
+        deleted: true,
+        before
+    };
+}
+
 module.exports = {
     listMySequences,
     getMySequenceById,
     createMySequence,
     updateMySequence,
-    toggleMySequenceActive
+    toggleMySequenceActive,
+    deleteMySequence
 };

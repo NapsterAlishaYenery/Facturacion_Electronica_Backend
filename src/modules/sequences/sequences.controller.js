@@ -110,12 +110,36 @@ const toggleMySequenceActive = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// DELETE /api/sequences/me/:id
+// ------------------------------------------------------------
+const deleteMySequence = catchAsync(async (req, res) => {
+    const reqInfo = {
+        ip: req.ip,
+        userAgent: req.get('user-agent')
+    };
+
+    const result = await sequencesService.deleteMySequence(
+        req.user.companyId,
+        req.params.id,
+        req.user,
+        reqInfo
+    );
+
+    res.json({
+        success: true,
+        message: 'Sequence deleted successfully',
+        data: result
+    });
+});
+
 module.exports = {
     listMySequences,
     getMySequenceById,
     createMySequence,
     updateMySequence,
-    toggleMySequenceActive
+    toggleMySequenceActive,
+    deleteMySequence
 };
 
 // Controladores planeados:

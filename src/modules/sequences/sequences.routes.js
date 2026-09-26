@@ -86,10 +86,17 @@ router.patch('/me/:id',
     sequencesController.updateMySequence
 );
 
+// DELETE /api/sequences/me/:id — Borrar
+router.delete('/me/:id',
+    authMiddleware,
+    roleMiddleware('company_admin'),
+    writeLimiter,
+    sequencesController.deleteMySequence
+);
+
 // ============================================================
 // Endpoints planeados (implementación pendiente)
 // ============================================================
-// DELETE /api/sequences/me/:id                → borrar
 // GET    /api/sequences                       → listar todas (admin)
 
 
