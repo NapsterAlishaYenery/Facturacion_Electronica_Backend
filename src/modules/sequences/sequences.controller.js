@@ -133,20 +133,24 @@ const deleteMySequence = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// GET /api/sequences (admin)
+// ------------------------------------------------------------
+const listAllSequences = catchAsync(async (req, res) => {
+    const result = await sequencesService.listAllSequences(req.validated.query);
+
+    res.json({
+        success: true,
+        data: result
+    });
+})
+
 module.exports = {
     listMySequences,
     getMySequenceById,
     createMySequence,
     updateMySequence,
     toggleMySequenceActive,
-    deleteMySequence
+    deleteMySequence,
+    listAllSequences
 };
-
-// Controladores planeados:
-// - listMySequences
-// - getMySequenceById
-// - createMySequence
-// - updateMySequence
-// - toggleMySequenceActive
-// - deleteMySequence
-// - listAllSequences

@@ -19,7 +19,8 @@ const {
     listSequencesQuerySchema,
     createSequenceSchema,
     updateSequenceSchema,
-    toggleSequenceActiveSchema
+    toggleSequenceActiveSchema,
+    listAllSequencesQuerySchema
 } = require('./sequences.validation');
 
 // Controlador
@@ -95,9 +96,18 @@ router.delete('/me/:id',
 );
 
 // ============================================================
-// Endpoints planeados (implementación pendiente)
+// Rutas de admin (TODAS las empresas)
 // ============================================================
-// GET    /api/sequences                       → listar todas (admin)
+
+// GET /api/sequences — Listar todas
+router.get('/',
+    authMiddleware,
+    roleMiddleware('admin'),
+    readLimiter,
+    validate(listAllSequencesQuerySchema, 'query'),
+    sequencesController.listAllSequences
+);
+
 
 
 module.exports = router;

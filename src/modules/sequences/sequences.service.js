@@ -4,7 +4,7 @@
 
 const { Op } = require('sequelize');
 const sequelize = require('../../config/database');
-const { Sequence, Invoice, AuditLog } = require('../../models');
+const { Sequence, Company, Invoice, AuditLog } = require('../../models');
 const { AppError } = require('../../shared/middlewares/error.middleware');
 
 
@@ -529,11 +529,92 @@ async function deleteMySequence(companyId, sequenceId, reqUser, reqInfo = {}) {
     };
 }
 
+// ------------------------------------------------------------
+// Listar TODAS las secuencias (solo admin)
+// ------------------------------------------------------------
+async function listAllSequences(filters = {}) {
+    // Construir where
+    const where = {};
+
+    if (filters.companyId) {
+        where.companyId = filters.companyId;
+    }
+
+    if (filters.type) {
+        where.type = filters.type;
+    }
+
+    if (filters.prefix) {
+        where.prefix = filters.prefix;
+    }
+
+    if (filters.isActive !== undefined) {
+        where.isActive = filters.isActive;
+    }
+
+    if (filters.expired !== undefined) {
+        if (filters.expired === true) {
+            where.expiresAt = { [Op.lt]: new Date() };
+        } else {
+            where.expiresAt = { [Op.gte]: new Date() };
+        }
+    }
+
+    // Paginación
+    const page = Number(filters.page) || 1;
+    const limit = Number(filters.limit) || 50;
+    const offset = (page - 1) * limit;
+
+    // Include de Company (con filtro por search si aplica)
+    const companyInclude = {
+        model: Company,
+        as: 'company',
+        attributes: ['id', 'rnc', 'name', 'isActive']
+    };
+
+    if (filters.search) {
+        companyInclude.where = {
+            [Op.or]: [
+                { rnc: { [Op.iLike]: `%${filters.search}%` } },
+                { name: { [Op.iLike]: `%${filters.search}%` } }
+            ]
+        };
+        companyInclude.required = true;
+    }
+
+    const { count, rows } = await Sequence.findAndCountAll({
+        where,
+        include: [companyInclude],
+        order: [['createdAt', 'DESC']],
+        limit,
+        offset,
+        distinct: true
+    });
+
+    // Enriquecer cada secuencia
+    const items = rows.map((seq) => buildSequenceResponse(seq).sequence);
+
+    const totalPages = Math.ceil(count / limit);
+
+    return {
+        items,
+        pagination: {
+            page,
+            limit,
+            totalItems: count,
+            totalPages,
+            hasNextPage: page < totalPages,
+            hasPrevPage: page > 1
+        }
+    };
+}
+
 module.exports = {
     listMySequences,
     getMySequenceById,
     createMySequence,
     updateMySequence,
     toggleMySequenceActive,
-    deleteMySequence
+    deleteMySequence,
+    listAllSequences
 };

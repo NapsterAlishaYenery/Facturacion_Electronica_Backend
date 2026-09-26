@@ -110,16 +110,27 @@ const toggleSequenceActiveSchema = Joi.object({
         })
 });
 
+// ------------------------------------------------------------
+// Schema: filtros de listado global (admin)
+// ------------------------------------------------------------
+const listAllSequencesQuerySchema = Joi.object({
+    companyId: Joi.string().uuid().optional(),
+    type: Joi.string()
+        .valid('31', '32', '33', '34', '41', '43', '44', '45', '46', '47')
+        .optional(),
+    prefix: Joi.string().max(5).optional(),
+    isActive: Joi.boolean().truthy('true').falsy('false').optional(),
+    expired: Joi.boolean().truthy('true').falsy('false').optional(),
+    search: Joi.string().max(100).optional().allow(''),
+    page: Joi.number().integer().min(1).default(1),
+    limit: Joi.number().integer().min(1).max(100).default(50)
+});
+
 
 module.exports = {
     listSequencesQuerySchema,
     createSequenceSchema,
     updateSequenceSchema,
-    toggleSequenceActiveSchema
+    toggleSequenceActiveSchema,
+    listAllSequencesQuerySchema
 };
-
-// Schemas planeados:
-// - createSequenceSchema
-// - updateSequenceSchema
-// - toggleSequenceActiveSchema
-// - listSequencesQuerySchema
