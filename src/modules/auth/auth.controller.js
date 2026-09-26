@@ -213,7 +213,7 @@ const refresh = catchAsync(async (req, res) => {
 // GET /api/auth/users (admin)
 // ------------------------------------------------------------
 const listUsers = catchAsync(async (req, res) => {
-    const result = await authService.listUsers(req.user, req.query);
+    const result = await authService.listUsers(req.user, req.validated.query);
 
     res.json({
         success: true,
@@ -269,7 +269,7 @@ const deleteUser = catchAsync(async (req, res) => {
 // GET /api/auth/company/users (company_admin)
 // ------------------------------------------------------------
 const listCompanyUsers = catchAsync(async (req, res) => {
-    const result = await authService.listUsers(req.user, req.query);
+    const result = await authService.listUsers(req.user, req.validated.query);
 
     res.json({
         success: true,

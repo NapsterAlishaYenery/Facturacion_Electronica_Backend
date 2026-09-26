@@ -45,7 +45,7 @@ const updateMyCompany = catchAsync(async (req, res) => {
 // GET /api/companies (admin)
 // ------------------------------------------------------------
 const listCompanies = catchAsync(async (req, res) => {
-    const result = await companiesService.listCompanies(req.query);
+    const result = await companiesService.listCompanies(req.validated.query);
 
     res.json({
         success: true,

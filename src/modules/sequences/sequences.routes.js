@@ -1,6 +1,5 @@
 // ============================================================
 // Rutas del módulo sequences
-// Fase 3 - Step 9.0: Solo estructura base y health check
 // ============================================================
 
 const express = require('express');
@@ -15,11 +14,13 @@ const {
     readLimiter
 } = require('../../shared/middlewares/rateLimit.middleware');
 
-// Validaciones (se usarán cuando se implementen los endpoints)
-// const sequencesValidation = require('./sequences.validation');
+// Validaciones
+const {
+    listSequencesQuerySchema
+} = require('./sequences.validation');
 
-// Controlador (se usará cuando se implementen los endpoints)
-// const sequencesController = require('./sequences.controller');
+// Controlador
+const sequencesController = require('./sequences.controller');
 
 // ============================================================
 // Health check del módulo
@@ -34,9 +35,21 @@ router.get('/ping', (req, res) => {
 });
 
 // ============================================================
+// Rutas de company_admin (MI EMPRESA)
+// ============================================================
+
+// GET /api/sequences/me — Listar mis secuencias
+router.get('/me',
+    authMiddleware,
+    roleMiddleware('company_admin'),
+    readLimiter,
+    validate(listSequencesQuerySchema, 'query'),
+    sequencesController.listMySequences
+);
+
+// ============================================================
 // Endpoints planeados (implementación pendiente)
 // ============================================================
-// GET    /api/sequences/me                    → listar mis secuencias
 // GET    /api/sequences/me/:id                → ver una específica
 // POST   /api/sequences/me                    → crear secuencia
 // PATCH  /api/sequences/me/:id                → actualizar

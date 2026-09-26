@@ -6,6 +6,25 @@
 const sequencesService = require('./sequences.service');
 const catchAsync = require('../../shared/utils/catchAsync');
 
+
+// ------------------------------------------------------------
+// GET /api/sequences/me
+// ------------------------------------------------------------
+const listMySequences = catchAsync(async (req, res) => {
+    const result = await sequencesService.listMySequences(
+        req.user.companyId,
+        req.validated.query
+    );
+
+    res.json({
+        success: true,
+        data: result
+    });
+});
+
+module.exports = {
+    listMySequences
+};
 // Controladores planeados:
 // - listMySequences
 // - getMySequenceById
@@ -14,7 +33,3 @@ const catchAsync = require('../../shared/utils/catchAsync');
 // - toggleMySequenceActive
 // - deleteMySequence
 // - listAllSequences
-
-module.exports = {
-    // Por ahora vacío
-};

@@ -37,7 +37,15 @@ function validate(schema, source = 'body') {
 
         // 3. Reemplazar el source con los datos validados y saneados
         //    Joi hace casting (ej: convierte strings numéricos a number)
-        req[source] = value;
+        if (source === 'body') {
+            // body: asignación directa (funciona bien)
+            req.body = value;
+        } else {
+            // query / params: NO reasignamos (Express 5 los bloquea)
+            // Guardamos el valor validado en req.validated[source]
+            if (!req.validated) req.validated = {};
+            req.validated[source] = value;
+        }
 
         // 4. Continuar
         next();
