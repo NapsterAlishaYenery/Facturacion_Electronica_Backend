@@ -18,7 +18,8 @@ const {
 const {
     listSequencesQuerySchema,
     createSequenceSchema,
-    updateSequenceSchema
+    updateSequenceSchema,
+    toggleSequenceActiveSchema
 } = require('./sequences.validation');
 
 // Controlador
@@ -66,6 +67,16 @@ router.post('/me',
     sequencesController.createMySequence
 );
 
+// PATCH /api/sequences/me/:id/activate — Activar/desactivar
+// IMPORTANTE: va ANTES de /me/:id PATCH para evitar conflicto de orden
+router.patch('/me/:id/activate',
+    authMiddleware,
+    roleMiddleware('company_admin'),
+    writeLimiter,
+    validate(toggleSequenceActiveSchema),
+    sequencesController.toggleMySequenceActive
+);
+
 // PATCH /api/sequences/me/:id — Actualizar
 router.patch('/me/:id',
     authMiddleware,
@@ -78,7 +89,6 @@ router.patch('/me/:id',
 // ============================================================
 // Endpoints planeados (implementación pendiente)
 // ============================================================
-// PATCH  /api/sequences/me/:id/activate       → activar/desactivar
 // DELETE /api/sequences/me/:id                → borrar
 // GET    /api/sequences                       → listar todas (admin)
 

@@ -99,10 +99,23 @@ const updateSequenceSchema = Joi.object({
     'any.custom': '{{#message}}'
 });
 
+// ------------------------------------------------------------
+// Schema: activar/desactivar secuencia (company_admin)
+// ------------------------------------------------------------
+const toggleSequenceActiveSchema = Joi.object({
+    isActive: Joi.boolean().required()
+        .messages({
+            'any.required': 'isActive is required',
+            'boolean.base': 'isActive must be a boolean'
+        })
+});
+
+
 module.exports = {
     listSequencesQuerySchema,
     createSequenceSchema,
-    updateSequenceSchema
+    updateSequenceSchema,
+    toggleSequenceActiveSchema
 };
 
 // Schemas planeados:

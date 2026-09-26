@@ -84,11 +84,38 @@ const updateMySequence = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// PATCH /api/sequences/me/:id/activate
+// ------------------------------------------------------------
+const toggleMySequenceActive = catchAsync(async (req, res) => {
+    const reqInfo = {
+        ip: req.ip,
+        userAgent: req.get('user-agent')
+    };
+
+    const { isActive } = req.body;
+
+    const result = await sequencesService.toggleMySequenceActive(
+        req.user.companyId,
+        req.params.id,
+        isActive,
+        req.user,
+        reqInfo
+    );
+
+    res.json({
+        success: true,
+        message: `Sequence ${isActive ? 'activated' : 'deactivated'} successfully`,
+        data: result
+    });
+});
+
 module.exports = {
     listMySequences,
     getMySequenceById,
     createMySequence,
-    updateMySequence
+    updateMySequence,
+    toggleMySequenceActive
 };
 
 // Controladores planeados:

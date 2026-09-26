@@ -7,11 +7,50 @@ const sequelize = require('../../config/database');
 const { Sequence, Invoice, AuditLog } = require('../../models');
 const { AppError } = require('../../shared/middlewares/error.middleware');
 
+
+// ------------------------------------------------------------
+// Helper: construir la respuesta completa de una secuencia
+// con campos calculados (Soporta objeto plano u instancia de Sequelize)
+// ------------------------------------------------------------
+function buildSequenceResponse(sequence, extraFields = {}) {
+    // Si la secuencia viene como instancia de Sequelize, la convertimos a objeto plano con toJSON()
+    const data = typeof sequence.toJSON === 'function' ? sequence.toJSON() : sequence;
+    const now = new Date();
+
+    const currentNumber = Number(data.currentNumber);
+    const startNumber = Number(data.startNumber);
+    const endNumber = Number(data.endNumber);
+
+    const remainingNumbers = Math.max(0, endNumber - currentNumber);
+    const totalNumbers = endNumber - startNumber + 1;
+    const usedNumbers = currentNumber - (startNumber - 1);
+    const usedPercentage = totalNumbers > 0
+        ? Math.min(100, Math.round((usedNumbers / totalNumbers) * 100))
+        : 0;
+
+    const hasBeenUsed = currentNumber > startNumber - 1;
+
+    // Retornamos el objeto 'sequence' enriquecido, permitiendo inyectar 'extraFields' (ej. invoicesCount)
+    return {
+        sequence: {
+            ...data,
+            isExpired: new Date(data.expiresAt) < now,
+            remainingNumbers,
+            totalNumbers,
+            usedPercentage,
+            hasBeenUsed,
+            canBeEdited: !hasBeenUsed,
+            canBeDeleted: !hasBeenUsed && (extraFields.invoicesCount !== undefined ? extraFields.invoicesCount === 0 : true),
+            ...extraFields
+        }
+    };
+}
+
 // ------------------------------------------------------------
 // Listar MIS secuencias (company_admin)
 // ------------------------------------------------------------
 async function listMySequences(companyId, filters = {}) {
-    
+
     if (!companyId) {
         throw new AppError(
             'You do not belong to any company',
@@ -57,33 +96,7 @@ async function listMySequences(companyId, filters = {}) {
     });
 
     // Enriquecer cada secuencia con campos calculados
-    const now = new Date();
-    const items = rows.map((seq) => {
-        const data = seq.toJSON();
-        const currentNumber = Number(data.currentNumber);
-        const startNumber = Number(data.startNumber);
-        const endNumber = Number(data.endNumber);
-
-        // Números restantes (0 si ya se agotó)
-        const remainingNumbers = Math.max(0, endNumber - currentNumber);
-
-        // Total del rango
-        const totalNumbers = endNumber - startNumber + 1;
-
-        // Porcentaje usado (0-100)
-        const usedNumbers = currentNumber - (startNumber - 1);
-        const usedPercentage = totalNumbers > 0
-            ? Math.min(100, Math.round((usedNumbers / totalNumbers) * 100))
-            : 0;
-
-        return {
-            ...data,
-            isExpired: new Date(data.expiresAt) < now,
-            remainingNumbers,
-            totalNumbers,
-            usedPercentage
-        };
-    });
+    const items = rows.map((seq) => buildSequenceResponse(seq).sequence);
 
     const totalPages = Math.ceil(count / limit);
 
@@ -131,35 +144,7 @@ async function getMySequenceById(companyId, sequenceId) {
     });
 
     // 4. Calcular campos derivados
-    const data = sequence.toJSON();
-    const currentNumber = Number(data.currentNumber);
-    const startNumber = Number(data.startNumber);
-    const endNumber = Number(data.endNumber);
-    const now = new Date();
-
-    const remainingNumbers = Math.max(0, endNumber - currentNumber);
-    const totalNumbers = endNumber - startNumber + 1;
-    const usedNumbers = currentNumber - (startNumber - 1);
-    const usedPercentage = totalNumbers > 0
-        ? Math.min(100, Math.round((usedNumbers / totalNumbers) * 100))
-        : 0;
-
-    // 5. Determinar si es editable/borrable
-    const hasBeenUsed = currentNumber > startNumber - 1;
-
-    return {
-        sequence: {
-            ...data,
-            isExpired: new Date(data.expiresAt) < now,
-            remainingNumbers,
-            totalNumbers,
-            usedPercentage,
-            invoicesCount,
-            hasBeenUsed,
-            canBeEdited: !hasBeenUsed,
-            canBeDeleted: !hasBeenUsed && invoicesCount === 0
-        }
-    };
+    return buildSequenceResponse(sequence, { invoicesCount });
 }
 
 // ------------------------------------------------------------
@@ -248,25 +233,7 @@ async function createMySequence(companyId, data, reqUser, reqInfo = {}) {
     }
 
     // 6. Devolver con campos calculados
-    const data2 = sequence.toJSON();
-    const now = new Date();
-    const currentNumber = Number(data2.currentNumber);
-    const startNumberResp = Number(data2.startNumber);
-    const endNumberResp = Number(data2.endNumber);
-
-    return {
-        sequence: {
-            ...data2,
-            isExpired: new Date(data2.expiresAt) < now,
-            remainingNumbers: Math.max(0, endNumberResp - currentNumber),
-            totalNumbers: endNumberResp - startNumberResp + 1,
-            usedPercentage: 0,
-            invoicesCount: 0,
-            hasBeenUsed: false,
-            canBeEdited: true,
-            canBeDeleted: true
-        }
-    };
+    return buildSequenceResponse(sequence, { invoicesCount: 0 });
 }
 
 // ------------------------------------------------------------
@@ -396,36 +363,91 @@ async function updateMySequence(companyId, sequenceId, updates, reqUser, reqInfo
     }
 
     // 8. Devolver con campos calculados
-    const data = sequence.toJSON();
-    const now = new Date();
-    const newCurrentNumber = Number(data.currentNumber);
-    const newStartNumber = Number(data.startNumber);
-    const newEndNumber = Number(data.endNumber);
+    return buildSequenceResponse(sequence);
+}
 
-    const remainingNumbers = Math.max(0, newEndNumber - newCurrentNumber);
-    const totalNumbers = newEndNumber - newStartNumber + 1;
-    const usedNumbers = newCurrentNumber - (newStartNumber - 1);
-    const usedPercentage = totalNumbers > 0
-        ? Math.min(100, Math.round((usedNumbers / totalNumbers) * 100))
-        : 0;
+// ------------------------------------------------------------
+// Activar/desactivar secuencia (company_admin)
+// ------------------------------------------------------------
+async function toggleMySequenceActive(companyId, sequenceId, isActive, reqUser, reqInfo = {}) {
+    if (!companyId) {
+        throw new AppError(
+            'You do not belong to any company',
+            400,
+            'NO_COMPANY_ASSIGNED'
+        );
+    }
 
-    return {
-        sequence: {
-            ...data,
-            isExpired: new Date(data.expiresAt) < now,
-            remainingNumbers,
-            totalNumbers,
-            usedPercentage,
-            hasBeenUsed,
-            canBeEdited: !hasBeenUsed,
-            canBeDeleted: !hasBeenUsed
+    // 1. Buscar la secuencia (aislamiento multi-tenant)
+    const sequence = await Sequence.findOne({
+        where: { id: sequenceId, companyId }
+    });
+
+    if (!sequence) {
+        throw new AppError('Sequence not found', 404, 'SEQUENCE_NOT_FOUND');
+    }
+
+    // 2. Idempotencia: si ya está en el estado deseado, retornar sin hacer nada
+    if (sequence.isActive === isActive) {
+        return buildSequenceResponse(sequence);
+    }
+
+    // 3. Si intenta activar, verificar que no esté vencida ni agotada
+    if (isActive === true) {
+        const now = new Date();
+        if (new Date(sequence.expiresAt) < now) {
+            throw new AppError(
+                'Cannot activate an expired sequence',
+                409,
+                'SEQUENCE_EXPIRED'
+            );
         }
+
+        const currentNumber = Number(sequence.currentNumber);
+        const endNumber = Number(sequence.endNumber);
+
+        if (currentNumber >= endNumber) {
+            throw new AppError(
+                'Cannot activate an exhausted sequence (no remaining numbers)',
+                409,
+                'SEQUENCE_EXHAUSTED'
+            );
+        }
+    }
+
+    // 4. Guardar estado anterior para audit
+    const before = {
+        isActive: sequence.isActive
     };
+
+    // 5. Actualizar
+    await sequence.update({ isActive });
+
+    // 6. Audit log con acción específica
+    const action = isActive ? 'sequence.activated' : 'sequence.deactivated';
+    try {
+        await AuditLog.create({
+            companyId,
+            userId: reqUser.id,
+            action,
+            entity: 'sequence',
+            entityId: sequence.id,
+            before,
+            after: { isActive },
+            ip: reqInfo.ip || null,
+            userAgent: reqInfo.userAgent || null
+        });
+    } catch (err) {
+        // Ignorar errores de audit
+    }
+
+    return buildSequenceResponse(sequence);
 }
 
 module.exports = {
     listMySequences,
     getMySequenceById,
     createMySequence,
-    updateMySequence
+    updateMySequence,
+    toggleMySequenceActive
 };
