@@ -47,14 +47,22 @@ router.get('/me',
     sequencesController.listMySequences
 );
 
+// GET /api/sequences/me/:id — Ver una específica
+router.get('/me/:id',
+    authMiddleware,
+    roleMiddleware('company_admin'),
+    readLimiter,
+    sequencesController.getMySequenceById
+);
+
 // ============================================================
 // Endpoints planeados (implementación pendiente)
 // ============================================================
-// GET    /api/sequences/me/:id                → ver una específica
 // POST   /api/sequences/me                    → crear secuencia
 // PATCH  /api/sequences/me/:id                → actualizar
 // PATCH  /api/sequences/me/:id/activate       → activar/desactivar
 // DELETE /api/sequences/me/:id                → borrar
 // GET    /api/sequences                       → listar todas (admin)
+
 
 module.exports = router;

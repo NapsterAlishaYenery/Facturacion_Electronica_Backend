@@ -22,9 +22,26 @@ const listMySequences = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// GET /api/sequences/me/:id
+// ------------------------------------------------------------
+const getMySequenceById = catchAsync(async (req, res) => {
+    const result = await sequencesService.getMySequenceById(
+        req.user.companyId,
+        req.params.id
+    );
+
+    res.json({
+        success: true,
+        data: result
+    });
+});
+
 module.exports = {
-    listMySequences
+    listMySequences,
+    getMySequenceById
 };
+
 // Controladores planeados:
 // - listMySequences
 // - getMySequenceById

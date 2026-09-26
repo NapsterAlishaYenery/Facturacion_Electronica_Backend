@@ -100,6 +100,69 @@ async function listMySequences(companyId, filters = {}) {
     };
 }
 
+// ------------------------------------------------------------
+// Ver una secuencia específica (company_admin)
+// ------------------------------------------------------------
+async function getMySequenceById(companyId, sequenceId) {
+    if (!companyId) {
+        throw new AppError(
+            'You do not belong to any company',
+            400,
+            'NO_COMPANY_ASSIGNED'
+        );
+    }
+
+    // 1. Buscar la secuencia (filtrando por companyId para multi-tenant)
+    const sequence = await Sequence.findOne({
+        where: {
+            id: sequenceId,
+            companyId
+        }
+    });
+
+    // 2. Si no existe O es de otra empresa → mismo error (no revelar)
+    if (!sequence) {
+        throw new AppError('Sequence not found', 404, 'SEQUENCE_NOT_FOUND');
+    }
+
+    // 3. Contar facturas emitidas con esta secuencia
+    const invoicesCount = await Invoice.count({
+        where: { sequenceId: sequence.id }
+    });
+
+    // 4. Calcular campos derivados
+    const data = sequence.toJSON();
+    const currentNumber = Number(data.currentNumber);
+    const startNumber = Number(data.startNumber);
+    const endNumber = Number(data.endNumber);
+    const now = new Date();
+
+    const remainingNumbers = Math.max(0, endNumber - currentNumber);
+    const totalNumbers = endNumber - startNumber + 1;
+    const usedNumbers = currentNumber - (startNumber - 1);
+    const usedPercentage = totalNumbers > 0
+        ? Math.min(100, Math.round((usedNumbers / totalNumbers) * 100))
+        : 0;
+
+    // 5. Determinar si es editable/borrable
+    const hasBeenUsed = currentNumber > startNumber - 1;
+
+    return {
+        sequence: {
+            ...data,
+            isExpired: new Date(data.expiresAt) < now,
+            remainingNumbers,
+            totalNumbers,
+            usedPercentage,
+            invoicesCount,
+            hasBeenUsed,
+            canBeEdited: !hasBeenUsed,
+            canBeDeleted: !hasBeenUsed && invoicesCount === 0
+        }
+    };
+}
+
 module.exports = {
-    listMySequences
+    listMySequences,
+    getMySequenceById
 };
