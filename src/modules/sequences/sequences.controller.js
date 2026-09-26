@@ -37,9 +37,33 @@ const getMySequenceById = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// POST /api/sequences/me
+// ------------------------------------------------------------
+const createMySequence = catchAsync(async (req, res) => {
+    const reqInfo = {
+        ip: req.ip,
+        userAgent: req.get('user-agent')
+    };
+
+    const result = await sequencesService.createMySequence(
+        req.user.companyId,
+        req.body,
+        req.user,
+        reqInfo
+    );
+
+    res.status(201).json({
+        success: true,
+        message: 'Sequence created successfully',
+        data: result
+    });
+});
+
 module.exports = {
     listMySequences,
-    getMySequenceById
+    getMySequenceById,
+    createMySequence
 };
 
 // Controladores planeados:

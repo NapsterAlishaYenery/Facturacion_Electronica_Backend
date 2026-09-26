@@ -162,7 +162,115 @@ async function getMySequenceById(companyId, sequenceId) {
     };
 }
 
+// ------------------------------------------------------------
+// Crear secuencia (company_admin)
+// ------------------------------------------------------------
+async function createMySequence(companyId, data, reqUser, reqInfo = {}) {
+    if (!companyId) {
+        throw new AppError(
+            'You do not belong to any company',
+            400,
+            'NO_COMPANY_ASSIGNED'
+        );
+    }
+
+    const { type, prefix = 'E', startNumber, endNumber, expiresAt } = data;
+
+    // 1. Convertir los strings de 10 dígitos a números
+    const startInt = parseInt(startNumber, 10);
+    const endInt = parseInt(endNumber, 10);
+
+    // 2. Validar rango
+    if (endInt <= startInt) {
+        throw new AppError('endNumber must be greater than startNumber', 400, 'INVALID_RANGE');
+    }
+
+    const rangeSize = endInt - startInt + 1;
+    if (rangeSize > 1000000) {
+        throw new AppError('Range cannot exceed 1,000,000 numbers', 400, 'RANGE_TOO_LARGE');
+    }
+
+    // 3. Verificar que no haya otra secuencia activa del mismo tipo
+    const overlapping = await Sequence.findOne({
+        where: {
+            companyId,
+            type,
+            prefix,
+            isActive: true,
+            [Op.or]: [
+                { startNumber: { [Op.lte]: startInt }, endNumber: { [Op.gte]: startInt } },
+                { startNumber: { [Op.lte]: endInt }, endNumber: { [Op.gte]: endInt } },
+                { startNumber: { [Op.gte]: startInt }, endNumber: { [Op.lte]: endInt } }
+            ]
+        }
+    });
+
+    if (overlapping) {
+        throw new AppError(
+            `This range overlaps with an existing active sequence for type ${type}. Deactivate it first or use a different range.`,
+            409,
+            'RANGE_OVERLAPS'
+        );
+    }
+
+    // 4. Crear la secuencia
+    const sequence = await Sequence.create({
+        companyId,
+        type,
+        prefix,
+        startNumber: startInt,
+        endNumber: endInt,
+        currentNumber: startInt - 1,  // Aún no se ha usado nada
+        expiresAt,
+        isActive: true
+    });
+
+    // 5. Audit log
+    try {
+        await AuditLog.create({
+            companyId,
+            userId: reqUser.id,
+            action: 'sequence.created',
+            entity: 'sequence',
+            entityId: sequence.id,
+            after: {
+                type: sequence.type,
+                prefix: sequence.prefix,
+                startNumber: startInt,
+                endNumber: endInt,
+                expiresAt
+            },
+            ip: reqInfo.ip || null,
+            userAgent: reqInfo.userAgent || null
+        });
+    } catch (err) {
+        // Ignorar errores de audit
+    }
+
+    // 6. Devolver con campos calculados
+    const data2 = sequence.toJSON();
+    const now = new Date();
+    const currentNumber = Number(data2.currentNumber);
+    const startNumberResp = Number(data2.startNumber);
+    const endNumberResp = Number(data2.endNumber);
+
+    return {
+        sequence: {
+            ...data2,
+            isExpired: new Date(data2.expiresAt) < now,
+            remainingNumbers: Math.max(0, endNumberResp - currentNumber),
+            totalNumbers: endNumberResp - startNumberResp + 1,
+            usedPercentage: 0,
+            invoicesCount: 0,
+            hasBeenUsed: false,
+            canBeEdited: true,
+            canBeDeleted: true
+        }
+    };
+}
+
 module.exports = {
     listMySequences,
-    getMySequenceById
+    getMySequenceById,
+    createMySequence
 };

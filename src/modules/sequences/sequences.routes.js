@@ -16,7 +16,8 @@ const {
 
 // Validaciones
 const {
-    listSequencesQuerySchema
+    listSequencesQuerySchema,
+    createSequenceSchema
 } = require('./sequences.validation');
 
 // Controlador
@@ -55,10 +56,18 @@ router.get('/me/:id',
     sequencesController.getMySequenceById
 );
 
+// POST /api/sequences/me — Crear secuencia
+router.post('/me',
+    authMiddleware,
+    roleMiddleware('company_admin'),
+    writeLimiter,
+    validate(createSequenceSchema),
+    sequencesController.createMySequence
+);
+
 // ============================================================
 // Endpoints planeados (implementación pendiente)
 // ============================================================
-// POST   /api/sequences/me                    → crear secuencia
 // PATCH  /api/sequences/me/:id                → actualizar
 // PATCH  /api/sequences/me/:id/activate       → activar/desactivar
 // DELETE /api/sequences/me/:id                → borrar
