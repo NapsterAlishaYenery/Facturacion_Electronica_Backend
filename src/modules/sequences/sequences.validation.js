@@ -61,9 +61,48 @@ const createSequenceSchema = Joi.object({
     'any.custom': '{{#message}}'
 });
 
+// ------------------------------------------------------------
+// Schema: actualizar secuencia (company_admin)
+// ------------------------------------------------------------
+const updateSequenceSchema = Joi.object({
+    startNumber: Joi.string()
+        .pattern(/^\d{10}$/)
+        .optional()
+        .messages({
+            'string.pattern.base': 'Start number must be exactly 10 digits (e.g. 0000000001)'
+        }),
+    endNumber: Joi.string()
+        .pattern(/^\d{10}$/)
+        .optional()
+        .messages({
+            'string.pattern.base': 'End number must be exactly 10 digits (e.g. 0000000100)'
+        }),
+    expiresAt: Joi.date().iso().greater('now').optional()
+        .messages({
+            'date.greater': 'Expiration date must be in the future'
+        })
+}).min(1).messages({
+    'object.min': 'At least one field is required to update'
+}).custom((value, helpers) => {
+    // Si se envían ambos, validar que end > start
+    if (value.startNumber !== undefined && value.endNumber !== undefined) {
+        const start = parseInt(value.startNumber, 10);
+        const end = parseInt(value.endNumber, 10);
+        if (end <= start) {
+            return helpers.error('any.custom', {
+                message: 'endNumber must be greater than startNumber'
+            });
+        }
+    }
+    return value;
+}).messages({
+    'any.custom': '{{#message}}'
+});
+
 module.exports = {
     listSequencesQuerySchema,
-    createSequenceSchema
+    createSequenceSchema,
+    updateSequenceSchema
 };
 
 // Schemas planeados:

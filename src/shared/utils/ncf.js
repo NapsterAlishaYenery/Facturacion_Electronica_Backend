@@ -1,5 +1,15 @@
 // ============================================================
 // Utilidades para construir y parsear e-NCF
+//
+// NOTA: Este util NO se usa en el módulo sequences (porque el
+// usuario ingresa el secuencial puro, no el e-NCF completo).
+// Se usará en el módulo invoices (construir e-NCF al emitir)
+// y en módulos futuros (validación, parsing de respuestas DGII).
+// ============================================================
+
+
+// ============================================================
+// Utilidades para construir y parsear e-NCF
 // ============================================================
 
 // ------------------------------------------------------------

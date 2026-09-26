@@ -60,10 +60,35 @@ const createMySequence = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// PATCH /api/sequences/me/:id
+// ------------------------------------------------------------
+const updateMySequence = catchAsync(async (req, res) => {
+    const reqInfo = {
+        ip: req.ip,
+        userAgent: req.get('user-agent')
+    };
+
+    const result = await sequencesService.updateMySequence(
+        req.user.companyId,
+        req.params.id,
+        req.body,
+        req.user,
+        reqInfo
+    );
+
+    res.json({
+        success: true,
+        message: 'Sequence updated successfully',
+        data: result
+    });
+});
+
 module.exports = {
     listMySequences,
     getMySequenceById,
-    createMySequence
+    createMySequence,
+    updateMySequence
 };
 
 // Controladores planeados:

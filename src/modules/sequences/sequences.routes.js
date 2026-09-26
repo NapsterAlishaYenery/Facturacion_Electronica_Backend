@@ -17,7 +17,8 @@ const {
 // Validaciones
 const {
     listSequencesQuerySchema,
-    createSequenceSchema
+    createSequenceSchema,
+    updateSequenceSchema
 } = require('./sequences.validation');
 
 // Controlador
@@ -65,10 +66,18 @@ router.post('/me',
     sequencesController.createMySequence
 );
 
+// PATCH /api/sequences/me/:id — Actualizar
+router.patch('/me/:id',
+    authMiddleware,
+    roleMiddleware('company_admin'),
+    writeLimiter,
+    validate(updateSequenceSchema),
+    sequencesController.updateMySequence
+);
+
 // ============================================================
 // Endpoints planeados (implementación pendiente)
 // ============================================================
-// PATCH  /api/sequences/me/:id                → actualizar
 // PATCH  /api/sequences/me/:id/activate       → activar/desactivar
 // DELETE /api/sequences/me/:id                → borrar
 // GET    /api/sequences                       → listar todas (admin)
