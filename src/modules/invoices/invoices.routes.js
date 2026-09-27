@@ -15,11 +15,14 @@ const {
     readLimiter
 } = require('../../shared/middlewares/rateLimit.middleware');
 
-// Validaciones (se usarán cuando se implementen los endpoints)
-// const invoicesValidation = require('./invoices.validation');
+// Validaciones
+const {
+    listInvoicesQuerySchema
+} = require('./invoices.validation');
 
-// Controlador (se usará cuando se implementen los endpoints)
-// const invoicesController = require('./invoices.controller');
+// Controlador
+const invoicesController = require('./invoices.controller');
+
 
 // ============================================================
 // Health check del módulo
@@ -32,6 +35,19 @@ router.get('/ping', (req, res) => {
         message: 'Module mounted. Endpoints pending implementation.'
     });
 });
+
+// ============================================================
+// Rutas de company_admin (MI EMPRESA)
+// ============================================================
+
+// GET /api/invoices/me — Listar mis facturas
+router.get('/me',
+    authMiddleware,
+    roleMiddleware('company_admin'),
+    readLimiter,
+    validate(listInvoicesQuerySchema, 'query'),
+    invoicesController.listMyInvoices
+);
 
 // ============================================================
 // Endpoints planeados (implementación pendiente)
