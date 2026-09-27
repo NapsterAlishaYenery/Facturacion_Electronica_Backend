@@ -163,8 +163,60 @@ async function listMyInvoices(companyId, filters = {}) {
     };
 }
 
+// ------------------------------------------------------------
+// Ver una factura específica (company_admin)
+// ------------------------------------------------------------
+async function getMyInvoiceById(companyId, invoiceId) {
+    if (!companyId) {
+        throw new AppError(
+            'You do not belong to any company',
+            400,
+            'NO_COMPANY_ASSIGNED'
+        );
+    }
+
+    // 1. Buscar la factura con sus relaciones
+    const invoice = await Invoice.findOne({
+        where: { id: invoiceId, companyId },
+        include: [
+            {
+                model: Sequence,
+                as: 'sequence',
+                attributes: ['id', 'type', 'prefix', 'startNumber', 'endNumber', 'currentNumber', 'expiresAt', 'isActive']
+            },
+            {
+                model: InvoiceLine,
+                as: 'lines',
+                separate: true,           // ← query separada para poder ordenar
+                order: [['lineNumber', 'ASC']]
+            }
+        ]
+    });
+
+    if (!invoice) {
+        throw new AppError('Invoice not found', 404, 'INVOICE_NOT_FOUND');
+    }
+
+    // 2. Contar líneas (para lineCount)
+    const lineCount = invoice.lines?.length || 0;
+
+    // 3. Construir respuesta (SÍ exponer xmlContent y xmlSigned en detalle)
+    const result = buildInvoiceResponse(invoice, {
+        lineCount,
+        hideXml: false  // ← en detalle SÍ mostramos XML
+    });
+
+    // 4. Agregar campos específicos del detalle
+    const status = invoice.status;
+    result.invoice.canBeSigned = status === 'draft';
+    result.invoice.canBeSent = status === 'signed';
+
+    return result;
+}
+
 module.exports = {
-    listMyInvoices
+    listMyInvoices,
+    getMyInvoiceById
 };
 
 

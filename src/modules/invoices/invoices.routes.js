@@ -49,6 +49,17 @@ router.get('/me',
     invoicesController.listMyInvoices
 );
 
+// GET /api/invoices/me/:id — Ver una específica
+router.get('/me/:id',
+    authMiddleware,
+    roleMiddleware('company_admin'),
+    readLimiter,
+    invoicesController.getMyInvoiceById
+);
+
+
+module.exports = router;
+
 // ============================================================
 // Endpoints planeados (implementación pendiente)
 // ============================================================
@@ -62,5 +73,3 @@ router.get('/me',
 // DELETE /api/invoices/me/:id/lines/:lineId     → borrar línea
 // GET    /api/invoices                          → listar todas (admin)
 // GET    /api/invoices/:id                      → ver una (admin)
-
-module.exports = router;

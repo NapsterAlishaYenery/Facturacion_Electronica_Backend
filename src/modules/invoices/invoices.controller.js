@@ -21,8 +21,24 @@ const listMyInvoices = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// GET /api/invoices/me/:id
+// ------------------------------------------------------------
+const getMyInvoiceById = catchAsync(async (req, res) => {
+    const result = await invoicesService.getMyInvoiceById(
+        req.user.companyId,
+        req.params.id
+    );
+
+    res.json({
+        success: true,
+        data: result
+    });
+});
+
 module.exports = {
-    listMyInvoices
+    listMyInvoices,
+    getMyInvoiceById
 };
 
 // Controladores planeados:
