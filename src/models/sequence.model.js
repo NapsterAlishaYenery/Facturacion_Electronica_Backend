@@ -81,14 +81,20 @@ const Sequence = sequelize.define('Sequence', {
     validate: {
         // end_number >= start_number
         rangeIsValid() {
-            if (this.endNumber < this.startNumber) {
+            const start = Number(this.startNumber);
+            const end = Number(this.endNumber);
+            if (end < start) {
                 throw new Error('end_number must be >= start_number');
             }
         },
         // current_number entre start-1 y end
         currentNumberInRange() {
-            const min = this.startNumber - 1;
-            if (this.currentNumber < min || this.currentNumber > this.endNumber) {
+            const start = Number(this.startNumber);
+            const end = Number(this.endNumber);
+            const current = Number(this.currentNumber);
+
+            const min = start - 1;
+            if (current < min || current > end) {
                 throw new Error('current_number must be between start_number - 1 and end_number');
             }
         }
