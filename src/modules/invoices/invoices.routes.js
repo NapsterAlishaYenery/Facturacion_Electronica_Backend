@@ -18,7 +18,8 @@ const {
 // Validaciones
 const {
     listInvoicesQuerySchema,
-    createInvoiceSchema
+    createInvoiceSchema,
+    updateInvoiceSchema
 } = require('./invoices.validation');
 
 // Controlador
@@ -65,6 +66,14 @@ router.get('/me/:id',
     roleMiddleware('company_admin'),
     readLimiter,
     invoicesController.getMyInvoiceById
+);
+
+router.patch('/me/:id',
+    authMiddleware,
+    roleMiddleware('company_admin'),
+    writeLimiter,
+    validate(updateInvoiceSchema),
+    invoicesController.updateMyInvoice
 );
 
 

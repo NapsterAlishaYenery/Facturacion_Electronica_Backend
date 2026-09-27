@@ -59,10 +59,36 @@ const createMyInvoice = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// PATCH /api/invoices/me/:id
+// ------------------------------------------------------------
+const updateMyInvoice = catchAsync(async (req, res) => {
+    const reqInfo = {
+        ip: req.ip,
+        userAgent: req.get('user-agent')
+    };
+
+    const result = await invoicesService.updateMyInvoice(
+        req.user.companyId,
+        req.params.id,
+        req.body,
+        req.user,
+        reqInfo
+    );
+
+    res.json({
+        success: true,
+        message: 'Invoice updated successfully',
+        data: result
+    });
+});
+
+
 module.exports = {
     listMyInvoices,
     getMyInvoiceById,
-    createMyInvoice
+    createMyInvoice,
+    updateMyInvoice
 };
 
 // Controladores planeados:

@@ -503,10 +503,156 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
     });
 }
 
+// ------------------------------------------------------------
+// Editar factura (company_admin)
+// Solo si status === 'draft'
+// ------------------------------------------------------------
+async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo = {}) {
+    if (!companyId) {
+        throw new AppError(
+            'You do not belong to any company',
+            400,
+            'NO_COMPANY_ASSIGNED'
+        );
+    }
+
+    // 1. Buscar la factura
+    const invoice = await Invoice.findOne({
+        where: { id: invoiceId, companyId }
+    });
+
+    if (!invoice) {
+        throw new AppError('Invoice not found', 404, 'INVOICE_NOT_FOUND');
+    }
+
+    // 2. Solo se puede editar si está en draft
+    if (invoice.status !== 'draft') {
+        throw new AppError(
+            `Cannot edit invoice with status '${invoice.status}'. Only drafts can be edited.`,
+            409,
+            'INVOICE_NOT_EDITABLE'
+        );
+    }
+
+    // 3. Guardar estado anterior para audit
+    const before = {
+        receiverRnc: invoice.receiverRnc,
+        receiverName: invoice.receiverName,
+        issuedAt: invoice.issuedAt,
+        subtotal: invoice.subtotal,
+        itbis: invoice.itbis,
+        total: invoice.total
+    };
+
+    // 4. Procesar en transacción
+    const result = await sequelize.transaction(async (t) => {
+        const updateData = {};
+
+        // 4.1. Datos del comprador
+        if (updates.receiverRnc !== undefined) {
+            updateData.receiverRnc = updates.receiverRnc || null;
+        }
+        if (updates.receiverName !== undefined) {
+            updateData.receiverName = updates.receiverName || null;
+        }
+        if (updates.issuedAt !== undefined) {
+            updateData.issuedAt = new Date(updates.issuedAt);
+        }
+
+        // 4.2. Si se envían items, reemplazar TODAS las líneas
+        if (updates.items !== undefined) {
+            // Calcular nuevas líneas
+            const calculatedLines = updates.items.map((item, index) => {
+                const totals = calculateLineTotals(item);
+                return {
+                    lineNumber: index + 1,
+                    itemCode: item.itemCode || null,
+                    description: item.description,
+                    ...totals
+                };
+            });
+
+            const invoiceTotals = calculateInvoiceTotals(calculatedLines);
+
+            updateData.subtotal = invoiceTotals.subtotal;
+            updateData.itbis = invoiceTotals.itbis;
+            updateData.total = invoiceTotals.total;
+
+            // Borrar líneas anteriores
+            await InvoiceLine.destroy({
+                where: { invoiceId: invoice.id },
+                transaction: t
+            });
+
+            // Crear nuevas líneas
+            await InvoiceLine.bulkCreate(
+                calculatedLines.map((line) => ({
+                    invoiceId: invoice.id,
+                    lineNumber: line.lineNumber,
+                    itemCode: line.itemCode,
+                    description: line.description,
+                    quantity: line.quantity,
+                    unitPrice: line.unitPrice,
+                    discount: line.discount,
+                    itbisRate: line.itbisRate,
+                    itbisAmount: line.itbisAmount,
+                    total: line.total
+                })),
+                { transaction: t }
+            );
+        }
+
+        // 4.3. Actualizar la factura (con datos del encabezado)
+        await invoice.update(updateData, { transaction: t });
+
+        // 4.4. Audit log
+        try {
+            await AuditLog.create({
+                companyId,
+                userId: reqUser.id,
+                action: 'invoice.updated',
+                entity: 'invoice',
+                entityId: invoice.id,
+                before,
+                after: updateData,
+                ip: reqInfo.ip || null,
+                userAgent: reqInfo.userAgent || null
+            }, { transaction: t });
+        } catch (err) {
+            // Ignorar errores de audit
+        }
+
+        return invoice;
+    });
+
+    // 5. Recargar con sequence + lines para la respuesta
+    const fullInvoice = await Invoice.findByPk(result.id, {
+        include: [
+            {
+                model: Sequence,
+                as: 'sequence',
+                attributes: ['id', 'type', 'prefix', 'startNumber', 'endNumber', 'currentNumber', 'expiresAt', 'isActive']
+            },
+            {
+                model: InvoiceLine,
+                as: 'lines',
+                separate: true,
+                order: [['lineNumber', 'ASC']]
+            }
+        ]
+    });
+
+    return buildInvoiceResponse(fullInvoice, {
+        lineCount: fullInvoice.lines.length,
+        hideXml: false
+    });
+}
+
 module.exports = {
     listMyInvoices,
     getMyInvoiceById,
-    createMyInvoice
+    createMyInvoice,
+    updateMyInvoice
 };
 
 
