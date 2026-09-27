@@ -76,6 +76,13 @@ router.patch('/me/:id',
     invoicesController.updateMyInvoice
 );
 
+router.delete('/me/:id',
+    authMiddleware,
+    roleMiddleware('company_admin'),
+    writeLimiter,
+    invoicesController.deleteMyInvoice
+);
+
 
 module.exports = router;
 

@@ -83,12 +83,36 @@ const updateMyInvoice = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// DELETE /api/invoices/me/:id
+// ------------------------------------------------------------
+const deleteMyInvoice = catchAsync(async (req, res) => {
+    const reqInfo = {
+        ip: req.ip,
+        userAgent: req.get('user-agent')
+    };
+
+    const result = await invoicesService.deleteMyInvoice(
+        req.user.companyId,
+        req.params.id,
+        req.user,
+        reqInfo
+    );
+
+    res.json({
+        success: true,
+        message: 'Invoice deleted successfully',
+        data: result
+    });
+});
+
 
 module.exports = {
     listMyInvoices,
     getMyInvoiceById,
     createMyInvoice,
-    updateMyInvoice
+    updateMyInvoice,
+    deleteMyInvoice
 };
 
 // Controladores planeados:
