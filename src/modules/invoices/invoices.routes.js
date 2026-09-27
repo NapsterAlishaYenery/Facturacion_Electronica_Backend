@@ -97,20 +97,14 @@ router.get('/',
     invoicesController.listAllInvoices
 );
 
+// GET /api/invoices/:id — Ver una específica (cualquier empresa)
+router.get('/:id',
+    authMiddleware,
+    roleMiddleware('admin'),
+    readLimiter,
+    invoicesController.getInvoiceById
+);
+
 
 
 module.exports = router;
-
-// ============================================================
-// Endpoints planeados (implementación pendiente)
-// ============================================================
-// GET    /api/invoices/me                       → listar mis facturas
-// GET    /api/invoices/me/:id                   → ver una específica
-// POST   /api/invoices/me                       → crear borrador
-// PATCH  /api/invoices/me/:id                   → editar borrador
-// DELETE /api/invoices/me/:id                   → borrar borrador
-// POST   /api/invoices/me/:id/lines             → agregar línea
-// PATCH  /api/invoices/me/:id/lines/:lineId     → editar línea
-// DELETE /api/invoices/me/:id/lines/:lineId     → borrar línea
-// GET    /api/invoices                          → listar todas (admin)
-// GET    /api/invoices/:id                      → ver una (admin)

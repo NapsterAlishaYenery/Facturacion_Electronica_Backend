@@ -118,6 +118,18 @@ const listAllInvoices = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// GET /api/invoices/:id (admin)
+// ------------------------------------------------------------
+const getInvoiceById = catchAsync(async (req, res) => {
+    const result = await invoicesService.getInvoiceById(req.params.id);
+
+    res.json({
+        success: true,
+        data: result
+    });
+});
+
 
 module.exports = {
     listMyInvoices,
@@ -125,7 +137,8 @@ module.exports = {
     createMyInvoice,
     updateMyInvoice,
     deleteMyInvoice,
-    listAllInvoices
+    listAllInvoices,
+    getInvoiceById
 };
 
 // Controladores planeados:

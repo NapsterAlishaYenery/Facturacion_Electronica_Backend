@@ -855,30 +855,53 @@ async function listAllInvoices(filters = {}) {
     };
 }
 
+// ------------------------------------------------------------
+// Ver CUALQUIER factura (solo admin)
+// ------------------------------------------------------------
+async function getInvoiceById(invoiceId) {
+    // 1. Buscar la factura SIN filtrar por companyId
+    const invoice = await Invoice.findByPk(invoiceId, {
+        include: [
+            {
+                model: Company,
+                as: 'company',
+                attributes: ['id', 'rnc', 'name', 'tradeName', 'email', 'phone', 'address', 'dgiiEnvironment', 'isActive']
+            },
+            {
+                model: Sequence,
+                as: 'sequence',
+                attributes: ['id', 'type', 'prefix', 'startNumber', 'endNumber', 'currentNumber', 'expiresAt', 'isActive']
+            },
+            {
+                model: InvoiceLine,
+                as: 'lines',
+                separate: true,
+                order: [['lineNumber', 'ASC']]
+            }
+        ]
+    });
+
+    if (!invoice) {
+        throw new AppError('Invoice not found', 404, 'INVOICE_NOT_FOUND');
+    }
+
+    // 2. Contar líneas
+    const lineCount = invoice.lines?.length || 0;
+
+    // 3. Construir respuesta (SÍ exponer XML en detalle de admin)
+    return buildInvoiceResponse(invoice, {
+        lineCount,
+        hideXml: false
+    });
+}
+
 module.exports = {
     listMyInvoices,
     getMyInvoiceById,
     createMyInvoice,
     updateMyInvoice,
     deleteMyInvoice,
-    listAllInvoices
+    listAllInvoices,
+    getInvoiceById
 };
 
-
-// Funciones planeadas:
-// - listMyInvoices (company_admin)
-// - getMyInvoiceById (company_admin)
-// - createMyInvoice (company_admin)
-// - updateMyInvoice (company_admin)
-// - deleteMyInvoice (company_admin)
-// - addLineToMyInvoice (company_admin)
-// - updateLineOfMyInvoice (company_admin)
-// - deleteLineOfMyInvoice (company_admin)
-// - listAllInvoices (admin)
-// - getInvoiceById (admin)
-
-// Helpers internos:
-// - buildInvoiceResponse
-// - calculateInvoiceTotals
-// - assignSequenceNumber (transaccional)
-// - updateSequenceCurrentNumber

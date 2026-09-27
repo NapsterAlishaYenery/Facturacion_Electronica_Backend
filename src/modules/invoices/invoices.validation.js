@@ -213,11 +213,3 @@ module.exports = {
     updateInvoiceSchema,
     listAllInvoicesQuerySchema
 };
-
-// Schemas planeados:
-// - createInvoiceSchema
-// - updateInvoiceSchema
-// - createInvoiceLineSchema
-// - updateInvoiceLineSchema
-// - listInvoicesQuerySchema
-// - listAllInvoicesQuerySchema
