@@ -17,7 +17,8 @@ const {
 
 // Validaciones
 const {
-    listInvoicesQuerySchema
+    listInvoicesQuerySchema,
+    createInvoiceSchema
 } = require('./invoices.validation');
 
 // Controlador
@@ -47,6 +48,15 @@ router.get('/me',
     readLimiter,
     validate(listInvoicesQuerySchema, 'query'),
     invoicesController.listMyInvoices
+);
+
+// POST /api/invoices/me — Crear factura (draft)
+router.post('/me',
+    authMiddleware,
+    roleMiddleware('company_admin'),
+    writeLimiter,
+    validate(createInvoiceSchema),
+    invoicesController.createMyInvoice
 );
 
 // GET /api/invoices/me/:id — Ver una específica

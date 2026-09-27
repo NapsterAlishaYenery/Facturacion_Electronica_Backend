@@ -7,12 +7,16 @@ const { Op } = require('sequelize');
 const sequelize = require('../../config/database');
 const {
     Company,
+    Plan,
+    Subscription,
     Sequence,
     Invoice,
     InvoiceLine,
     AuditLog
 } = require('../../models');
 const { AppError } = require('../../shared/middlewares/error.middleware');
+
+// LISTA DE METODOS HELPERS
 
 // ------------------------------------------------------------
 // Helper: construir la respuesta completa de una factura
@@ -35,6 +39,8 @@ function buildInvoiceResponse(invoice, options = {}) {
         isContingency: status === 'contingency',
         canEdit: status === 'draft',
         canDelete: status === 'draft',
+        canBeSigned: status === 'draft',
+        canBeSent: status === 'signed',
         hasTrackId: !!data.trackId
     };
 
@@ -52,6 +58,118 @@ function buildInvoiceResponse(invoice, options = {}) {
 
     return { invoice: response };
 }
+
+// ------------------------------------------------------------
+// Helper: calcular totales de una línea de factura
+// ------------------------------------------------------------
+function calculateLineTotals(item) {
+    const quantity = Number(item.quantity);
+    const unitPrice = Number(item.unitPrice);
+    const discount = Number(item.discount || 0);
+    const itbisRate = Number(item.itbisRate || 0);
+
+    // Base imponible = (cantidad × precio) - descuento
+    const lineBase = (quantity * unitPrice) - discount;
+
+    // ITBIS = base × (tasa / 100)
+    const itbisAmount = lineBase * (itbisRate / 100);
+
+    // Total de la línea = base + ITBIS
+    // Redondeamos a 2 decimales
+    const total = Math.round((lineBase + itbisAmount) * 100) / 100;
+
+    return {
+        quantity,
+        unitPrice,
+        discount,
+        itbisRate,
+        lineBase: Math.round(lineBase * 100) / 100,
+        itbisAmount: Math.round(itbisAmount * 100) / 100,
+        total
+    };
+}
+
+// ------------------------------------------------------------
+// Helper: calcular totales de la factura completa
+// ------------------------------------------------------------
+function calculateInvoiceTotals(lines) {
+    let subtotal = 0;
+    let itbis = 0;
+    let total = 0;
+
+    for (const line of lines) {
+        subtotal += line.lineBase;
+        itbis += line.itbisAmount;
+        total += line.total;
+    }
+
+    return {
+        subtotal: Math.round(subtotal * 100) / 100,
+        itbis: Math.round(itbis * 100) / 100,
+        total: Math.round(total * 100) / 100
+    };
+}
+
+// ------------------------------------------------------------
+// Helper: asignar el siguiente e-NCF desde una secuencia activa
+// TRANSACCIONAL — debe llamarse dentro de sequelize.transaction
+// ------------------------------------------------------------
+async function assignNextNCF(companyId, type, transaction) {
+    // 1. Buscar la secuencia activa, vigente, con números disponibles, ordenada por vencimiento
+    const { Sequence } = require('../../models');
+    const { Op } = require('sequelize');
+
+    const sequence = await Sequence.findOne({
+        where: {
+            companyId,
+            type,
+            isActive: true,
+            expiresAt: { [Op.gt]: new Date() }
+        },
+        order: [['expiresAt', 'ASC'], ['createdAt', 'ASC']],
+        lock: transaction.LOCK.UPDATE, // ← Lock pesimista
+        transaction
+    });
+
+    // 2. Si no existe secuencia activa
+    if (!sequence) {
+        throw new AppError(
+            `No active sequence found for type ${type}. Please register or activate one first.`,
+            409,
+            'NO_ACTIVE_SEQUENCE'
+        );
+    }
+
+    // 3. Calcular siguiente número
+    const currentNumber = Number(sequence.currentNumber);
+    const endNumber = Number(sequence.endNumber);
+    const nextNumber = currentNumber + 1;
+
+    // 4. Verificar que no se haya agotado
+    if (nextNumber > endNumber) {
+        throw new AppError(
+            `Sequence ${sequence.prefix}${sequence.type} is exhausted (reached ${endNumber})`,
+            409,
+            'SEQUENCE_EXHAUSTED'
+        );
+    }
+
+    // 5. Actualizar currentNumber
+    await sequence.update(
+        { currentNumber: nextNumber },
+        { transaction }
+    );
+
+    // 6. Construir el e-NCF completo
+    const { buildNCF } = require('../../shared/utils/ncf');
+    const ncf = buildNCF(sequence.prefix, sequence.type, nextNumber);
+
+    return { sequence, ncf, nextNumber };
+}
+
+
+
+// LISTA DE METODOS DEL SERVICIO 
 
 // ------------------------------------------------------------
 // Listar MIS facturas (company_admin)
@@ -208,15 +326,187 @@ async function getMyInvoiceById(companyId, invoiceId) {
 
     // 4. Agregar campos específicos del detalle
     const status = invoice.status;
-    result.invoice.canBeSigned = status === 'draft';
-    result.invoice.canBeSent = status === 'signed';
 
     return result;
 }
 
+// ------------------------------------------------------------
+// Crear factura (company_admin)
+// ------------------------------------------------------------
+// ------------------------------------------------------------
+// Crear factura (company_admin)
+// ------------------------------------------------------------
+async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
+    if (!companyId) {
+        throw new AppError(
+            'You do not belong to any company',
+            400,
+            'NO_COMPANY_ASSIGNED'
+        );
+    }
+
+    const { type, receiverRnc, receiverName, issuedAt, items } = data;
+
+    // 1. Verificar que la empresa esté activa
+    const company = await Company.findByPk(companyId);
+    if (!company) {
+        throw new AppError('Company not found', 404, 'COMPANY_NOT_FOUND');
+    }
+    if (!company.isActive) {
+        throw new AppError(
+            'Company is inactive. Cannot issue invoices.',
+            403,
+            'COMPANY_INACTIVE'
+        );
+    }
+
+    // 2. Verificar suscripción activa
+    const subscription = await Subscription.findOne({
+        where: {
+            companyId,
+            status: ['trial', 'active', 'past_due']
+        },
+        include: [{
+            model: Plan,
+            as: 'plan'
+        }],
+        order: [['createdAt', 'DESC']]
+    });
+
+    if (!subscription) {
+        throw new AppError(
+            'No active subscription found. Please contact support.',
+            403,
+            'NO_ACTIVE_SUBSCRIPTION'
+        );
+    }
+
+    // 3. Verificar límite mensual ANTES de la transacción
+    //    (usando el contador persistente invoicesUsedThisMonth)
+    const planLimit = subscription.plan?.invoicesPerMonth;
+    const usedThisMonth = Number(subscription.invoicesUsedThisMonth) || 0;
+
+    if (planLimit !== -1 && usedThisMonth >= planLimit) {
+        throw new AppError(
+            `Monthly invoice limit reached (${usedThisMonth}/${planLimit}). Upgrade your plan to continue.`,
+            403,
+            'INVOICE_LIMIT_REACHED'
+        );
+    }
+
+    // 4. Procesar todo en una transacción
+    const result = await sequelize.transaction(async (t) => {
+        // 4.1. Asignar siguiente e-NCF (transaccional)
+        const { sequence, ncf } = await assignNextNCF(companyId, type, t);
+
+        // 4.2. Calcular totales de las líneas
+        const calculatedLines = items.map((item, index) => {
+            const totals = calculateLineTotals(item);
+            return {
+                lineNumber: index + 1,
+                itemCode: item.itemCode || null,
+                description: item.description,
+                ...totals
+            };
+        });
+
+        // 4.3. Calcular totales de la factura
+        const invoiceTotals = calculateInvoiceTotals(calculatedLines);
+
+        // 4.4. Determinar issuedAt
+        const finalIssuedAt = issuedAt ? new Date(issuedAt) : new Date();
+
+        // 4.5. Crear la factura (encabezado)
+        const invoice = await Invoice.create({
+            companyId,
+            sequenceId: sequence.id,
+            type,
+            ncf,
+            status: 'draft',
+            issuerRnc: company.rnc,
+            issuerName: company.name,
+            receiverRnc: receiverRnc || null,
+            receiverName: receiverName || null,
+            subtotal: invoiceTotals.subtotal,
+            itbis: invoiceTotals.itbis,
+            total: invoiceTotals.total,
+            issuedAt: finalIssuedAt
+        }, { transaction: t });
+
+        // 4.6. Crear las líneas
+        const lines = await InvoiceLine.bulkCreate(
+            calculatedLines.map((line) => ({
+                invoiceId: invoice.id,
+                lineNumber: line.lineNumber,
+                itemCode: line.itemCode,
+                description: line.description,
+                quantity: line.quantity,
+                unitPrice: line.unitPrice,
+                discount: line.discount,
+                itbisRate: line.itbisRate,
+                itbisAmount: line.itbisAmount,
+                total: line.total
+            })),
+            { transaction: t, returning: true }
+        );
+
+        // 4.7. Incrementar contador de facturas usadas del mes
+        await subscription.increment('invoicesUsedThisMonth', {
+            by: 1,
+            transaction: t
+        });
+
+        // 4.8. Audit log
+        try {
+            await AuditLog.create({
+                companyId,
+                userId: reqUser.id,
+                action: 'invoice.created',
+                entity: 'invoice',
+                entityId: invoice.id,
+                after: {
+                    ncf: invoice.ncf,
+                    type: invoice.type,
+                    total: invoice.total,
+                    lineCount: lines.length
+                },
+                ip: reqInfo.ip || null,
+                userAgent: reqInfo.userAgent || null
+            }, { transaction: t });
+        } catch (err) {
+            // Ignorar errores de audit
+        }
+
+        return { invoice, lines, sequence };
+    });
+
+    // 5. Recargar factura con sequence + lines para la respuesta
+    const fullInvoice = await Invoice.findByPk(result.invoice.id, {
+        include: [
+            {
+                model: Sequence,
+                as: 'sequence',
+                attributes: ['id', 'type', 'prefix', 'startNumber', 'endNumber', 'currentNumber', 'expiresAt', 'isActive']
+            },
+            {
+                model: InvoiceLine,
+                as: 'lines',
+                separate: true,
+                order: [['lineNumber', 'ASC']]
+            }
+        ]
+    });
+
+    return buildInvoiceResponse(fullInvoice, {
+        lineCount: fullInvoice.lines.length,
+        hideXml: false
+    });
+}
+
 module.exports = {
     listMyInvoices,
-    getMyInvoiceById
+    getMyInvoiceById,
+    createMyInvoice
 };
 
 
