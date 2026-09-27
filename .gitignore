@@ -1,15 +1,24 @@
-gitignore
-# Dependencias
+# ============================================================
+# GITIGNORE — Facturación Electrónica DGII
+# ============================================================
+
+# ============================================================
+# DEPENDENCIAS
+# ============================================================
 node_modules/
 package-lock.json
 yarn.lock
 
-# Variables de entorno (NUNCA subir)
+# ============================================================
+# VARIABLES DE ENTORNO (NUNCA subir)
+# ============================================================
 .env
 .env.local
 .env.*.local
 
-# Certificados digitales (CRÍTICO - nunca subir)
+# ============================================================
+# CERTIFICADOS DIGITALES (CRÍTICO - NUNCA subir)
+# ============================================================
 certs/
 *.p12
 *.pfx
@@ -18,12 +27,15 @@ certs/
 *.crt
 *.cer
 
-# Archivos generados por el sistema
-# Ignorar las fotos de uploads pero mantener la carpeta en el repo
+# ============================================================
+# UPLOADS (carpeta vacía se mantiene, contenido se ignora)
+# ============================================================
 uploads/*
 !.gitkeep
 
-uploads/
+# ============================================================
+# ARCHIVOS TEMPORALES, LOGS, CACHÉ
+# ============================================================
 temp/
 tmp/
 logs/
@@ -32,26 +44,42 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# XML generados (contienen datos de facturas)
+# ============================================================
+# XML GENERADOS EN RUNTIME (facturas reales - datos fiscales)
+# ============================================================
+# Ignora XMLs en el código fuente pero NO los de docs
 generated/
 xml-output/
-*.xml
-!*.example.xml
+src/**/*.xml
 
-# PDFs generados
+# ============================================================
+# PDFs GENERADOS EN RUNTIME (representaciones impresas)
+# ============================================================
+# Ignora PDFs en el código fuente pero NO los de docs
 pdf-output/
-*.pdf
+src/**/*.pdf
 
-# Backups
+# ============================================================
+# BACKUPS DE BASE DE DATOS
+# ============================================================
 backups/
-*.sql
 *.dump
 
-# Sequelize
+# ============================================================
+# SQL GENERADOS EN RUNTIME
+# ============================================================
+# Ignora SQLs en el código fuente pero NO los de docs/sql/
+src/**/*.sql
+
+# ============================================================
+# SEQUELIZE
+# ============================================================
 .sequelizerc.local
 src/db/migrations/*.js.map
 
-# IDE y editores
+# ============================================================
+# IDE Y EDITORES
+# ============================================================
 .vscode/
 .idea/
 *.swp
@@ -60,17 +88,23 @@ src/db/migrations/*.js.map
 .DS_Store
 Thumbs.db
 
-# Build y dist
+# ============================================================
+# BUILD Y DIST
+# ============================================================
 dist/
 build/
 coverage/
 .nyc_output/
 
-# Caché
+# ============================================================
+# CACHÉ
+# ============================================================
 .cache/
 .parcel-cache/
 .eslintcache
 
-# Sistema operativo
+# ============================================================
+# SISTEMA OPERATIVO
+# ============================================================
 desktop.ini
 $RECYCLE.BIN/
