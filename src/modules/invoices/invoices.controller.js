@@ -106,13 +106,26 @@ const deleteMyInvoice = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// GET /api/invoices (admin)
+// ------------------------------------------------------------
+const listAllInvoices = catchAsync(async (req, res) => {
+    const result = await invoicesService.listAllInvoices(req.validated.query);
+
+    res.json({
+        success: true,
+        data: result
+    });
+});
+
 
 module.exports = {
     listMyInvoices,
     getMyInvoiceById,
     createMyInvoice,
     updateMyInvoice,
-    deleteMyInvoice
+    deleteMyInvoice,
+    listAllInvoices
 };
 
 // Controladores planeados:

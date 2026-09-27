@@ -185,10 +185,33 @@ const updateInvoiceSchema = Joi.object({
     'any.custom': '{{#message}}'
 });
 
+// ------------------------------------------------------------
+// Schema: listar TODAS las facturas (admin)
+// ------------------------------------------------------------
+const listAllInvoicesQuerySchema = Joi.object({
+    companyId: Joi.string().uuid().optional(),
+    status: Joi.string()
+        .valid('draft', 'signed', 'sent', 'accepted', 'rejected', 'contingency')
+        .optional(),
+    type: Joi.string()
+        .valid('31', '32', '33', '34', '41', '43', '44', '45', '46', '47')
+        .optional(),
+    fromDate: Joi.date().iso().optional(),
+    toDate: Joi.date().iso().optional(),
+    receiverRnc: Joi.string().max(15).optional(),
+    ncf: Joi.string().max(20).optional(),
+    hasTrackId: Joi.boolean().truthy('true').falsy('false').optional(),
+    search: Joi.string().max(100).optional().allow(''),  // ← busca por RNC o nombre de empresa
+    page: Joi.number().integer().min(1).default(1),
+    limit: Joi.number().integer().min(1).max(100).default(50)
+});
+
+
 module.exports = {
     listInvoicesQuerySchema,
     createInvoiceSchema,
-    updateInvoiceSchema
+    updateInvoiceSchema,
+    listAllInvoicesQuerySchema
 };
 
 // Schemas planeados:

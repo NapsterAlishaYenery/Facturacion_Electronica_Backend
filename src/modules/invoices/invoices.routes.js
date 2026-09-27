@@ -19,7 +19,8 @@ const {
 const {
     listInvoicesQuerySchema,
     createInvoiceSchema,
-    updateInvoiceSchema
+    updateInvoiceSchema,
+    listAllInvoicesQuerySchema
 } = require('./invoices.validation');
 
 // Controlador
@@ -82,6 +83,20 @@ router.delete('/me/:id',
     writeLimiter,
     invoicesController.deleteMyInvoice
 );
+
+// ============================================================
+// Rutas de admin (TODAS las empresas)
+// ============================================================
+
+// GET /api/invoices — Listar todas
+router.get('/',
+    authMiddleware,
+    roleMiddleware('admin'),
+    readLimiter,
+    validate(listAllInvoicesQuerySchema, 'query'),
+    invoicesController.listAllInvoices
+);
+
 
 
 module.exports = router;
