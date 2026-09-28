@@ -471,6 +471,131 @@ function buildRFCE(rfceData) {
 }
 
 // ============================================================
+// 6. VALIDACIÓN BÁSICA DEL XML
+// ============================================================
+
+// ------------------------------------------------------------
+// Reglas mínimas por tipo de e-CF
+// No es validación XSD completa, pero atrapa errores comunes.
+// ------------------------------------------------------------
+const REQUIRED_TAGS_BY_TYPE = {
+  '31': [
+    'Version', 'TipoeCF', 'eNCF', 'FechaVencimientoSecuencia',
+    'TipoIngresos', 'TipoPago',
+    'RNCEmisor', 'RazonSocialEmisor', 'DireccionEmisor', 'FechaEmision',
+    'RNCComprador', 'RazonSocialComprador',
+    'MontoGravadoTotal', 'ITBIS1', 'TotalITBIS', 'MontoTotal',
+    'DetallesItems', 'FechaHoraFirma'
+  ],
+  '32': [
+    'Version', 'TipoeCF', 'eNCF', 'FechaVencimientoSecuencia',
+    'TipoIngresos', 'TipoPago',
+    'RNCEmisor', 'RazonSocialEmisor', 'DireccionEmisor', 'FechaEmision',
+    'MontoGravadoTotal', 'ITBIS1', 'TotalITBIS', 'MontoTotal',
+    'DetallesItems', 'FechaHoraFirma'
+  ],
+  '33': [
+    'Version', 'TipoeCF', 'eNCF', 'FechaVencimientoSecuencia',
+    'TipoIngresos', 'TipoPago',
+    'RNCEmisor', 'RazonSocialEmisor', 'DireccionEmisor', 'FechaEmision',
+    'RNCComprador', 'RazonSocialComprador',
+    'MontoGravadoTotal', 'ITBIS1', 'TotalITBIS', 'MontoTotal',
+    'DetallesItems', 'InformationReferencia', 'FechaHoraFirma'
+  ],
+  '34': [
+    'Version', 'TipoeCF', 'eNCF', 'FechaVencimientoSecuencia',
+    'TipoIngresos', 'TipoPago',
+    'RNCEmisor', 'RazonSocialEmisor', 'DireccionEmisor', 'FechaEmision',
+    'RNCComprador', 'RazonSocialComprador',
+    'MontoGravadoTotal', 'ITBIS1', 'TotalITBIS', 'MontoTotal',
+    'DetallesItems', 'InformationReferencia', 'FechaHoraFirma'
+  ]
+};
+
+// ------------------------------------------------------------
+// Validación básica del XML contra reglas mínimas
+//
+// Retorna { valid: boolean, errors: string[] }
+// ------------------------------------------------------------
+function validateAgainstXSD(xml, type) {
+  const errors = [];
+
+  // ------------------------------------------------------------
+  // 1. Verificar que el XML no esté vacío
+  // ------------------------------------------------------------
+  if (!xml || typeof xml !== 'string' || xml.trim().length === 0) {
+    return { valid: false, errors: ['XML is empty or invalid'] };
+  }
+
+  // ------------------------------------------------------------
+  // 2. Verificar declaración XML
+  // ------------------------------------------------------------
+  if (!xml.startsWith('<?xml version="1.0" encoding="UTF-8"?>')) {
+    errors.push('Missing XML declaration or wrong encoding');
+  }
+
+  // ------------------------------------------------------------
+  // 3. Verificar tipo válido
+  // ------------------------------------------------------------
+  const validTypes = ['31', '32', '33', '34', '41', '43', '44', '45', '46', '47'];
+  if (!validTypes.includes(String(type))) {
+    errors.push(`Invalid e-CF type: ${type}`);
+  }
+
+  // ------------------------------------------------------------
+  // 4. Verificar tags obligatorios según tipo
+  // ------------------------------------------------------------
+  const requiredTags = REQUIRED_TAGS_BY_TYPE[String(type)] || [];
+  for (const tag of requiredTags) {
+    const regex = new RegExp(`<${tag}[\\s>]`);
+    if (!regex.test(xml)) {
+      errors.push(`Missing required tag: <${tag}>`);
+    }
+  }
+
+  // ------------------------------------------------------------
+  // 5. Verificar que no haya tags vacíos
+  // ------------------------------------------------------------
+  if (/<([a-zA-Z0-9_:]+)(\s[^>]*)?>\s*<\/\1>/.test(xml)) {
+    errors.push('XML contains empty tags (not allowed by DGII)');
+  }
+  if (/<([a-zA-Z0-9_:]+)(\s[^>]*)?\/>/.test(xml)) {
+    errors.push('XML contains self-closing empty tags (not allowed by DGII)');
+  }
+
+  // ------------------------------------------------------------
+  // 6. Verificar que el TipoeCF coincida con el type esperado
+  // ------------------------------------------------------------
+  const tipoeCFMatch = xml.match(/<TipoeCF>(\d+)<\/TipoeCF>/);
+  if (tipoeCFMatch && tipoeCFMatch[1] !== String(type)) {
+    errors.push(`TipoeCF in XML (${tipoeCFMatch[1]}) does not match expected type (${type})`);
+  }
+
+  // ------------------------------------------------------------
+  // 7. Verificar estructura mínima de Encabezado
+  // ------------------------------------------------------------
+  if (!xml.includes('<Encabezado>') || !xml.includes('</Encabezado>')) {
+    errors.push('Missing <Encabezado> section');
+  }
+  if (!xml.includes('<DetallesItems>') || !xml.includes('</DetallesItems>')) {
+    errors.push('Missing <DetallesItems> section');
+  }
+
+  // ------------------------------------------------------------
+  // 8. Verificar que FechaHoraFirma esté presente
+  // ------------------------------------------------------------
+  if (!/<FechaHoraFirma>\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2}<\/FechaHoraFirma>/.test(xml)) {
+    errors.push('Missing or malformed <FechaHoraFirma>');
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors
+  };
+}
+
+
+// ============================================================
 // EXPORTS
 // ============================================================
 module.exports = {
@@ -480,5 +605,6 @@ module.exports = {
   extractSecurityCode,
   generateECF32,
   generateECF31,
-  buildRFCE
+  buildRFCE,
+  validateAgainstXSD
 };
