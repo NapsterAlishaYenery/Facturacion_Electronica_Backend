@@ -5,12 +5,11 @@
 // ============================================================
 
 // ============================================================
-// HELPERS INTERNOS DEL MÓDULO
+// HELPERS INTERNOS DEL MÓDULO (no se exportan)
 // ============================================================
 
 // ------------------------------------------------------------
-// Formatea una fecha a dd-MM-yyyy
-// Usa UTC para consistencia entre zonas horarias
+// Formatea una fecha a dd-MM-yyyy (UTC)
 // ------------------------------------------------------------
 function fmtDate(date) {
   if (!date) return '';
@@ -22,8 +21,7 @@ function fmtDate(date) {
 }
 
 // ------------------------------------------------------------
-// Formatea una fecha+hora a dd-MM-yyyy HH:mm:ss
-// Usa UTC para consistencia entre zonas horarias
+// Formatea una fecha+hora a dd-MM-yyyy HH:mm:ss (UTC)
 // ------------------------------------------------------------
 function fmtDateTime(date) {
   if (!date) return '';
@@ -51,6 +49,18 @@ function fmtQuantity(num) {
   return Number(num || 0).toFixed(2);
 }
 
+// ------------------------------------------------------------
+// Determina el IndicadorFacturacion según la tasa de ITBIS
+// 1: ITBIS 18%, 2: ITBIS 16%, 3: ITBIS 0%, 4: Exento, 0: No Facturable
+// ------------------------------------------------------------
+function getIndicadorFacturacion(itbisRate) {
+  if (itbisRate === null || itbisRate === undefined) return 4;
+  const rate = Number(itbisRate);
+  if (rate === 18) return 1;
+  if (rate === 16) return 2;
+  if (rate === 0) return 3;
+  return 4; // exento
+}
 
 // ============================================================
 // 1. UTILIDADES DE ESCAPADO Y LIMPIEZA XML
@@ -58,18 +68,14 @@ function fmtQuantity(num) {
 
 // ------------------------------------------------------------
 // Escapa caracteres especiales en texto para que sea seguro en XML
-// Requisito: el texto del usuario puede contener &, <, >, ", '
-// Si no se escapan, el XML queda inválido.
 // ------------------------------------------------------------
 function escapeXMLSpecialChars(text) {
   if (text === null || text === undefined) {
     return '';
   }
-
   const str = String(text);
-
   return str
-    .replace(/&/g, '&amp;')   // PRIMERO, porque las demás entidades usan &
+    .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
@@ -77,59 +83,26 @@ function escapeXMLSpecialChars(text) {
 }
 
 // ------------------------------------------------------------
-// Elimina tags vacíos del XML
-// Requisito DGII: el XML NO puede contener tags vacíos
-//   <tag></tag>  → se elimina
-//   <tag/>       → se elimina
-//   <tag>   </tag> → se elimina (solo espacios en blanco)
+// Elimina tags vacíos del XML (requisito DGII)
 // ------------------------------------------------------------
 function removeEmptyTags(xml) {
   if (!xml || typeof xml !== 'string') {
     return xml;
   }
-
-  // Iterar hasta que no haya cambios (porque eliminar un tag puede
-  // dejar el padre vacío y hay que eliminarlo también)
   let previousXml;
   let currentXml = xml;
-
   do {
     previousXml = currentXml;
-
-    // Elimina <tag></tag> y <tag>   </tag> (con espacios)
-    currentXml = currentXml.replace(
-      /<([a-zA-Z0-9_:]+)(\s[^>]*)?>\s*<\/\1>/g,
-      ''
-    );
-
-    // Elimina <tag/> (self-closing)
-    currentXml = currentXml.replace(
-      /<([a-zA-Z0-9_:]+)(\s[^>]*)?\/>/g,
-      ''
-    );
-
+    currentXml = currentXml.replace(/<([a-zA-Z0-9_:]+)(\s[^>]*)?>\s*<\/\1>/g, '');
+    currentXml = currentXml.replace(/<([a-zA-Z0-9_:]+)(\s[^>]*)?\/>/g, '');
   } while (currentXml !== previousXml);
-
   return currentXml;
 }
 
 // ============================================================
-// 2. CONSTRUCCIÓN DEL CÓDIGO QR PARA LA REPRESENTACIÓN IMPRESA
+// 2. CONSTRUCCIÓN DEL CÓDIGO QR
 // ============================================================
 
-// ------------------------------------------------------------
-// Construye la URL del código QR según especificaciones de DGII
-//
-// Para e-CF normales (31, 32, 33, 34, etc.):
-//   https://ecf.dgii.gov.do/ecf/ConsultaTimbre?...
-//
-// Para Factura de Consumo < DOP$250,000 (tipo 32):
-//   https://fc.dgii.gov.do/ecF/ConsultaTimbreFC?...
-//
-// IMPORTANTE: el CodigoSeguridad viene en Base64 y puede contener
-// caracteres especiales como + y /. Hay que codificarlos con
-// encodeURIComponent() para que no se interpreten mal.
-// ------------------------------------------------------------
 function buildQRCodeData(invoiceData) {
   const {
     issuerRnc,
@@ -138,45 +111,24 @@ function buildQRCodeData(invoiceData) {
     total,
     issuedAt,
     type,
-    signedAt,           // Fecha de firma (cuando se firmó el XML)
-    securityCode        // Primeros 6 chars del SignatureValue
+    signedAt,
+    securityCode
   } = invoiceData;
 
-  // ------------------------------------------------------------
-  // 1. Formatear fechas
-  // ------------------------------------------------------------
-
-
-  // ------------------------------------------------------------
-  // 2. Determinar si es Factura de Consumo < DOP$250,000
-  //    (usa URL de FC, no de e-CF normal)
-  // ------------------------------------------------------------
   const totalNumber = Number(total) || 0;
   const isFC = type === '32' && totalNumber < 250000;
-
-  // ------------------------------------------------------------
-  // 3. Formatear monto (siempre con 2 decimales)
-  // ------------------------------------------------------------
   const formattedTotal = totalNumber.toFixed(2);
 
-  // ------------------------------------------------------------
-  // 4. Construir la URL según el tipo
-  // ------------------------------------------------------------
   if (isFC) {
-    // Factura de Consumo < DOP$250,000
-    // Parámetros: RncEmisor, ENCF, MontoTotal, CodigoSeguridad
     const params = [
       `RncEmisor=${encodeURIComponent(issuerRnc)}`,
       `ENCF=${encodeURIComponent(ncf)}`,
       `MontoTotal=${encodeURIComponent(formattedTotal)}`,
       `CodigoSeguridad=${encodeURIComponent(securityCode || '')}`
     ].join('&');
-
     return `https://fc.dgii.gov.do/ecf/ConsultaTimbreFC?${params}`;
   }
 
-  // e-CF normal (31, 32 > 250K, 33, 34, 41, 43, 44, 45, 46, 47)
-  // Parámetros: RncEmisor, RncComprador, ENCF, FechaEmision, MontoTotal, FechaFirma, CodigoSeguridad
   const params = [
     `RncEmisor=${encodeURIComponent(issuerRnc)}`,
     `RncComprador=${encodeURIComponent(receiverRnc || '')}`,
@@ -186,15 +138,9 @@ function buildQRCodeData(invoiceData) {
     `FechaFirma=${encodeURIComponent(fmtDateTime(signedAt))}`,
     `CodigoSeguridad=${encodeURIComponent(securityCode || '')}`
   ].join('&');
-
   return `https://ecf.dgii.gov.do/ecf/ConsultaTimbre?${params}`;
 }
 
-// ------------------------------------------------------------
-// Extrae los primeros 6 caracteres del SignatureValue
-// El SignatureValue viene en Base64 dentro del XML firmado.
-// Se usa como CodigoSeguridad en el QR.
-// ------------------------------------------------------------
 function extractSecurityCode(signatureValue) {
   if (!signatureValue || typeof signatureValue !== 'string') {
     return '';
@@ -203,60 +149,74 @@ function extractSecurityCode(signatureValue) {
 }
 
 // ============================================================
-// 3. GENERADOR DE XML PARA e-CF 32 (Factura de Consumo)
+// 3. CONSTRUCTOR BASE DE e-CF (reutilizable por todos los tipos)
 // ============================================================
 
 // ------------------------------------------------------------
-// Genera el XML completo para un e-CF tipo 32
-// NO firma. Solo construye la estructura.
-// La firma se agrega en el Step 12 (módulo dgii).
+// Construye el cuerpo XML de un e-CF
+//
+// options:
+//   - type: '32' | '31' | '33' | '34' | etc.
+//   - requireReceiver: boolean (si true, exige RNC + Razón Social)
+//
+// Retorna el string XML sin firmar.
 // ------------------------------------------------------------
-function generateECF32(invoiceData) {
+function buildECFBody(invoiceData, options) {
+  const { type, requireReceiver } = options;
+
   const {
     // IdDoc
     ncf,
-    sequenceExpiresAt,      // Fecha de vencimiento de la secuencia
+    sequenceExpiresAt,
     // Emisor
     issuerRnc,
     issuerName,
-    issuerTradeName,        // Opcional
+    issuerTradeName,
     issuerAddress,
-    issuerMunicipio,        // Código de la Tabla III
-    issuerProvincia,        // Código de la Tabla III
-    issuerPhone,            // Opcional
-    issuerEmail,            // Opcional
-    issuerWebsite,          // Opcional
-    issuerEconomicActivity, // Opcional
+    issuerMunicipio,
+    issuerProvincia,
+    issuerPhone,
+    issuerEmail,
+    issuerWebsite,
+    issuerEconomicActivity,
     // Comprador
     receiverRnc,
     receiverName,
     // Pago
-    paymentType = 1,        // 1: Contado, 2: Crédito, 3: Gratuito
-    paymentDeadline,        // Solo si paymentType = 2
-    paymentTerms,           // Texto libre: "30 días", "1 semana"
-    paymentMethods = [],    // [{ method: 1, amount: 1180.00 }]
+    paymentType = 1,
+    paymentDeadline,
+    paymentTerms,
+    paymentMethods = [],
     // Fechas
     issuedAt,
     // Totales
-    subtotal,               // Base gravada 18%
-    itbis,                  // ITBIS total
+    subtotal,
+    itbis,
     total,
     // Líneas
-    lines,                  // Array de items
+    lines,
     // Totales por tasa
-    itbis1Base,             // Base ITBIS 18%
-    itbis1Amount,           // ITBIS 18% monto
-    itbis2Base,             // Base ITBIS 16% (opcional)
-    itbis2Amount,           // ITBIS 16% monto (opcional)
-    itbis3Base,             // Base ITBIS 0% (opcional)
-    exemptAmount            // Monto exento (opcional)
+    itbis1Base,
+    itbis1Amount,
+    itbis2Base,
+    itbis2Amount,
+    itbis3Base,
+    exemptAmount
   } = invoiceData;
 
-  // ------------------------------------------------------------
-  // Helpers locales
-  // ------------------------------------------------------------
   const esc = escapeXMLSpecialChars;
 
+  // ------------------------------------------------------------
+  // Validación de comprador
+  // ------------------------------------------------------------
+  if (requireReceiver) {
+    if (!receiverRnc) {
+      throw new Error(`RNC Comprador is required for e-CF type ${type}`);
+    }
+    if (!receiverName) {
+      throw new Error(`Razón Social Comprador is required for e-CF type ${type}`);
+    }
+  }
 
   // ------------------------------------------------------------
   // Calcular totales de tasas
@@ -278,7 +238,7 @@ function generateECF32(invoiceData) {
   <Encabezado>
     <Version>1.0</Version>
     <IdDoc>
-      <TipoeCF>32</TipoeCF>
+      <TipoeCF>${type}</TipoeCF>
       <eNCF>${esc(ncf)}</eNCF>
       <FechaVencimientoSecuencia>${fmtDate(sequenceExpiresAt)}</FechaVencimientoSecuencia>
       <IndicadorMontoGravado>0</IndicadorMontoGravado>
@@ -342,16 +302,9 @@ function generateECF32(invoiceData) {
     const quantity = Number(line.quantity);
     const unitPrice = Number(line.unitPrice);
     const discount = Number(line.discount || 0);
-    const itbisRate = Number(line.itbisRate || 0);
+    const itbisRate = line.itbisRate;
     const montoItem = (quantity * unitPrice) - discount;
-
-    // Indicador de facturación según ITBIS
-    let indicadorFacturacion = 1;
-    if (itbisRate === 18) indicadorFacturacion = 1;
-    else if (itbisRate === 16) indicadorFacturacion = 2;
-    else if (itbisRate === 0) indicadorFacturacion = 3;
-    else if (itbisRate === null || itbisRate === undefined) indicadorFacturacion = 4;
-    // Si el usuario marca "exento" → 4
+    const indicadorFacturacion = getIndicadorFacturacion(itbisRate);
 
     return `
     <Item>
@@ -376,31 +329,58 @@ function generateECF32(invoiceData) {
   </DetallesItems>`;
 
   // ------------------------------------------------------------
-  // 3. FECHA Y HORA DE FIRMA (se completa en el Step 12)
+  // 3. FECHA Y HORA DE FIRMA (placeholder)
   // ------------------------------------------------------------
-  // La dejamos como placeholder para que el firmador la reemplace
   const fechaHoraFirma = `
-  <FechaHoraFirma>${fmtDate(new Date())} ${new Date().toTimeString().substring(0, 8)}</FechaHoraFirma>`;
+  <FechaHoraFirma>${fmtDateTime(new Date())}</FechaHoraFirma>`;
 
   // ------------------------------------------------------------
-  // 4. ARMAR EL XML COMPLETO
+  // 4. ARMAR XML
   // ------------------------------------------------------------
   let xml = `<?xml version="1.0" encoding="UTF-8"?>
 <ECF>${encabezado}${detallesItems}${fechaHoraFirma}
 </ECF>`;
 
   // ------------------------------------------------------------
-  // 5. LIMPIAR TAGS VACÍOS (requisito DGII)
+  // 5. LIMPIAR TAGS VACÍOS
   // ------------------------------------------------------------
   xml = removeEmptyTags(xml);
 
   return xml;
 }
 
+// ============================================================
+// 4. GENERADORES POR TIPO (wrappers ligeros)
+// ============================================================
+
+// ------------------------------------------------------------
+// Genera XML para e-CF 32 (Factura de Consumo)
+// ------------------------------------------------------------
+function generateECF32(invoiceData) {
+  return buildECFBody(invoiceData, {
+    type: '32',
+    requireReceiver: false // RNC comprador opcional en FC < 250K
+  });
+}
+
+// ------------------------------------------------------------
+// Genera XML para e-CF 31 (Factura de Crédito Fiscal)
+// ------------------------------------------------------------
+function generateECF31(invoiceData) {
+  return buildECFBody(invoiceData, {
+    type: '31',
+    requireReceiver: true // RNC + Razón Social obligatorios
+  });
+}
+
+// ============================================================
+// EXPORTS
+// ============================================================
 module.exports = {
   escapeXMLSpecialChars,
   removeEmptyTags,
   buildQRCodeData,
   extractSecurityCode,
-  generateECF32
+  generateECF32,
+  generateECF31
 };
