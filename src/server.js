@@ -18,6 +18,7 @@ const authRoutes = require('./modules/auth/auth.routes');
 const companiesRoutes = require('./modules/companies/companies.routes');
 const sequencesRoutes = require('./modules/sequences/sequences.routes');
 const invoicesRoutes = require('./modules/invoices/invoices.routes');
+const dgiiRoutes = require('./modules/dgii/dgii.routes');
 
 //Importar Middlewatres globales propios
 const { errorMiddleware, notFoundMiddleware } = require('./shared/middlewares/error.middleware');
@@ -63,7 +64,8 @@ app.get('/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/companies', companiesRoutes);
 app.use('/api/sequences', sequencesRoutes);
-app.use('/api/invoices', invoicesRoutes)
+app.use('/api/invoices', invoicesRoutes);
+app.use('/api/dgii', dgiiRoutes);
 
 
 // Middleware global de errores
