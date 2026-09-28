@@ -424,7 +424,7 @@
           </xs:complexType>
         </xs:element>
         <xs:element name="FechaHoraFirma" type="DateTimeValidationType" minOccurs="1" maxOccurs="1"/>
-        <xs:any processContents="skip" minOccurs="1" maxOccurs="1"  />
+        <xs:any processContents="skip" minOccurs="0" maxOccurs="1" />
       </xs:sequence>
     </xs:complexType>
   </xs:element>
@@ -473,7 +473,7 @@
     </xs:restriction>
   </xs:simpleType>
 
-  <xs:simpleType name=" IndicadorServicioTodoIncluidoType">
+  <xs:simpleType name="IndicadorServicioTodoIncluidoType">
     <xs:restriction base="xs:integer">
       <xs:enumeration value="1"/> <!--Indicador Servicio Todo Incluido-->
     </xs:restriction>

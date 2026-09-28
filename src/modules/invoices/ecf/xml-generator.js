@@ -1,102 +1,96 @@
 // ============================================================
-// Generador de XML para e-CF (Comprobantes Fiscales Electrónicos)
-// Este módulo es invocado por invoices.service.js
-// NO es un módulo HTTP. NO tiene rutas ni controladores.
+// LIBRERÍAS
 // ============================================================
+const fs = require('fs');
+const path = require('path');
+const libxml = require('libxmljs2');
 
 // ============================================================
 // HELPERS INTERNOS DEL MÓDULO (no se exportan)
 // ============================================================
 
-// ------------------------------------------------------------
-// Formatea una fecha a dd-MM-yyyy (UTC)
-// ------------------------------------------------------------
 function fmtDate(date) {
-  if (!date) return '';
-  const d = new Date(date);
-  const day = String(d.getUTCDate()).padStart(2, '0');
-  const month = String(d.getUTCMonth() + 1).padStart(2, '0');
-  const year = d.getUTCFullYear();
-  return `${day}-${month}-${year}`;
+    if (!date) return '';
+    const d = new Date(date);
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const year = d.getUTCFullYear();
+    return `${day}-${month}-${year}`;
 }
 
-// ------------------------------------------------------------
-// Formatea una fecha+hora a dd-MM-yyyy HH:mm:ss (UTC)
-// ------------------------------------------------------------
 function fmtDateTime(date) {
-  if (!date) return '';
-  const d = new Date(date);
-  const day = String(d.getUTCDate()).padStart(2, '0');
-  const month = String(d.getUTCMonth() + 1).padStart(2, '0');
-  const year = d.getUTCFullYear();
-  const hours = String(d.getUTCHours()).padStart(2, '0');
-  const minutes = String(d.getUTCMinutes()).padStart(2, '0');
-  const seconds = String(d.getUTCSeconds()).padStart(2, '0');
-  return `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
+    if (!date) return '';
+    const d = new Date(date);
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const year = d.getUTCFullYear();
+    const hours = String(d.getUTCHours()).padStart(2, '0');
+    const minutes = String(d.getUTCMinutes()).padStart(2, '0');
+    const seconds = String(d.getUTCSeconds()).padStart(2, '0');
+    return `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
 }
 
-// ------------------------------------------------------------
-// Formatea un monto a 2 decimales con punto
-// ------------------------------------------------------------
 function fmtMoney(num) {
-  return Number(num || 0).toFixed(2);
+    return Number(num || 0).toFixed(2);
 }
 
-// ------------------------------------------------------------
-// Formatea una cantidad a 2 decimales con punto
-// ------------------------------------------------------------
 function fmtQuantity(num) {
-  return Number(num || 0).toFixed(2);
+    return Number(num || 0).toFixed(2);
 }
 
-// ------------------------------------------------------------
-// Determina el IndicadorFacturacion según la tasa de ITBIS
-// 1: ITBIS 18%, 2: ITBIS 16%, 3: ITBIS 0%, 4: Exento, 0: No Facturable
-// ------------------------------------------------------------
 function getIndicadorFacturacion(itbisRate) {
-  if (itbisRate === null || itbisRate === undefined) return 4;
-  const rate = Number(itbisRate);
-  if (rate === 18) return 1;
-  if (rate === 16) return 2;
-  if (rate === 0) return 3;
-  return 4; // exento
+    if (itbisRate === null || itbisRate === undefined) return 4;
+    const rate = Number(itbisRate);
+    if (rate === 18) return 1;
+    if (rate === 16) return 2;
+    if (rate === 0) return 3;
+    return 4;
 }
 
 // ============================================================
 // 1. UTILIDADES DE ESCAPADO Y LIMPIEZA XML
 // ============================================================
 
-// ------------------------------------------------------------
-// Escapa caracteres especiales en texto para que sea seguro en XML
-// ------------------------------------------------------------
 function escapeXMLSpecialChars(text) {
-  if (text === null || text === undefined) {
-    return '';
-  }
-  const str = String(text);
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
+    if (text === null || text === undefined) return '';
+    const str = String(text);
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&apos;');
 }
 
 // ------------------------------------------------------------
-// Elimina tags vacíos del XML (requisito DGII)
+// Elimina tags vacíos del XML (requisito DGII).
+// EXCEPCIÓN: preserva <Comprador> aunque esté vacío porque el XSD
+// lo exige como contenedor obligatorio (minOccurs="1").
 // ------------------------------------------------------------
 function removeEmptyTags(xml) {
-  if (!xml || typeof xml !== 'string') {
-    return xml;
-  }
-  let previousXml;
-  let currentXml = xml;
-  do {
-    previousXml = currentXml;
-    currentXml = currentXml.replace(/<([a-zA-Z0-9_:]+)(\s[^>]*)?>\s*<\/\1>/g, '');
-    currentXml = currentXml.replace(/<([a-zA-Z0-9_:]+)(\s[^>]*)?\/>/g, '');
-  } while (currentXml !== previousXml);
-  return currentXml;
+    if (!xml || typeof xml !== 'string') return xml;
+
+    const PRESERVE_EMPTY = ['Comprador'];
+    const preservePattern = PRESERVE_EMPTY.join('|');
+
+    const emptyTagRegex = new RegExp(
+        `<(?!(?:${preservePattern})\\b)([a-zA-Z0-9_:]+)(\\s[^>]*)?>\\s*<\\/\\1>`,
+        'g'
+    );
+    const selfClosingRegex = new RegExp(
+        `<(?!(?:${preservePattern})\\b)([a-zA-Z0-9_:]+)(\\s[^>]*)?\\/>`,
+        'g'
+    );
+
+    let previousXml;
+    let currentXml = xml;
+    do {
+        previousXml = currentXml;
+        currentXml = currentXml.replace(emptyTagRegex, '');
+        currentXml = currentXml.replace(selfClosingRegex, '');
+    } while (currentXml !== previousXml);
+
+    return currentXml;
 }
 
 // ============================================================
@@ -104,143 +98,124 @@ function removeEmptyTags(xml) {
 // ============================================================
 
 function buildQRCodeData(invoiceData) {
-  const {
-    issuerRnc,
-    ncf,
-    receiverRnc,
-    total,
-    issuedAt,
-    type,
-    signedAt,
-    securityCode
-  } = invoiceData;
+    const {
+        issuerRnc,
+        ncf,
+        receiverRnc,
+        total,
+        issuedAt,
+        type,
+        signedAt,
+        securityCode
+    } = invoiceData;
 
-  const totalNumber = Number(total) || 0;
-  const isFC = type === '32' && totalNumber < 250000;
-  const formattedTotal = totalNumber.toFixed(2);
+    const totalNumber = Number(total) || 0;
+    const isFC = type === '32' && totalNumber < 250000;
+    const formattedTotal = totalNumber.toFixed(2);
 
-  if (isFC) {
+    if (isFC) {
+        const params = [
+            `RncEmisor=${encodeURIComponent(issuerRnc)}`,
+            `ENCF=${encodeURIComponent(ncf)}`,
+            `MontoTotal=${encodeURIComponent(formattedTotal)}`,
+            `CodigoSeguridad=${encodeURIComponent(securityCode || '')}`
+        ].join('&');
+        return `https://fc.dgii.gov.do/ecf/ConsultaTimbreFC?${params}`;
+    }
+
     const params = [
-      `RncEmisor=${encodeURIComponent(issuerRnc)}`,
-      `ENCF=${encodeURIComponent(ncf)}`,
-      `MontoTotal=${encodeURIComponent(formattedTotal)}`,
-      `CodigoSeguridad=${encodeURIComponent(securityCode || '')}`
+        `RncEmisor=${encodeURIComponent(issuerRnc)}`,
+        `RncComprador=${encodeURIComponent(receiverRnc || '')}`,
+        `ENCF=${encodeURIComponent(ncf)}`,
+        `FechaEmision=${encodeURIComponent(fmtDate(issuedAt))}`,
+        `MontoTotal=${encodeURIComponent(formattedTotal)}`,
+        `FechaFirma=${encodeURIComponent(fmtDateTime(signedAt))}`,
+        `CodigoSeguridad=${encodeURIComponent(securityCode || '')}`
     ].join('&');
-    return `https://fc.dgii.gov.do/ecf/ConsultaTimbreFC?${params}`;
-  }
-
-  const params = [
-    `RncEmisor=${encodeURIComponent(issuerRnc)}`,
-    `RncComprador=${encodeURIComponent(receiverRnc || '')}`,
-    `ENCF=${encodeURIComponent(ncf)}`,
-    `FechaEmision=${encodeURIComponent(fmtDate(issuedAt))}`,
-    `MontoTotal=${encodeURIComponent(formattedTotal)}`,
-    `FechaFirma=${encodeURIComponent(fmtDateTime(signedAt))}`,
-    `CodigoSeguridad=${encodeURIComponent(securityCode || '')}`
-  ].join('&');
-  return `https://ecf.dgii.gov.do/ecf/ConsultaTimbre?${params}`;
+    return `https://ecf.dgii.gov.do/ecf/ConsultaTimbre?${params}`;
 }
 
 function extractSecurityCode(signatureValue) {
-  if (!signatureValue || typeof signatureValue !== 'string') {
-    return '';
-  }
-  return signatureValue.substring(0, 6);
+    if (!signatureValue || typeof signatureValue !== 'string') return '';
+    return signatureValue.substring(0, 6);
 }
 
 // ============================================================
 // 3. CONSTRUCTOR BASE DE e-CF (reutilizable por todos los tipos)
 // ============================================================
 
-// ------------------------------------------------------------
-// Construye el cuerpo XML de un e-CF
-//
-// options:
-//   - type: '32' | '31' | '33' | '34' | etc.
-//   - requireReceiver: boolean (si true, exige RNC + Razón Social)
-//
-// Retorna el string XML sin firmar.
-// ------------------------------------------------------------
 function buildECFBody(invoiceData, options) {
-  const { type, requireReceiver } = options;
+    const { type, requireReceiver } = options;
+    const is31 = String(type) === '31';
 
-  const {
-    // IdDoc
-    ncf,
-    sequenceExpiresAt,
-    // Emisor
-    issuerRnc,
-    issuerName,
-    issuerTradeName,
-    issuerAddress,
-    issuerMunicipio,
-    issuerProvincia,
-    issuerPhone,
-    issuerEmail,
-    issuerWebsite,
-    issuerEconomicActivity,
-    // Comprador
-    receiverRnc,
-    receiverName,
-    // Pago
-    paymentType = 1,
-    paymentDeadline,
-    paymentTerms,
-    paymentMethods = [],
-    // Fechas
-    issuedAt,
-    // Totales
-    subtotal,
-    itbis,
-    total,
-    // Líneas
-    lines,
-    // Totales por tasa
-    itbis1Base,
-    itbis1Amount,
-    itbis2Base,
-    itbis2Amount,
-    itbis3Base,
-    exemptAmount
-  } = invoiceData;
+    const {
+        ncf,
+        sequenceExpiresAt,
+        issuerRnc,
+        issuerName,
+        issuerTradeName,
+        issuerAddress,
+        issuerMunicipio,
+        issuerProvincia,
+        issuerPhone,
+        issuerEmail,
+        issuerWebsite,
+        issuerEconomicActivity,
+        receiverRnc,
+        receiverName,
+        paymentType = 1,
+        paymentDeadline,
+        paymentTerms,
+        paymentMethods = [],
+        issuedAt,
+        subtotal,
+        itbis,
+        total,
+        lines,
+        itbis1Base,
+        itbis1Amount,
+        itbis2Base,
+        itbis2Amount,
+        itbis3Base,
+        exemptAmount
+    } = invoiceData;
 
-  const esc = escapeXMLSpecialChars;
+    const esc = escapeXMLSpecialChars;
 
-  // ------------------------------------------------------------
-  // Validación de comprador
-  // ------------------------------------------------------------
-  if (requireReceiver) {
-    if (!receiverRnc) {
-      throw new Error(`RNC Comprador is required for e-CF type ${type}`);
+    if (requireReceiver) {
+        if (!receiverRnc) throw new Error(`RNC Comprador is required for e-CF type ${type}`);
+        if (!receiverName) throw new Error(`Razón Social Comprador is required for e-CF type ${type}`);
     }
-    if (!receiverName) {
-      throw new Error(`Razón Social Comprador is required for e-CF type ${type}`);
-    }
-  }
 
-  // ------------------------------------------------------------
-  // Calcular totales de tasas
-  // ------------------------------------------------------------
-  const base18 = Number(itbis1Base || subtotal || 0);
-  const amount18 = Number(itbis1Amount || itbis || 0);
-  const base16 = Number(itbis2Base || 0);
-  const amount16 = Number(itbis2Amount || 0);
-  const base0 = Number(itbis3Base || 0);
-  const exempt = Number(exemptAmount || 0);
+    const base18 = Number(itbis1Base || subtotal || 0);
+    const amount18 = Number(itbis1Amount || itbis || 0);
+    const base16 = Number(itbis2Base || 0);
+    const amount16 = Number(itbis2Amount || 0);
+    const base0 = Number(itbis3Base || 0);
+    const exempt = Number(exemptAmount || 0);
 
-  const montoGravadoTotal = base18 + base16 + base0;
-  const totalITBIS = amount18 + amount16;
+    const montoGravadoTotal = base18 + base16 + base0;
+    const totalITBIS = amount18 + amount16;
 
-  // ------------------------------------------------------------
-  // 1. ENCABEZADO
-  // ------------------------------------------------------------
-  const encabezado = `
+    // FechaVencimientoSecuencia solo existe en e-CF 31
+    const fechaVencimientoSecuencia = is31
+        ? `<FechaVencimientoSecuencia>${fmtDate(sequenceExpiresAt)}</FechaVencimientoSecuencia>`
+        : '';
+
+    // Comprador: contenedor obligatorio en ambos tipos (XSD minOccurs=1)
+    const compradorBlock = `
+    <Comprador>
+      ${receiverRnc ? `<RNCComprador>${esc(receiverRnc)}</RNCComprador>` : ''}
+      ${receiverName ? `<RazonSocialComprador>${esc(receiverName)}</RazonSocialComprador>` : ''}
+    </Comprador>`;
+
+    const encabezado = `
   <Encabezado>
     <Version>1.0</Version>
     <IdDoc>
       <TipoeCF>${type}</TipoeCF>
       <eNCF>${esc(ncf)}</eNCF>
-      <FechaVencimientoSecuencia>${fmtDate(sequenceExpiresAt)}</FechaVencimientoSecuencia>
+      ${fechaVencimientoSecuencia}
       <IndicadorMontoGravado>0</IndicadorMontoGravado>
       <TipoIngresos>01</TipoIngresos>
       <TipoPago>${paymentType}</TipoPago>
@@ -270,12 +245,7 @@ function buildECFBody(invoiceData, options) {
       ${issuerWebsite ? `<WebSite>${esc(issuerWebsite)}</WebSite>` : ''}
       ${issuerEconomicActivity ? `<ActividadEconomica>${esc(issuerEconomicActivity)}</ActividadEconomica>` : ''}
       <FechaEmision>${fmtDate(issuedAt)}</FechaEmision>
-    </Emisor>
-    ${(receiverRnc || receiverName) ? `
-    <Comprador>
-      ${receiverRnc ? `<RNCComprador>${esc(receiverRnc)}</RNCComprador>` : ''}
-      ${receiverName ? `<RazonSocialComprador>${esc(receiverName)}</RazonSocialComprador>` : ''}
-    </Comprador>` : ''}
+    </Emisor>${compradorBlock}
     <Totales>
       <MontoGravadoTotal>${fmtMoney(montoGravadoTotal)}</MontoGravadoTotal>
       <MontoGravadoI1>${fmtMoney(base18)}</MontoGravadoI1>
@@ -292,21 +262,18 @@ function buildECFBody(invoiceData, options) {
     </Totales>
   </Encabezado>`;
 
-  // ------------------------------------------------------------
-  // 2. DETALLE DE ITEMS
-  // ------------------------------------------------------------
-  const detallesItems = `
+    const detallesItems = `
   <DetallesItems>
     ${lines.map((line, index) => {
-    const lineNumber = line.lineNumber || (index + 1);
-    const quantity = Number(line.quantity);
-    const unitPrice = Number(line.unitPrice);
-    const discount = Number(line.discount || 0);
-    const itbisRate = line.itbisRate;
-    const montoItem = (quantity * unitPrice) - discount;
-    const indicadorFacturacion = getIndicadorFacturacion(itbisRate);
+        const lineNumber = line.lineNumber || (index + 1);
+        const quantity = Number(line.quantity);
+        const unitPrice = Number(line.unitPrice);
+        const discount = Number(line.discount || 0);
+        const itbisRate = line.itbisRate;
+        const montoItem = (quantity * unitPrice) - discount;
+        const indicadorFacturacion = getIndicadorFacturacion(itbisRate);
 
-    return `
+        return `
     <Item>
       <NumeroLinea>${lineNumber}</NumeroLinea>
       <IndicadorFacturacion>${indicadorFacturacion}</IndicadorFacturacion>
@@ -325,116 +292,72 @@ function buildECFBody(invoiceData, options) {
       ${discount > 0 ? `<DescuentoMonto>${fmtMoney(discount)}</DescuentoMonto>` : ''}
       <MontoItem>${fmtMoney(montoItem)}</MontoItem>
     </Item>`;
-  }).join('')}
+    }).join('')}
   </DetallesItems>`;
 
-  // ------------------------------------------------------------
-  // 3. FECHA Y HORA DE FIRMA (placeholder)
-  // ------------------------------------------------------------
-  const fechaHoraFirma = `
+    const fechaHoraFirma = `
   <FechaHoraFirma>${fmtDateTime(new Date())}</FechaHoraFirma>`;
 
-  // ------------------------------------------------------------
-  // 4. ARMAR XML
-  // ------------------------------------------------------------
-  let xml = `<?xml version="1.0" encoding="UTF-8"?>
+    let xml = `<?xml version="1.0" encoding="UTF-8"?>
 <ECF>${encabezado}${detallesItems}${fechaHoraFirma}
 </ECF>`;
 
-  // ------------------------------------------------------------
-  // 5. LIMPIAR TAGS VACÍOS
-  // ------------------------------------------------------------
-  xml = removeEmptyTags(xml);
-
-  return xml;
+    xml = removeEmptyTags(xml);
+    return xml;
 }
 
 // ============================================================
-// 4. GENERADORES POR TIPO (wrappers ligeros)
+// 4. GENERADORES POR TIPO
 // ============================================================
 
-// ------------------------------------------------------------
-// Genera XML para e-CF 32 (Factura de Consumo)
-// ------------------------------------------------------------
 function generateECF32(invoiceData) {
-  return buildECFBody(invoiceData, {
-    type: '32',
-    requireReceiver: false // RNC comprador opcional en FC < 250K
-  });
+    return buildECFBody(invoiceData, { type: '32', requireReceiver: false });
 }
 
-// ------------------------------------------------------------
-// Genera XML para e-CF 31 (Factura de Crédito Fiscal)
-// ------------------------------------------------------------
 function generateECF31(invoiceData) {
-  return buildECFBody(invoiceData, {
-    type: '31',
-    requireReceiver: true // RNC + Razón Social obligatorios
-  });
+    return buildECFBody(invoiceData, { type: '31', requireReceiver: true });
 }
-
 
 // ============================================================
 // 5. GENERADOR DE RFCE (Resumen de Factura de Consumo)
 // ============================================================
 
-// ------------------------------------------------------------
-// Genera el XML del Resumen de Factura de Consumo Electrónica
-// Consolida todas las FC < DOP$250,000 de un período
-// ------------------------------------------------------------
 function buildRFCE(rfceData) {
-  const {
-    issuerRnc,
-    issuerName,
-    periodFrom,
-    periodTo,
-    issuedAt,
-    invoices
-  } = rfceData;
+    const { issuerRnc, issuerName, periodFrom, periodTo, issuedAt, invoices } = rfceData;
+    const esc = escapeXMLSpecialChars;
 
-  const esc = escapeXMLSpecialChars;
+    if (!invoices || invoices.length === 0) {
+        throw new Error('RFCE requires at least one invoice');
+    }
 
-  // ------------------------------------------------------------
-  // Validaciones
-  // ------------------------------------------------------------
-  if (!invoices || invoices.length === 0) {
-    throw new Error('RFCE requires at least one invoice');
-  }
+    let totalMontoGravado = 0;
+    let totalITBIS = 0;
+    let totalMonto = 0;
 
-  // ------------------------------------------------------------
-  // Calcular totales consolidados
-  // ------------------------------------------------------------
-  let totalMontoGravado = 0;
-  let totalITBIS = 0;
-  let totalMonto = 0;
+    for (const inv of invoices) {
+        const base18 = Number(inv.itbis1Base || 0);
+        const base16 = Number(inv.itbis2Base || 0);
+        const base0 = Number(inv.itbis3Base || 0);
+        const amount18 = Number(inv.itbis1Amount || 0);
+        const amount16 = Number(inv.itbis2Amount || 0);
+        const invTotal = Number(inv.total || 0);
 
-  for (const inv of invoices) {
-    const base18 = Number(inv.itbis1Base || 0);
-    const base16 = Number(inv.itbis2Base || 0);
-    const base0 = Number(inv.itbis3Base || 0);
-    const amount18 = Number(inv.itbis1Amount || 0);
-    const amount16 = Number(inv.itbis2Amount || 0);
-    const invTotal = Number(inv.total || 0);
+        totalMontoGravado += base18 + base16 + base0;
+        totalITBIS += amount18 + amount16;
+        totalMonto += invTotal;
+    }
 
-    totalMontoGravado += base18 + base16 + base0;
-    totalITBIS += amount18 + amount16;
-    totalMonto += invTotal;
-  }
+    const detalleECF = invoices.map(inv => {
+        const base18 = Number(inv.itbis1Base || 0);
+        const base16 = Number(inv.itbis2Base || 0);
+        const base0 = Number(inv.itbis3Base || 0);
+        const amount18 = Number(inv.itbis1Amount || 0);
+        const amount16 = Number(inv.itbis2Amount || 0);
 
-  // ------------------------------------------------------------
-  // Construir XML
-  // ------------------------------------------------------------
-  const detalleECF = invoices.map(inv => {
-    const base18 = Number(inv.itbis1Base || 0);
-    const base16 = Number(inv.itbis2Base || 0);
-    const base0 = Number(inv.itbis3Base || 0);
-    const amount18 = Number(inv.itbis1Amount || 0);
-    const amount16 = Number(inv.itbis2Amount || 0);
+        const montoGravado = base18 + base16 + base0;
+        const itbis = amount18 + amount16;
 
-    const montoGravado = base18 + base16 + base0;
-    const itbis = amount18 + amount16;
-
-    return `
+        return `
     <ECFResumen>
       <eNCF>${esc(inv.ncf)}</eNCF>
       <FechaEmision>${fmtDate(inv.issuedAt)}</FechaEmision>
@@ -442,9 +365,9 @@ function buildRFCE(rfceData) {
       <ITBIS>${fmtMoney(itbis)}</ITBIS>
       <MontoTotal>${fmtMoney(inv.total)}</MontoTotal>
     </ECFResumen>`;
-  }).join('');
+    }).join('');
 
-  let xml = `<?xml version="1.0" encoding="UTF-8"?>
+    let xml = `<?xml version="1.0" encoding="UTF-8"?>
 <RFCE>
   <Encabezado>
     <Version>1.0</Version>
@@ -466,145 +389,136 @@ function buildRFCE(rfceData) {
   <FechaHoraFirma>${fmtDateTime(new Date())}</FechaHoraFirma>
 </RFCE>`;
 
-  xml = removeEmptyTags(xml);
-  return xml;
+    xml = removeEmptyTags(xml);
+    return xml;
 }
 
 // ============================================================
-// 6. VALIDACIÓN BÁSICA DEL XML
+// 6. VALIDACIÓN CONTRA XSD OFICIAL DE DGII
 // ============================================================
 
-// ------------------------------------------------------------
-// Reglas mínimas por tipo de e-CF
-// No es validación XSD completa, pero atrapa errores comunes.
-// ------------------------------------------------------------
-const REQUIRED_TAGS_BY_TYPE = {
-  '31': [
-    'Version', 'TipoeCF', 'eNCF', 'FechaVencimientoSecuencia',
-    'TipoIngresos', 'TipoPago',
-    'RNCEmisor', 'RazonSocialEmisor', 'DireccionEmisor', 'FechaEmision',
-    'RNCComprador', 'RazonSocialComprador',
-    'MontoGravadoTotal', 'ITBIS1', 'TotalITBIS', 'MontoTotal',
-    'DetallesItems', 'FechaHoraFirma'
-  ],
-  '32': [
-    'Version', 'TipoeCF', 'eNCF', 'FechaVencimientoSecuencia',
-    'TipoIngresos', 'TipoPago',
-    'RNCEmisor', 'RazonSocialEmisor', 'DireccionEmisor', 'FechaEmision',
-    'MontoGravadoTotal', 'ITBIS1', 'TotalITBIS', 'MontoTotal',
-    'DetallesItems', 'FechaHoraFirma'
-  ],
-  '33': [
-    'Version', 'TipoeCF', 'eNCF', 'FechaVencimientoSecuencia',
-    'TipoIngresos', 'TipoPago',
-    'RNCEmisor', 'RazonSocialEmisor', 'DireccionEmisor', 'FechaEmision',
-    'RNCComprador', 'RazonSocialComprador',
-    'MontoGravadoTotal', 'ITBIS1', 'TotalITBIS', 'MontoTotal',
-    'DetallesItems', 'InformationReferencia', 'FechaHoraFirma'
-  ],
-  '34': [
-    'Version', 'TipoeCF', 'eNCF', 'FechaVencimientoSecuencia',
-    'TipoIngresos', 'TipoPago',
-    'RNCEmisor', 'RazonSocialEmisor', 'DireccionEmisor', 'FechaEmision',
-    'RNCComprador', 'RazonSocialComprador',
-    'MontoGravadoTotal', 'ITBIS1', 'TotalITBIS', 'MontoTotal',
-    'DetallesItems', 'InformationReferencia', 'FechaHoraFirma'
-  ]
+const XSD_PATH_BY_TYPE = {
+    '31': 'docs/dgii/xsd/ecf31/e-CF 31 v.1.0.xsd',
+    '32': 'docs/dgii/xsd/ecf32/e-CF 32 v.1.0.xsd',
+    '33': 'docs/dgii/xsd/ecf33/e-CF 33 v.1.0.xsd',
+    '34': 'docs/dgii/xsd/ecf34/e-CF 34 v.1.0.xsd',
+    '41': 'docs/dgii/xsd/ecf41/e-CF 41 v.1.0.xsd',
+    '43': 'docs/dgii/xsd/ecf43/e-CF 43 v.1.0.xsd',
+    '44': 'docs/dgii/xsd/ecf44/e-CF 44 v.1.0.xsd',
+    '45': 'docs/dgii/xsd/ecf45/e-CF 45 v.1.0.xsd',
+    '46': 'docs/dgii/xsd/ecf46/e-CF 46 v.1.0.xsd',
+    '47': 'docs/dgii/xsd/ecf47/e-CF 47 v.1.0.xsd'
 };
 
-// ------------------------------------------------------------
-// Validación básica del XML contra reglas mínimas
-//
-// Retorna { valid: boolean, errors: string[] }
-// ------------------------------------------------------------
-function validateAgainstXSD(xml, type) {
-  const errors = [];
+const xsdCache = {};
 
-  // ------------------------------------------------------------
-  // 1. Verificar que el XML no esté vacío
-  // ------------------------------------------------------------
-  if (!xml || typeof xml !== 'string' || xml.trim().length === 0) {
-    return { valid: false, errors: ['XML is empty or invalid'] };
-  }
+function loadXSD(type) {
+    const typeStr = String(type);
+    if (xsdCache[typeStr]) return xsdCache[typeStr];
 
-  // ------------------------------------------------------------
-  // 2. Verificar declaración XML
-  // ------------------------------------------------------------
-  if (!xml.startsWith('<?xml version="1.0" encoding="UTF-8"?>')) {
-    errors.push('Missing XML declaration or wrong encoding');
-  }
+    const xsdPath = XSD_PATH_BY_TYPE[typeStr];
+    if (!xsdPath) throw new Error(`No XSD configured for type ${typeStr}`);
 
-  // ------------------------------------------------------------
-  // 3. Verificar tipo válido
-  // ------------------------------------------------------------
-  const validTypes = ['31', '32', '33', '34', '41', '43', '44', '45', '46', '47'];
-  if (!validTypes.includes(String(type))) {
-    errors.push(`Invalid e-CF type: ${type}`);
-  }
+    const fullPath = path.resolve(process.cwd(), xsdPath);
+    if (!fs.existsSync(fullPath)) throw new Error(`XSD not found: ${fullPath}`);
 
-  // ------------------------------------------------------------
-  // 4. Verificar tags obligatorios según tipo
-  // ------------------------------------------------------------
-  const requiredTags = REQUIRED_TAGS_BY_TYPE[String(type)] || [];
-  for (const tag of requiredTags) {
-    const regex = new RegExp(`<${tag}[\\s>]`);
-    if (!regex.test(xml)) {
-      errors.push(`Missing required tag: <${tag}>`);
+    const rawBuffer = fs.readFileSync(fullPath);
+    const hasBOM = rawBuffer.length >= 3 &&
+        rawBuffer[0] === 0xef && rawBuffer[1] === 0xbb && rawBuffer[2] === 0xbf;
+
+    let xsdContent = rawBuffer.toString('utf8');
+    if (hasBOM) xsdContent = xsdContent.replace(/^\uFEFF/, '');
+
+    let xsdDoc;
+    try {
+        xsdDoc = libxml.parseXml(xsdContent);
+    } catch (parseErr) {
+        const firstChars = xsdContent.slice(0, 60).replace(/\n/g, '\\n');
+        const detail = [
+            `Failed to parse XSD for type ${typeStr}`,
+            `  path: ${fullPath}`,
+            `  hasBOM: ${hasBOM}`,
+            `  bytes: ${rawBuffer.length}`,
+            `  firstChars: "${firstChars}"`,
+            `  originalError: ${parseErr.message}`
+        ].join('\n');
+        throw new Error(detail);
     }
-  }
 
-  // ------------------------------------------------------------
-  // 5. Verificar que no haya tags vacíos
-  // ------------------------------------------------------------
-  if (/<([a-zA-Z0-9_:]+)(\s[^>]*)?>\s*<\/\1>/.test(xml)) {
-    errors.push('XML contains empty tags (not allowed by DGII)');
-  }
-  if (/<([a-zA-Z0-9_:]+)(\s[^>]*)?\/>/.test(xml)) {
-    errors.push('XML contains self-closing empty tags (not allowed by DGII)');
-  }
-
-  // ------------------------------------------------------------
-  // 6. Verificar que el TipoeCF coincida con el type esperado
-  // ------------------------------------------------------------
-  const tipoeCFMatch = xml.match(/<TipoeCF>(\d+)<\/TipoeCF>/);
-  if (tipoeCFMatch && tipoeCFMatch[1] !== String(type)) {
-    errors.push(`TipoeCF in XML (${tipoeCFMatch[1]}) does not match expected type (${type})`);
-  }
-
-  // ------------------------------------------------------------
-  // 7. Verificar estructura mínima de Encabezado
-  // ------------------------------------------------------------
-  if (!xml.includes('<Encabezado>') || !xml.includes('</Encabezado>')) {
-    errors.push('Missing <Encabezado> section');
-  }
-  if (!xml.includes('<DetallesItems>') || !xml.includes('</DetallesItems>')) {
-    errors.push('Missing <DetallesItems> section');
-  }
-
-  // ------------------------------------------------------------
-  // 8. Verificar que FechaHoraFirma esté presente
-  // ------------------------------------------------------------
-  if (!/<FechaHoraFirma>\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2}<\/FechaHoraFirma>/.test(xml)) {
-    errors.push('Missing or malformed <FechaHoraFirma>');
-  }
-
-  return {
-    valid: errors.length === 0,
-    errors
-  };
+    xsdCache[typeStr] = xsdDoc;
+    return xsdDoc;
 }
 
+function validateBasicPreChecks(xml, type) {
+    const errors = [];
+
+    if (!xml || typeof xml !== 'string' || xml.trim().length === 0) {
+        return { valid: false, errors: ['XML is empty or invalid'] };
+    }
+
+    if (!xml.startsWith('<?xml version="1.0" encoding="UTF-8"?>')) {
+        errors.push('Missing XML declaration or wrong encoding');
+    }
+
+    const validTypes = ['31', '32', '33', '34', '41', '43', '44', '45', '46', '47'];
+    if (!validTypes.includes(String(type))) {
+        errors.push(`Invalid e-CF type: ${type}`);
+    }
+
+    return { valid: errors.length === 0, errors };
+}
+
+function validateAgainstXSD(xml, type) {
+    const preCheck = validateBasicPreChecks(xml, type);
+    if (!preCheck.valid) return preCheck;
+
+    let xmlDoc;
+    try {
+        xmlDoc = libxml.parseXml(xml);
+    } catch (parseError) {
+        return { valid: false, errors: [`XML parse error: ${parseError.message}`] };
+    }
+
+    let xsdDoc;
+    try {
+        xsdDoc = loadXSD(type);
+    } catch (xsdError) {
+        return { valid: false, errors: [`XSD load error: ${xsdError.message}`] };
+    }
+
+    let isValid;
+    try {
+        isValid = xmlDoc.validate(xsdDoc);
+    } catch (validationError) {
+        return { valid: false, errors: [`XSD validation threw: ${validationError.message}`] };
+    }
+
+    const errors = [];
+    if (!isValid) {
+        for (const err of xmlDoc.validationErrors) {
+            errors.push((err.message || '').trim());
+        }
+    }
+
+    return { valid: isValid, errors };
+}
+
+function clearXSDCache() {
+    for (const key of Object.keys(xsdCache)) delete xsdCache[key];
+}
 
 // ============================================================
 // EXPORTS
 // ============================================================
 module.exports = {
-  escapeXMLSpecialChars,
-  removeEmptyTags,
-  buildQRCodeData,
-  extractSecurityCode,
-  generateECF32,
-  generateECF31,
-  buildRFCE,
-  validateAgainstXSD
+    escapeXMLSpecialChars,
+    removeEmptyTags,
+    buildQRCodeData,
+    extractSecurityCode,
+    generateECF32,
+    generateECF31,
+    buildRFCE,
+    buildECFBody,
+    validateAgainstXSD,
+    clearXSDCache
 };

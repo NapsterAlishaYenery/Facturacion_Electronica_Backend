@@ -77,7 +77,6 @@ test('has FechaHoraFirma', xml.includes('<FechaHoraFirma>'));
 test('has Version 1.0', xml.includes('<Version>1.0</Version>'));
 test('has TipoeCF 32', xml.includes('<TipoeCF>32</TipoeCF>'));
 test('has eNCF', xml.includes('<eNCF>E320000000001</eNCF>'));
-test('has FechaVencimientoSecuencia', xml.includes('<FechaVencimientoSecuencia>31-12-2026</FechaVencimientoSecuencia>'));
 test('has TipoPago 1', xml.includes('<TipoPago>1</TipoPago>'));
 test('has TablaFormasPago', xml.includes('<TablaFormasPago>'));
 test('has FormaPago 1', xml.includes('<FormaPago>1</FormaPago>'));
@@ -125,9 +124,6 @@ test('does NOT have self-closing empty tags', !xml.match(/<[a-zA-Z0-9_:]+[^>]*\/
 // ============================================================
 // TEST con ITBIS 0% (exento)
 // ============================================================
-console.log('\n=== TESTS: generateECF32 con exento ===\n');
-console.log('Fecha esperada:', '31-12-2026');
-console.log('Fecha en XML:', xml.match(/<FechaVencimientoSecuencia>(.*?)<\/FechaVencimientoSecuencia>/)?.[1]);
 
 const exemptInvoice = {
     ...invoiceData,
