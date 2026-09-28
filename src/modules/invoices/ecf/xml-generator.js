@@ -373,6 +373,103 @@ function generateECF31(invoiceData) {
   });
 }
 
+
+// ============================================================
+// 5. GENERADOR DE RFCE (Resumen de Factura de Consumo)
+// ============================================================
+
+// ------------------------------------------------------------
+// Genera el XML del Resumen de Factura de Consumo Electrónica
+// Consolida todas las FC < DOP$250,000 de un período
+// ------------------------------------------------------------
+function buildRFCE(rfceData) {
+  const {
+    issuerRnc,
+    issuerName,
+    periodFrom,
+    periodTo,
+    issuedAt,
+    invoices
+  } = rfceData;
+
+  const esc = escapeXMLSpecialChars;
+
+  // ------------------------------------------------------------
+  // Validaciones
+  // ------------------------------------------------------------
+  if (!invoices || invoices.length === 0) {
+    throw new Error('RFCE requires at least one invoice');
+  }
+
+  // ------------------------------------------------------------
+  // Calcular totales consolidados
+  // ------------------------------------------------------------
+  let totalMontoGravado = 0;
+  let totalITBIS = 0;
+  let totalMonto = 0;
+
+  for (const inv of invoices) {
+    const base18 = Number(inv.itbis1Base || 0);
+    const base16 = Number(inv.itbis2Base || 0);
+    const base0 = Number(inv.itbis3Base || 0);
+    const amount18 = Number(inv.itbis1Amount || 0);
+    const amount16 = Number(inv.itbis2Amount || 0);
+    const invTotal = Number(inv.total || 0);
+
+    totalMontoGravado += base18 + base16 + base0;
+    totalITBIS += amount18 + amount16;
+    totalMonto += invTotal;
+  }
+
+  // ------------------------------------------------------------
+  // Construir XML
+  // ------------------------------------------------------------
+  const detalleECF = invoices.map(inv => {
+    const base18 = Number(inv.itbis1Base || 0);
+    const base16 = Number(inv.itbis2Base || 0);
+    const base0 = Number(inv.itbis3Base || 0);
+    const amount18 = Number(inv.itbis1Amount || 0);
+    const amount16 = Number(inv.itbis2Amount || 0);
+
+    const montoGravado = base18 + base16 + base0;
+    const itbis = amount18 + amount16;
+
+    return `
+    <ECFResumen>
+      <eNCF>${esc(inv.ncf)}</eNCF>
+      <FechaEmision>${fmtDate(inv.issuedAt)}</FechaEmision>
+      <MontoGravado>${fmtMoney(montoGravado)}</MontoGravado>
+      <ITBIS>${fmtMoney(itbis)}</ITBIS>
+      <MontoTotal>${fmtMoney(inv.total)}</MontoTotal>
+    </ECFResumen>`;
+  }).join('');
+
+  let xml = `<?xml version="1.0" encoding="UTF-8"?>
+<RFCE>
+  <Encabezado>
+    <Version>1.0</Version>
+    <IdDoc>
+      <TipoeCF>32</TipoeCF>
+      <RNCEmisor>${esc(issuerRnc)}</RNCEmisor>
+      <RazonSocialEmisor>${esc(issuerName)}</RazonSocialEmisor>
+      <PeriodoDesde>${fmtDate(periodFrom)}</PeriodoDesde>
+      <PeriodoHasta>${fmtDate(periodTo)}</PeriodoHasta>
+      <FechaEmision>${fmtDate(issuedAt)}</FechaEmision>
+      <TotalMontoGravado>${fmtMoney(totalMontoGravado)}</TotalMontoGravado>
+      <TotalITBIS>${fmtMoney(totalITBIS)}</TotalITBIS>
+      <TotalMonto>${fmtMoney(totalMonto)}</TotalMonto>
+      <CantidadECF>${invoices.length}</CantidadECF>
+    </IdDoc>
+  </Encabezado>
+  <DetalleECF>${detalleECF}
+  </DetalleECF>
+  <FechaHoraFirma>${fmtDateTime(new Date())}</FechaHoraFirma>
+</RFCE>`;
+
+  xml = removeEmptyTags(xml);
+  return xml;
+}
+
 // ============================================================
 // EXPORTS
 // ============================================================
@@ -382,5 +479,6 @@ module.exports = {
   buildQRCodeData,
   extractSecurityCode,
   generateECF32,
-  generateECF31
+  generateECF31,
+  buildRFCE
 };
