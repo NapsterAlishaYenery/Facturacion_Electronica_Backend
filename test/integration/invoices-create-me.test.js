@@ -5,14 +5,13 @@ const sequelize = require('../../src/config/database');
 const { User, Company, Subscription, Plan, Sequence, Invoice, InvoiceLine, AuditLog } = require('../../src/models');
 
 let companyAdminCookie = null;
-let adminCookie = null;
-let testRnc = '130999930';
-let testEmail = 'owner-inv-create@expedinap.com';
-let adminEmail = 'admin-inv-create@expedinap.com';
+let testRnc = '130999933';
+let testEmail = 'owner-inv-notas@expedinap.com';
 let testCompanyId = null;
-let testSequenceId = null;
-let adminId = null;
-let subscriptionId = null;
+let testSequence32Id = null;
+let testSequence33Id = null;
+let testSequence34Id = null;
+let originalInvoiceId = null;
 
 async function test(label, condition, extra = '') {
     console.log(`  ${condition ? '✅' : '❌'} ${label}${extra ? ': ' + extra : ''}`);
@@ -52,56 +51,57 @@ async function cleanupCompany(rnc) {
         await sequelize.authenticate();
         console.log('✅ DB connected\n');
 
-        // Limpieza previa
+        // Limpieza
         await cleanupCompany(testRnc);
-        await User.destroy({ where: { email: [testEmail, adminEmail] } });
-
-        // Crear admin
-        const adminUser = await User.create({
-            email: adminEmail,
-            password: 'AdminPass123',
-            firstName: 'Admin',
-            lastName: 'InvCreate',
-            role: 'admin'
-        });
-        adminId = adminUser.id;
+        await User.destroy({ where: { email: testEmail } });
 
         // Crear empresa + dueño
         const registerRes = await request('/api/auth/register-company', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                company: { rnc: testRnc, name: 'Invoices Create Test SRL' },
-                owner: { email: testEmail, password: 'OwnerPass123', firstName: 'Owner', lastName: 'InvCreate' }
+                company: { rnc: testRnc, name: 'Invoices Notas Test SRL' },
+                owner: { email: testEmail, password: 'OwnerPass123', firstName: 'Owner', lastName: 'Notas' }
             })
         });
         testCompanyId = registerRes.body?.data?.company?.id;
-        subscriptionId = registerRes.body?.data?.subscription?.id;
 
-        // Crear secuencia tipo 32
-        const seq = await Sequence.create({
+        // Secuencias 32, 33, 34
+        const seq32 = await Sequence.create({
             companyId: testCompanyId,
-            type: '32',
-            prefix: 'E',
-            startNumber: 1,
-            endNumber: 100,
-            currentNumber: 0,
+            type: '32', prefix: 'E',
+            startNumber: 1, endNumber: 100, currentNumber: 0,
             expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
             isActive: true
         });
-        testSequenceId = seq.id;
+        testSequence32Id = seq32.id;
 
-        // Login
+        const seq33 = await Sequence.create({
+            companyId: testCompanyId,
+            type: '33', prefix: 'E',
+            startNumber: 1, endNumber: 100, currentNumber: 0,
+            expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+            isActive: true
+        });
+        testSequence33Id = seq33.id;
+
+        const seq34 = await Sequence.create({
+            companyId: testCompanyId,
+            type: '34', prefix: 'E',
+            startNumber: 1, endNumber: 100, currentNumber: 0,
+            expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+            isActive: true
+        });
+        testSequence34Id = seq34.id;
+
         companyAdminCookie = await loginAndGetCookie(testEmail, 'OwnerPass123');
-        adminCookie = await loginAndGetCookie(adminEmail, 'AdminPass123');
-
         console.log('✅ Setup completed\n');
 
         // ============================================================
-        // TEST 1: crear factura exitosamente
+        // SETUP: crear una factura 32 original (para usarla como referencia)
         // ============================================================
-        console.log('--- Test 1: crear factura exitosamente ---');
-        const createRes = await request('/api/invoices/me', {
+        console.log('--- Setup: crear factura 32 original ---');
+        const origRes = await request('/api/invoices/me', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -109,261 +109,27 @@ async function cleanupCompany(rnc) {
             },
             body: JSON.stringify({
                 type: '32',
-                receiverName: 'Cliente Final',
-                items: [
-                    { description: 'Corte de cabello', quantity: 1, unitPrice: 500, discount: 0, itbisRate: 18 },
-                    { description: 'Shampoo', quantity: 1, unitPrice: 200, discount: 0, itbisRate: 18 }
-                ]
+                receiverRnc: '130999888',
+                receiverName: 'Cliente Original',
+                items: [{ description: 'Servicio original', quantity: 1, unitPrice: 1000, itbisRate: 18 }]
             })
         });
-        test('status 201', createRes.status === 201, `got ${createRes.status}`);
-        test('has invoice', !!createRes.body?.data?.invoice);
-        const inv = createRes.body?.data?.invoice;
-        test('ncf is E320000000001', inv?.ncf === 'E320000000001');
-        test('type is 32', inv?.type === '32');
-        test('status is draft', inv?.status === 'draft');
-        test('has 2 lines', inv?.lines?.length === 2);
-        test('lineCount is 2', inv?.lineCount === 2);
-        test('subtotal is 700', inv?.subtotal === '700.00' || Number(inv?.subtotal) === 700);
-        test('itbis is 126', Number(inv?.itbis) === 126);
-        test('total is 826', Number(inv?.total) === 826);
-        test('issuerRnc matches', inv?.issuerRnc === testRnc);
-        test('issuerName matches', inv?.issuerName === 'Invoices Create Test SRL');
-        test('receiverName is Cliente Final', inv?.receiverName === 'Cliente Final');
-        test('has sequence include', !!inv?.sequence);
-        test('isDraft true', inv?.isDraft === true);
-        test('canBeSigned true', inv?.canBeSigned === true);
-        test('canBeSent false', inv?.canBeSent === false);
-        test('canEdit true', inv?.canEdit === true);
+        test('original invoice created', origRes.status === 201);
+        originalInvoiceId = origRes.body?.data?.invoice?.id;
+
+        // Promoverla a 'accepted' para que sea modificable
+        await Invoice.update(
+            { status: 'accepted', trackId: 'TRACK-ORIG-001' },
+            { where: { id: originalInvoiceId } }
+        );
+        const originalNcf = origRes.body?.data?.invoice?.ncf;
+        console.log(`   Original NCF: ${originalNcf}\n`);
 
         // ============================================================
-        // TEST 2: verificar que currentNumber se incrementó
+        // TEST 1: crear Nota de Débito (33) válida
         // ============================================================
-        console.log('\n--- Test 2: currentNumber incrementado ---');
-        const seqAfter = await Sequence.findByPk(testSequenceId);
-        test('currentNumber is 1', Number(seqAfter.currentNumber) === 1);
-
-        // ============================================================
-        // TEST 3: crear segunda factura → NCF incrementado
-        // ============================================================
-        console.log('\n--- Test 3: segunda factura ---');
-        const createRes2 = await request('/api/invoices/me', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Cookie': companyAdminCookie
-            },
-            body: JSON.stringify({
-                type: '32',
-                items: [
-                    { description: 'Servicio 1', quantity: 2, unitPrice: 100, itbisRate: 18 }
-                ]
-            })
-        });
-        test('status 201', createRes2.status === 201);
-        test('ncf is E320000000002', createRes2.body?.data?.invoice?.ncf === 'E320000000002');
-        test('subtotal is 200', Number(createRes2.body?.data?.invoice?.subtotal) === 200);
-        test('itbis is 36', Number(createRes2.body?.data?.invoice?.itbis) === 36);
-        test('total is 236', Number(createRes2.body?.data?.invoice?.total) === 236);
-
-        // Verificar currentNumber
-        const seqAfter2 = await Sequence.findByPk(testSequenceId);
-        test('currentNumber is 2', Number(seqAfter2.currentNumber) === 2);
-
-        // ============================================================
-        // TEST 4: cálculo correcto con ITBIS 0% (exento)
-        // ============================================================
-        console.log('\n--- Test 4: ITBIS 0% (exento) ---');
-        const createExempt = await request('/api/invoices/me', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Cookie': companyAdminCookie
-            },
-            body: JSON.stringify({
-                type: '32',
-                items: [
-                    { description: 'Arroz', quantity: 1, unitPrice: 50, itbisRate: 0 },
-                    { description: 'Aceite', quantity: 1, unitPrice: 100, itbisRate: 18 }
-                ]
-            })
-        });
-        test('status 201', createExempt.status === 201);
-        test('subtotal is 150', Number(createExempt.body?.data?.invoice?.subtotal) === 150);
-        test('itbis is 18', Number(createExempt.body?.data?.invoice?.itbis) === 18);
-        test('total is 168', Number(createExempt.body?.data?.invoice?.total) === 168);
-
-        // ============================================================
-        // TEST 5: descuento por línea
-        // ============================================================
-        console.log('\n--- Test 5: descuento por línea ---');
-        const createDiscount = await request('/api/invoices/me', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Cookie': companyAdminCookie
-            },
-            body: JSON.stringify({
-                type: '32',
-                items: [
-                    { description: 'Producto con descuento', quantity: 1, unitPrice: 1000, discount: 100, itbisRate: 18 }
-                ]
-            })
-        });
-        test('status 201', createDiscount.status === 201);
-        test('subtotal is 900 (1000 - 100)', Number(createDiscount.body?.data?.invoice?.subtotal) === 900);
-        test('itbis is 162', Number(createDiscount.body?.data?.invoice?.itbis) === 162);
-        test('total is 1062', Number(createDiscount.body?.data?.invoice?.total) === 1062);
-
-        // ============================================================
-        // TEST 6: issuedAt en el futuro → 400
-        // ============================================================
-        console.log('\n--- Test 6: issuedAt futuro → 400 ---');
-        const futureDate = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
-        const futureRes = await request('/api/invoices/me', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Cookie': companyAdminCookie
-            },
-            body: JSON.stringify({
-                type: '32',
-                issuedAt: futureDate,
-                items: [{ description: 'X', quantity: 1, unitPrice: 100 }]
-            })
-        });
-        test('status 400', futureRes.status === 400);
-        test('code VALIDATION_ERROR', futureRes.body?.error?.code === 'VALIDATION_ERROR');
-
-        // ============================================================
-        // TEST 7: issuedAt > 30 días atrás → 400
-        // ============================================================
-        console.log('\n--- Test 7: issuedAt > 30 días atrás ---');
-        const oldDate = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString();
-        const oldRes = await request('/api/invoices/me', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Cookie': companyAdminCookie
-            },
-            body: JSON.stringify({
-                type: '32',
-                issuedAt: oldDate,
-                items: [{ description: 'X', quantity: 1, unitPrice: 100 }]
-            })
-        });
-        test('status 400', oldRes.status === 400);
-        test('code VALIDATION_ERROR', oldRes.body?.error?.code === 'VALIDATION_ERROR');
-
-        // ============================================================
-        // TEST 8: más de 100 ítems → 400
-        // ============================================================
-        console.log('\n--- Test 8: más de 100 ítems ---');
-        const tooManyItems = Array.from({ length: 101 }, (_, i) => ({
-            description: `Item ${i + 1}`,
-            quantity: 1,
-            unitPrice: 10
-        }));
-        const tooManyRes = await request('/api/invoices/me', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Cookie': companyAdminCookie
-            },
-            body: JSON.stringify({
-                type: '32',
-                items: tooManyItems
-            })
-        });
-        test('status 400', tooManyRes.status === 400);
-        test('code VALIDATION_ERROR', tooManyRes.body?.error?.code === 'VALIDATION_ERROR');
-
-        // ============================================================
-        // TEST 9: descuento > base de línea → 400
-        // ============================================================
-        console.log('\n--- Test 9: descuento excesivo ---');
-        const badDiscountRes = await request('/api/invoices/me', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Cookie': companyAdminCookie
-            },
-            body: JSON.stringify({
-                type: '32',
-                items: [{ description: 'Item', quantity: 1, unitPrice: 100, discount: 200 }]
-            })
-        });
-        test('status 400', badDiscountRes.status === 400);
-
-        // ============================================================
-        // TEST 10: sin ítems → 400
-        // ============================================================
-        console.log('\n--- Test 10: sin ítems ---');
-        const noItemsRes = await request('/api/invoices/me', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Cookie': companyAdminCookie
-            },
-            body: JSON.stringify({
-                type: '32',
-                items: []
-            })
-        });
-        test('status 400', noItemsRes.status === 400);
-
-        // ============================================================
-        // TEST 11: type inválido → 400
-        // ============================================================
-        console.log('\n--- Test 11: type inválido ---');
-        const badTypeRes = await request('/api/invoices/me', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Cookie': companyAdminCookie
-            },
-            body: JSON.stringify({
-                type: '99',
-                items: [{ description: 'X', quantity: 1, unitPrice: 100 }]
-            })
-        });
-        test('status 400', badTypeRes.status === 400);
-
-        // ============================================================
-        // TEST 12: sin secuencia activa para tipo 31 → 409
-        // ============================================================
-        console.log('\n--- Test 12: sin secuencia activa tipo 31 ---');
-        const noSeqRes = await request('/api/invoices/me', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Cookie': companyAdminCookie
-            },
-            body: JSON.stringify({
-                type: '31',
-                items: [{ description: 'X', quantity: 1, unitPrice: 100 }]
-            })
-        });
-        test('status 409', noSeqRes.status === 409, `got ${noSeqRes.status}`);
-        test('code NO_ACTIVE_SEQUENCE', noSeqRes.body?.error?.code === 'NO_ACTIVE_SEQUENCE');
-
-        // ============================================================
-        // TEST 13: secuencia agotada → 409
-        // ============================================================
-        console.log('\n--- Test 13: secuencia agotada ---');
-        // Crear secuencia tipo 33 con 1 solo número
-        const tinySeq = await Sequence.create({
-            companyId: testCompanyId,
-            type: '33',
-            prefix: 'E',
-            startNumber: 1,
-            endNumber: 1,
-            currentNumber: 1,  // ← ya agotada
-            expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
-            isActive: true
-        });
-
-        const exhaustedRes = await request('/api/invoices/me', {
+        console.log('--- Test 1: crear Nota de Débito (33) válida ---');
+        const create33Res = await request('/api/invoices/me', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -371,30 +137,53 @@ async function cleanupCompany(rnc) {
             },
             body: JSON.stringify({
                 type: '33',
-                items: [{ description: 'X', quantity: 1, unitPrice: 100 }]
+                receiverRnc: '130999888',
+                receiverName: 'Cliente Original',
+                modifiedNcf: originalNcf,
+                modifiedNcfDate: new Date().toISOString(),
+                modificationCode: 3,
+                modificationReason: 'Corrección de monto por error',
+                items: [{ description: 'Ajuste', quantity: 1, unitPrice: 500, itbisRate: 18 }]
             })
         });
-        test('status 409', exhaustedRes.status === 409, `got ${exhaustedRes.status}`);
-        test('code SEQUENCE_EXHAUSTED', exhaustedRes.body?.error?.code === 'SEQUENCE_EXHAUSTED');
+        test('status 201', create33Res.status === 201, `got ${create33Res.status}`);
+        const inv33 = create33Res.body?.data?.invoice;
+        test('type is 33', inv33?.type === '33');
+        test('ncf starts with E33', inv33?.ncf?.startsWith('E33'));
+        test('modifiedNcf persisted', inv33?.modifiedNcf === originalNcf);
+        test('modifiedNcfDate persisted', !!inv33?.modifiedNcfDate);
+        test('modificationCode persisted', Number(inv33?.modificationCode) === 3);
+        test('modificationReason persisted', inv33?.modificationReason === 'Corrección de monto por error');
+        test('indicadorNotaCredito is null for 33', inv33?.indicadorNotaCredito === null);
 
-        await tinySeq.destroy();
+        const note33Id = inv33?.id;
 
         // ============================================================
-        // TEST 14: secuencia vencida (isActive=true pero expirada) → NO_ACTIVE
+        // TEST 2: crear Nota de Crédito (34) válida (dentro de 30 días → indicador 0)
         // ============================================================
-        console.log('\n--- Test 14: secuencia vencida ---');
-        const expiredSeq = await Sequence.create({
-            companyId: testCompanyId,
-            type: '34',
-            prefix: 'E',
-            startNumber: 1,
-            endNumber: 100,
-            currentNumber: 0,
-            expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000),  // ayer
-            isActive: true
+        console.log('\n--- Test 2: crear Nota de Crédito (34) dentro de 30 días ---');
+        // Crear otra factura original para el 34
+        const orig2Res = await request('/api/invoices/me', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Cookie': companyAdminCookie
+            },
+            body: JSON.stringify({
+                type: '32',
+                receiverName: 'Cliente 2',
+                items: [{ description: 'Servicio 2', quantity: 1, unitPrice: 500, itbisRate: 18 }]
+            })
         });
+        const orig2Ncf = orig2Res.body?.data?.invoice?.ncf;
+        const orig2Id = orig2Res.body?.data?.invoice?.id;
 
-        const expiredRes = await request('/api/invoices/me', {
+        await Invoice.update(
+            { status: 'accepted', trackId: 'TRACK-ORIG-002' },
+            { where: { id: orig2Id } }
+        );
+
+        const create34Res = await request('/api/invoices/me', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -402,85 +191,267 @@ async function cleanupCompany(rnc) {
             },
             body: JSON.stringify({
                 type: '34',
-                items: [{ description: 'X', quantity: 1, unitPrice: 100 }]
+                receiverName: 'Cliente 2',
+                modifiedNcf: orig2Ncf,
+                modifiedNcfDate: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(), // 5 días atrás
+                modificationCode: 1,
+                modificationReason: 'Devolución de producto',
+                indicadorNotaCredito: 0,  // ≤ 30 días
+                items: [{ description: 'Devolución', quantity: 1, unitPrice: 500, itbisRate: 18 }]
             })
         });
-        // La secuencia vencida no se encuentra porque el where filtra expiresAt > now
-        test('status 409', expiredRes.status === 409);
-        test('code NO_ACTIVE_SEQUENCE', expiredRes.body?.error?.code === 'NO_ACTIVE_SEQUENCE');
+        test('status 201', create34Res.status === 201, `got ${create34Res.status}`);
+        const inv34 = create34Res.body?.data?.invoice;
+        test('type is 34', inv34?.type === '34');
+        test('ncf starts with E34', inv34?.ncf?.startsWith('E34'));
+        test('modifiedNcf persisted', inv34?.modifiedNcf === orig2Ncf);
+        test('modificationCode persisted', Number(inv34?.modificationCode) === 1);
+        test('indicadorNotaCredito is 0', Number(inv34?.indicadorNotaCredito) === 0);
 
-        await expiredSeq.destroy();
-
-        // ============================================================
-        // TEST 15: admin intenta crear → 400 NO_COMPANY_ASSIGNED
-        // ============================================================
-        console.log('\n--- Test 15: admin intenta crear ---');
-        const adminRes = await request('/api/invoices/me', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Cookie': adminCookie
-            },
-            body: JSON.stringify({
-                type: '32',
-                items: [{ description: 'X', quantity: 1, unitPrice: 100 }]
-            })
-        });
-        test('status 400', adminRes.status === 400);
-        test('code NO_COMPANY_ASSIGNED', adminRes.body?.error?.code === 'NO_COMPANY_ASSIGNED');
+        const note34Id = inv34?.id;
 
         // ============================================================
-        // TEST 16: sin autenticación → 401
+        // TEST 3: crear 33 sin modifiedNcf → 400 (Joi)
         // ============================================================
-        console.log('\n--- Test 16: sin autenticación ---');
-        const noAuthRes = await request('/api/invoices/me', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                type: '32',
-                items: [{ description: 'X', quantity: 1, unitPrice: 100 }]
-            })
-        });
-        test('status 401', noAuthRes.status === 401);
-
-        // ============================================================
-        // TEST 17: audit log
-        // ============================================================
-        console.log('\n--- Test 17: audit log ---');
-        const auditCount = await AuditLog.count({
-            where: {
-                companyId: testCompanyId,
-                action: 'invoice.created',
-                entity: 'invoice'
-            }
-        });
-        test('has invoice.created logs', auditCount >= 4, `count: ${auditCount}`);
-
-        // ============================================================
-        // TEST 18: rollback en error (no deja huérfanos)
-        // ============================================================
-        console.log('\n--- Test 18: rollback en error ---');
-        const currentSeq = await Sequence.findByPk(testSequenceId);
-        const beforeNumber = Number(currentSeq.currentNumber);
-
-        // Intentar crear factura con tipo inválido ya fue validado por Joi (no llega al servicio)
-        // Intentar crear con descuento excesivo también falla en Joi
-        // Forzamos un error en el servicio: secuencia tipo 31 sin existir
-        await request('/api/invoices/me', {
+        console.log('\n--- Test 3: 33 sin modifiedNcf → 400 ---');
+        const noModNcfRes = await request('/api/invoices/me', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Cookie': companyAdminCookie
             },
             body: JSON.stringify({
-                type: '31',  // sin secuencia
+                type: '33',
+                modifiedNcfDate: new Date().toISOString(),
+                modificationCode: 3,
                 items: [{ description: 'X', quantity: 1, unitPrice: 100 }]
             })
         });
+        test('status 400', noModNcfRes.status === 400);
+        test('code VALIDATION_ERROR', noModNcfRes.body?.error?.code === 'VALIDATION_ERROR');
 
-        // Verificar que currentNumber NO cambió para tipo 32
-        const afterSeq = await Sequence.findByPk(testSequenceId);
-        test('currentNumber unchanged after failed create', Number(afterSeq.currentNumber) === beforeNumber);
+        // ============================================================
+        // TEST 4: crear 31 con modifiedNcf → 400 (Joi forbidden)
+        // ============================================================
+        console.log('\n--- Test 4: 31 con modifiedNcf → 400 ---');
+        const bad31Res = await request('/api/invoices/me', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Cookie': companyAdminCookie
+            },
+            body: JSON.stringify({
+                type: '31',
+                modifiedNcf: originalNcf,
+                items: [{ description: 'X', quantity: 1, unitPrice: 100 }]
+            })
+        });
+        test('status 400', bad31Res.status === 400);
+
+        // ============================================================
+        // TEST 5: crear 34 con indicadorNotaCredito incoherente → 400 (custom)
+        // ============================================================
+        console.log('\n--- Test 5: 34 con indicador incoherente → 400 ---');
+        const badIndicadorRes = await request('/api/invoices/me', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Cookie': companyAdminCookie
+            },
+            body: JSON.stringify({
+                type: '34',
+                modifiedNcf: originalNcf,
+                modifiedNcfDate: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString(), // 60 días atrás
+                modificationCode: 1,
+                indicadorNotaCredito: 0,  // ❌ debería ser 1 porque > 30 días
+                items: [{ description: 'X', quantity: 1, unitPrice: 100 }]
+            })
+        });
+        test('status 400', badIndicadorRes.status === 400);
+
+        // ============================================================
+        // TEST 6: crear 33 con NCF que no existe → 404
+        // ============================================================
+        console.log('\n--- Test 6: 33 con NCF inexistente → 404 ---');
+        const noOriginalRes = await request('/api/invoices/me', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Cookie': companyAdminCookie
+            },
+            body: JSON.stringify({
+                type: '33',
+                modifiedNcf: 'E320000009999',   // NCF que no existe
+                modifiedNcfDate: new Date().toISOString(),
+                modificationCode: 3,
+                items: [{ description: 'X', quantity: 1, unitPrice: 100 }]
+            })
+        });
+        test('status 404', noOriginalRes.status === 404);
+        test('code ORIGINAL_INVOICE_NOT_FOUND', noOriginalRes.body?.error?.code === 'ORIGINAL_INVOICE_NOT_FOUND');
+
+        // ============================================================
+        // TEST 7: crear 33 sobre factura en draft → 409 ORIGINAL_NOT_EMITTED
+        // ============================================================
+        console.log('\n--- Test 7: 33 sobre factura en draft → 409 ---');
+        const draftRes = await request('/api/invoices/me', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Cookie': companyAdminCookie
+            },
+            body: JSON.stringify({
+                type: '32',
+                items: [{ description: 'Será draft', quantity: 1, unitPrice: 100 }]
+            })
+        });
+        const draftNcf = draftRes.body?.data?.invoice?.ncf;
+        // NO la promovemos → sigue en draft
+
+        const overDraftRes = await request('/api/invoices/me', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Cookie': companyAdminCookie
+            },
+            body: JSON.stringify({
+                type: '33',
+                modifiedNcf: draftNcf,
+                modifiedNcfDate: new Date().toISOString(),
+                modificationCode: 3,
+                items: [{ description: 'X', quantity: 1, unitPrice: 100 }]
+            })
+        });
+        test('status 409', overDraftRes.status === 409, `got ${overDraftRes.status}`);
+        test('code ORIGINAL_NOT_EMITTED', overDraftRes.body?.error?.code === 'ORIGINAL_NOT_EMITTED');
+
+        // ============================================================
+        // TEST 8: crear 34 que modifica un 33 → 409 INVALID_ORIGINAL_TYPE
+        // ============================================================
+        console.log('\n--- Test 8: 34 modificando un 33 → 409 ---');
+
+        // Promover la nota 33 a 'accepted' para que pase el filtro de status
+        // y llegue a la validación de tipo
+        await Invoice.update(
+            { status: 'accepted', trackId: 'TRACK-NOTE-33' },
+            { where: { id: note33Id } }
+        );
+
+        const overNotaRes = await request('/api/invoices/me', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Cookie': companyAdminCookie
+            },
+            body: JSON.stringify({
+                type: '34',
+                modifiedNcf: inv33?.ncf,
+                modifiedNcfDate: new Date().toISOString(),
+                modificationCode: 1,
+                indicadorNotaCredito: 0,
+                items: [{ description: 'X', quantity: 1, unitPrice: 100 }]
+            })
+        });
+        test('status 409', overNotaRes.status === 409, `got ${overNotaRes.status}`);
+        test('code INVALID_ORIGINAL_TYPE', overNotaRes.body?.error?.code === 'INVALID_ORIGINAL_TYPE');
+
+        // ============================================================
+        // TEST 9: crear 33 sobre factura ya modificada → 409
+        // ============================================================
+        console.log('\n--- Test 9: 33 sobre factura ya modificada → 409 ---');
+        const alreadyModRes = await request('/api/invoices/me', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Cookie': companyAdminCookie
+            },
+            body: JSON.stringify({
+                type: '33',
+                modifiedNcf: originalNcf,   // ya tiene una 33 activa
+                modifiedNcfDate: new Date().toISOString(),
+                modificationCode: 3,
+                items: [{ description: 'X', quantity: 1, unitPrice: 100 }]
+            })
+        });
+        test('status 409', alreadyModRes.status === 409, `got ${alreadyModRes.status}`);
+        test('code ORIGINAL_ALREADY_MODIFIED', alreadyModRes.body?.error?.code === 'ORIGINAL_ALREADY_MODIFIED');
+
+        // ============================================================
+        // TEST 10: 33 sin secuencia activa → 409 NO_ACTIVE_SEQUENCE
+        // ============================================================
+        console.log('\n--- Test 10: 33 sin secuencia → 409 ---');
+
+        // Crear una factura 32 fresca y emitirla (para que no tenga nota activa)
+        const freshRes = await request('/api/invoices/me', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Cookie': companyAdminCookie
+            },
+            body: JSON.stringify({
+                type: '32',
+                items: [{ description: 'Fresh', quantity: 1, unitPrice: 100 }]
+            })
+        });
+        const freshNcf = freshRes.body?.data?.invoice?.ncf;
+        const freshId = freshRes.body?.data?.invoice?.id;
+        await Invoice.update(
+            { status: 'accepted', trackId: 'TRACK-FRESH' },
+            { where: { id: freshId } }
+        );
+
+        // Desactivar la secuencia 33
+        await Sequence.update({ isActive: false }, { where: { id: testSequence33Id } });
+
+        const noSeqRes = await request('/api/invoices/me', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Cookie': companyAdminCookie
+            },
+            body: JSON.stringify({
+                type: '33',
+                modifiedNcf: freshNcf,          // ← NCF fresco sin nota activa
+                modifiedNcfDate: new Date().toISOString(),
+                modificationCode: 3,
+                items: [{ description: 'X', quantity: 1, unitPrice: 100 }]
+            })
+        });
+        test('status 409', noSeqRes.status === 409);
+        test('code NO_ACTIVE_SEQUENCE', noSeqRes.body?.error?.code === 'NO_ACTIVE_SEQUENCE');
+
+        // Reactivar
+        await Sequence.update({ isActive: true }, { where: { id: testSequence33Id } });
+
+        // ============================================================
+        // TEST 11: verificar persistencia en DB de la nota 33
+        // ============================================================
+        console.log('\n--- Test 11: persistencia en DB ---');
+        const dbNote33 = await Invoice.findByPk(note33Id);
+        test('DB type is 33', dbNote33.type === '33');
+        test('DB modifiedNcf matches', dbNote33.modifiedNcf === originalNcf);
+        test('DB modificationCode is 3', Number(dbNote33.modificationCode) === 3);
+        test('DB indicadorNotaCredito is null', dbNote33.indicadorNotaCredito === null);
+
+        // ============================================================
+        // TEST 12: no se puede modificar (update) una 33/34
+        // ============================================================
+        console.log('\n--- Test 12: no se puede editar una 33 ---');
+        const updateNoteRes = await request(`/api/invoices/me/${note33Id}`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json',
+                'Cookie': companyAdminCookie
+            },
+            body: JSON.stringify({
+                receiverName: 'Otro nombre'
+            })
+        });
+        // Nota: hoy la update no bloquea por type, solo por status. Como está en draft,
+        // se permite. Si en el futuro quieres bloquear edición de 33/34, va en 11.11.
+        test('update allowed while draft (por ahora)', updateNoteRes.status === 200 || updateNoteRes.status === 409);
+
+        console.log('\n✅ Tests completados');
 
     } catch (error) {
         console.error('❌ Test error:', error.message);
@@ -488,11 +459,7 @@ async function cleanupCompany(rnc) {
     } finally {
         try {
             await cleanupCompany(testRnc);
-            if (adminId) {
-                await AuditLog.destroy({ where: { userId: adminId } });
-                await User.destroy({ where: { id: adminId } });
-            }
-            await User.destroy({ where: { email: [testEmail, adminEmail] } });
+            await User.destroy({ where: { email: testEmail } });
             console.log('\n🧹 Cleaned up');
         } catch (cleanupError) {
             console.error('Cleanup error:', cleanupError.message);

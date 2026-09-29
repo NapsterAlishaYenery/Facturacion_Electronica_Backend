@@ -24,6 +24,9 @@ const listInvoicesQuerySchema = Joi.object({
 // ------------------------------------------------------------
 // Schema: crear factura (company_admin)
 // ------------------------------------------------------------
+// ------------------------------------------------------------
+// Schema: crear factura (company_admin)
+// ------------------------------------------------------------
 const createInvoiceSchema = Joi.object({
     type: Joi.string()
         .valid('31', '32', '33', '34', '41', '43', '44', '45', '46', '47')
@@ -44,6 +47,59 @@ const createInvoiceSchema = Joi.object({
         .messages({
             'date.format': 'issuedAt must be a valid ISO date'
         }),
+
+    // 🔥 NUEVO: campos específicos de Notas de Débito/Crédito (33/34)
+    // Solo se aceptan cuando type === 33 o 34. En cualquier otro tipo, forbidden.
+    modifiedNcf: Joi.when('type', {
+        is: Joi.valid('33', '34'),
+        then: Joi.string().min(11).max(19).required()
+            .messages({
+                'any.required': 'NCFModificado is required for Notas (33/34)',
+                'string.min': 'NCFModificado must be at least 11 characters',
+                'string.max': 'NCFModificado cannot exceed 19 characters'
+            }),
+        otherwise: Joi.forbidden()
+    }),
+    modifiedNcfIssuerRnc: Joi.when('type', {
+        is: Joi.valid('33', '34'),
+        then: Joi.string().max(15).optional().allow(null, ''),
+        otherwise: Joi.forbidden()
+    }),
+    modifiedNcfDate: Joi.when('type', {
+        is: Joi.valid('33', '34'),
+        then: Joi.date().iso().required()
+            .messages({
+                'any.required': 'FechaNCFModificado is required for Notas (33/34)'
+            }),
+        otherwise: Joi.forbidden()
+    }),
+    modificationCode: Joi.when('type', {
+        is: Joi.valid('33', '34'),
+        then: Joi.number().integer().min(1).max(5).required()
+            .messages({
+                'any.required': 'CodigoModificacion is required for Notas (33/34)',
+                'number.min': 'CodigoModificacion must be between 1 and 5',
+                'number.max': 'CodigoModificacion must be between 1 and 5'
+            }),
+        otherwise: Joi.forbidden()
+    }),
+    modificationReason: Joi.when('type', {
+        is: Joi.valid('33', '34'),
+        then: Joi.string().max(90).optional().allow(null, ''),
+        otherwise: Joi.forbidden()
+    }),
+
+    // 🔥 NUEVO: campo específico del 34 (Nota de Crédito)
+    indicadorNotaCredito: Joi.when('type', {
+        is: '34',
+        then: Joi.number().integer().valid(0, 1).required()
+            .messages({
+                'any.required': 'IndicadorNotaCredito is required for Nota de Crédito (34)',
+                'any.only': 'IndicadorNotaCredito must be 0 or 1'
+            }),
+        otherwise: Joi.forbidden()
+    }),
+
     items: Joi.array()
         .items(Joi.object({
             itemCode: Joi.string().max(50).optional().allow(null, ''),
@@ -106,6 +162,27 @@ const createInvoiceSchema = Joi.object({
         if (lineBase < 0) {
             return helpers.error('any.custom', {
                 message: `Item ${i + 1}: discount cannot exceed (quantity × unitPrice)`
+            });
+        }
+    }
+
+    // 🔥 NUEVO: coherencia del IndicadorNotaCredito con las fechas
+    // Regla DGII:
+    //   - 0 → nota emitida dentro de los 30 días de la factura original
+    //   - 1 → nota emitida después de 30 días de la factura original
+    if (value.type === '34' && value.modifiedNcfDate && value.indicadorNotaCredito !== undefined) {
+        const modDate = new Date(value.modifiedNcfDate);
+        const issuedDate = value.issuedAt ? new Date(value.issuedAt) : new Date();
+        const diffDays = (issuedDate - modDate) / (1000 * 60 * 60 * 24);
+
+        if (diffDays > 30 && value.indicadorNotaCredito !== 1) {
+            return helpers.error('any.custom', {
+                message: 'IndicadorNotaCredito must be 1 when the original NCF is more than 30 days old'
+            });
+        }
+        if (diffDays <= 30 && value.indicadorNotaCredito !== 0) {
+            return helpers.error('any.custom', {
+                message: 'IndicadorNotaCredito must be 0 when the original NCF is 30 days old or less'
             });
         }
     }

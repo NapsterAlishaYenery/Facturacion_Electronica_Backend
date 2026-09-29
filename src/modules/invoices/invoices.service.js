@@ -19,6 +19,72 @@ const { AppError } = require('../../shared/middlewares/error.middleware');
 // LISTA DE METODOS HELPERS
 
 // ------------------------------------------------------------
+// Helper: validar y cargar la factura original que modifica
+// una Nota de Débito/Crédito (33/34)
+// TRANSACCIONAL — se llama dentro de la tx para bloquear la fila
+// ------------------------------------------------------------
+async function resolveModifiedInvoice(companyId, type, modifiedNcf, transaction) {
+    // 1. Solo los tipos 33 y 34 requieren este paso
+    if (type !== '33' && type !== '34') return null;
+
+    // 2. Buscar la factura original por NCF en la misma empresa (sin filtrar status todavía)
+    const original = await Invoice.findOne({
+        where: {
+            companyId,
+            ncf: modifiedNcf
+        },
+        transaction
+    });
+
+    if (!original) {
+        throw new AppError(
+            `Original invoice with NCF ${modifiedNcf} not found`,
+            404,
+            'ORIGINAL_INVOICE_NOT_FOUND'
+        );
+    }
+
+    // 3. La original debe estar emitida (sent o accepted), nunca draft
+    if (original.status !== 'sent' && original.status !== 'accepted') {
+        throw new AppError(
+            `Cannot modify an invoice with status '${original.status}'. It must be sent or accepted.`,
+            409,
+            'ORIGINAL_NOT_EMITTED'
+        );
+    }
+
+    // 4. La original debe ser 31 o 32 (no se modifica un 33/34 con otro 33/34)
+    if (original.type !== '31' && original.type !== '32') {
+        throw new AppError(
+            `Cannot reference an invoice of type ${original.type}. Only 31 or 32 can be modified.`,
+            409,
+            'INVALID_ORIGINAL_TYPE'
+        );
+    }
+
+    // 5. No debe existir ya una nota ACTIVA que modifique la misma factura
+    const existingNote = await Invoice.findOne({
+        where: {
+            companyId,
+            modifiedNcf,
+            type: { [Op.in]: ['33', '34'] },
+            status: { [Op.notIn]: ['rejected'] }
+        },
+        transaction
+    });
+
+    if (existingNote) {
+        throw new AppError(
+            `Invoice ${modifiedNcf} already has an active note (${existingNote.ncf})`,
+            409,
+            'ORIGINAL_ALREADY_MODIFIED'
+        );
+    }
+
+    return original;
+}
+
+// ------------------------------------------------------------
 // Helper: construir la respuesta completa de una factura
 // con campos calculados
 // ------------------------------------------------------------
@@ -345,7 +411,22 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
         );
     }
 
-    const { type, receiverRnc, receiverName, issuedAt, items } = data;
+    const {
+        type,
+        receiverRnc,
+        receiverName,
+        issuedAt,
+        items,
+        // 🔥 NUEVO: campos específicos de Notas (33/34)
+        modifiedNcf,
+        modifiedNcfIssuerRnc,
+        modifiedNcfDate,
+        modificationCode,
+        modificationReason,
+        indicadorNotaCredito
+    } = data;
+
+    const isNota = type === '33' || type === '34';
 
     // 1. Verificar que la empresa esté activa
     const company = await Company.findByPk(companyId);
@@ -382,7 +463,6 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
     }
 
     // 3. Verificar límite mensual ANTES de la transacción
-    //    (usando el contador persistente invoicesUsedThisMonth)
     const planLimit = subscription.plan?.invoicesPerMonth;
     const usedThisMonth = Number(subscription.invoicesUsedThisMonth) || 0;
 
@@ -396,10 +476,17 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
 
     // 4. Procesar todo en una transacción
     const result = await sequelize.transaction(async (t) => {
-        // 4.1. Asignar siguiente e-NCF (transaccional)
+        // 4.1. Si es 33/34, resolver la factura original AHORA (dentro de la tx)
+        //      para evitar race conditions y validar que exista y sea modificable
+        let originalInvoice = null;
+        if (isNota) {
+            originalInvoice = await resolveModifiedInvoice(companyId, type, modifiedNcf, t);
+        }
+
+        // 4.2. Asignar siguiente e-NCF (transaccional)
         const { sequence, ncf } = await assignNextNCF(companyId, type, t);
 
-        // 4.2. Calcular totales de las líneas
+        // 4.3. Calcular totales de las líneas
         const calculatedLines = items.map((item, index) => {
             const totals = calculateLineTotals(item);
             return {
@@ -410,13 +497,25 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
             };
         });
 
-        // 4.3. Calcular totales de la factura
+        // 4.4. Calcular totales de la factura
         const invoiceTotals = calculateInvoiceTotals(calculatedLines);
 
-        // 4.4. Determinar issuedAt
+        // 4.5. Determinar issuedAt
         const finalIssuedAt = issuedAt ? new Date(issuedAt) : new Date();
 
-        // 4.5. Crear la factura (encabezado)
+        // 4.6. Construir los campos de la nota (o nulls si no aplica)
+        //      Nota: si es 33/34, sobreescribimos modifiedNcfDate y modifiedNcfIssuerRnc
+        //      con los datos reales de la factura original (evita manipulación del cliente).
+        const notaFields = isNota ? {
+            modifiedNcf: originalInvoice.ncf,
+            modifiedNcfIssuerRnc: modifiedNcfIssuerRnc || originalInvoice.issuerRnc,
+            modifiedNcfDate: new Date(modifiedNcfDate),
+            modificationCode,
+            modificationReason: modificationReason || null,
+            indicadorNotaCredito: type === '34' ? indicadorNotaCredito : null
+        } : {};
+
+        // 4.7. Crear la factura (encabezado)
         const invoice = await Invoice.create({
             companyId,
             sequenceId: sequence.id,
@@ -430,10 +529,11 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
             subtotal: invoiceTotals.subtotal,
             itbis: invoiceTotals.itbis,
             total: invoiceTotals.total,
-            issuedAt: finalIssuedAt
+            issuedAt: finalIssuedAt,
+            ...notaFields
         }, { transaction: t });
 
-        // 4.6. Crear las líneas
+        // 4.8. Crear las líneas
         const lines = await InvoiceLine.bulkCreate(
             calculatedLines.map((line) => ({
                 invoiceId: invoice.id,
@@ -450,13 +550,13 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
             { transaction: t, returning: true }
         );
 
-        // 4.7. Incrementar contador de facturas usadas del mes
+        // 4.9. Incrementar contador de facturas usadas del mes
         await subscription.increment('invoicesUsedThisMonth', {
             by: 1,
             transaction: t
         });
 
-        // 4.8. Audit log
+        // 4.10. Audit log
         try {
             await AuditLog.create({
                 companyId,
@@ -468,7 +568,9 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
                     ncf: invoice.ncf,
                     type: invoice.type,
                     total: invoice.total,
-                    lineCount: lines.length
+                    lineCount: lines.length,
+                    // 🔥 NUEVO: si es nota, guardar el NCF que modifica
+                    modifiedNcf: invoice.modifiedNcf || null
                 },
                 ip: reqInfo.ip || null,
                 userAgent: reqInfo.userAgent || null
