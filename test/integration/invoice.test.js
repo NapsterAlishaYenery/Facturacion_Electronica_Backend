@@ -1,9 +1,9 @@
 require('dotenv').config();
 const sequelize = require('../../src/config/database');
-const Invoice = require('../../src/models/invoice.model');
-const InvoiceLine = require('../../src/models/invoiceLine.model');
-const Company = require('../../src/models/company.model');
-const Sequence = require('../../src/models/sequence.model');
+const { Invoice, InvoiceLine, Company, Sequence } = require('../../src/models');
+
+// 🔥 FIX: RNC random por corrida para evitar colisión entre ejecuciones
+const testRnc = '13' + String(Math.floor(Math.random() * 1000000000)).padStart(9, '0');
 
 (async () => {
     try {
@@ -12,7 +12,7 @@ const Sequence = require('../../src/models/sequence.model');
 
         // 1. Setup: empresa y secuencia
         const company = await Company.create({
-            rnc: '130999555',
+            rnc: testRnc,
             name: 'Invoice Test Company'
         });
 

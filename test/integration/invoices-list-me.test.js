@@ -282,6 +282,10 @@ async function loginAndGetCookie(email, password) {
         console.log('\n--- Test 11: sin autenticación ---');
         const noAuthRes = await request('/api/invoices/me');
         test('status 401', noAuthRes.status === 401);
+        // 🔥 NUEVO: flags por tipo (listado)
+        test('inv1 has isNota false', inv1Item?.isNota === false);
+        test('inv1 has typeName', inv1Item?.typeName === 'Factura de Consumo Electrónica');
+        test('inv1 has canEditReference false', inv1Item?.canEditReference === false);
 
     } catch (error) {
         console.error('❌ Test error:', error.message);

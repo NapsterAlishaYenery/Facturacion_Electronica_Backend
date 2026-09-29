@@ -120,7 +120,7 @@ async function cleanupCompany(rnc) {
         });
 
         // Crear factura con líneas (empresa 1)
-       const invoiceCreated = await Invoice.create({
+        const invoiceCreated = await Invoice.create({
             companyId: testCompanyId,
             sequenceId: testSequenceId,
             type: '32',
@@ -204,6 +204,14 @@ async function cleanupCompany(rnc) {
         test('canBeSigned true', inv?.canBeSigned === true);
         test('canBeSent false', inv?.canBeSent === false);
         test('canEdit true', inv?.canEdit === true);
+
+        // 🔥 NUEVO: flags por tipo
+        test('inv has isNota false', inv?.isNota === false);
+        test('inv has isDebitNote false', inv?.isDebitNote === false);
+        test('inv has isCreditNote false', inv?.isCreditNote === false);
+        test('inv has typeName Factura de Consumo', inv?.typeName === 'Factura de Consumo Electrónica');
+        test('inv has hasModificationReference false', inv?.hasModificationReference === false);
+        test('inv has canEditReference false', inv?.canEditReference === false);
 
         // ============================================================
         // TEST 3: aislamiento multi-tenant

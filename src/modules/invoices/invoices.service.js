@@ -18,6 +18,22 @@ const { AppError } = require('../../shared/middlewares/error.middleware');
 
 // LISTA DE METODOS HELPERS
 
+// Helper: nombre legible del tipo de e-CF
+// ------------------------------------------------------------
+const ECF_TYPE_NAMES = {
+    '31': 'Factura de Crédito Fiscal Electrónica',
+    '32': 'Factura de Consumo Electrónica',
+    '33': 'Nota de Débito Electrónica',
+    '34': 'Nota de Crédito Electrónica',
+    '41': 'Comprobante de Compras Electrónico',
+    '43': 'Gastos Menores Electrónico',
+    '44': 'Regímenes Especiales Electrónico',
+    '45': 'Gubernamental Electrónico',
+    '46': 'Comprobante de Exportaciones Electrónico',
+    '47': 'Comprobante para Pagos al Exterior Electrónico'
+};
+
+
 // ------------------------------------------------------------
 // Helper: validar y cargar la factura original que modifica
 // una Nota de Débito/Crédito (33/34)
@@ -94,20 +110,36 @@ function buildInvoiceResponse(invoice, options = {}) {
     const data = typeof invoice.toJSON === 'function' ? invoice.toJSON() : invoice;
 
     const status = data.status;
+    const type = data.type;
+
+    // 🔥 NUEVO: flags por tipo
+    const isNota = type === '33' || type === '34';
 
     const response = {
         ...data,
+
+        // Estado
         isDraft: status === 'draft',
         isSigned: status === 'signed',
         isSent: status === 'sent',
         isAccepted: status === 'accepted',
         isRejected: status === 'rejected',
         isContingency: status === 'contingency',
+
+        // Permisos
         canEdit: status === 'draft',
         canDelete: status === 'draft',
         canBeSigned: status === 'draft',
         canBeSent: status === 'signed',
-        hasTrackId: !!data.trackId
+        hasTrackId: !!data.trackId,
+
+        // 🔥 NUEVO: identificación por tipo
+        typeName: ECF_TYPE_NAMES[type] || null,
+        isNota,
+        isDebitNote: type === '33',
+        isCreditNote: type === '34',
+        hasModificationReference: isNota && !!data.modifiedNcf,
+        canEditReference: false   // los campos de referencia nunca se editan
     };
 
     // lineCount solo si se pasa explícitamente (viene de un COUNT)
@@ -832,7 +864,8 @@ async function deleteMyInvoice(companyId, invoiceId, reqUser, reqInfo = {}) {
         total: Number(invoice.total),
         status: invoice.status,
         receiverName: invoice.receiverName,
-        issuedAt: invoice.issuedAt
+        issuedAt: invoice.issuedAt,
+        modifiedNcf: invoice.modifiedNcf || null
     };
 
     // 5. Borrar en transacción
