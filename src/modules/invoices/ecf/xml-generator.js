@@ -143,10 +143,37 @@ function extractSecurityCode(signatureValue) {
 // ============================================================
 // 3. CONSTRUCTOR BASE DE e-CF (reutilizable por todos los tipos)
 // ============================================================
+// ============================================================
+// 3. CONSTRUCTOR BASE DE e-CF (reutilizable por todos los tipos)
+// ============================================================
+//
+// Soporta los tipos 31, 32, 33 y 34.
+// Cada tipo tiene diferencias que se manejan con flags calculados aquí.
+//
+// | Elemento                      | 31 | 32 | 33 | 34 |
+// |-------------------------------|----|----|----|----|
+// | FechaVencimientoSecuencia     | ✅ | ❌ | ✅ | ❌ |
+// | IndicadorNotaCredito          | ❌ | ❌ | ❌ | ✅ |
+// | TablaFormasPago / TerminoPago | ✅ | ✅ | ✅ | ❌ |
+// | InformacionReferencia         | ❌ | ❌ | ✅ | ✅ |
+// | Comprador                     | obl| opc| opc| opc|
+// ============================================================
 
 function buildECFBody(invoiceData, options) {
     const { type, requireReceiver } = options;
+
+    // 🔥 Flags de tipo — cada uno activa/desactiva bloques del XSD correspondiente.
     const is31 = String(type) === '31';
+    const is33 = String(type) === '33';
+    const is34 = String(type) === '34';
+    const isNota = is33 || is34;                    // 33 y 34 comparten InformacionReferencia
+
+    // 🔥 FechaVencimientoSecuencia: solo 31 y 33 (los XSD 32 y 34 NO lo tienen).
+    const needsFechaVencimiento = is31 || is33;
+
+    // 🔥 Bloques de pago (TablaFormasPago, TerminoPago, FechaLimitePago, etc.):
+    //    31, 32 y 33 sí. El XSD 34 NO tiene TablaFormasPago ni TerminoPago.
+    const supportsPaymentInfo = !is34;
 
     const {
         ncf,
@@ -177,16 +204,48 @@ function buildECFBody(invoiceData, options) {
         itbis2Base,
         itbis2Amount,
         itbis3Base,
-        exemptAmount
+        exemptAmount,
+        // 🔥 Campos específicos de Notas (33 y 34):
+        modifiedNcf,            // NCFModificado (obligatorio en 33 y 34)
+        modifiedNcfIssuerRnc,   // RNCOtroContribuyente (opcional)
+        modifiedNcfDate,        // FechaNCFModificado (obligatorio en 33 y 34)
+        modificationCode,       // CodigoModificacion (obligatorio en 33 y 34)
+        modificationReason,     // RazonModificacion (opcional en 33 y 34)
+        // 🔥 Campo específico SOLO del 34:
+        indicadorNotaCredito    // IndicadorNotaCredito (obligatorio en 34; 0 o 1)
     } = invoiceData;
 
     const esc = escapeXMLSpecialChars;
 
+    // ------------------------------------------------------------
+    // Validaciones por tipo
+    // ------------------------------------------------------------
     if (requireReceiver) {
         if (!receiverRnc) throw new Error(`RNC Comprador is required for e-CF type ${type}`);
         if (!receiverName) throw new Error(`Razón Social Comprador is required for e-CF type ${type}`);
     }
 
+    // 🔥 Validación compartida por 33 y 34
+    if (isNota) {
+        if (!modifiedNcf) throw new Error(`NCFModificado is required for e-CF type ${type}`);
+        if (!modifiedNcfDate) throw new Error(`FechaNCFModificado is required for e-CF type ${type}`);
+        if (!modificationCode) throw new Error(`CodigoModificacion is required for e-CF type ${type}`);
+    }
+
+    // 🔥 Validación específica del 34: IndicadorNotaCredito obligatorio (0 o 1)
+    if (is34) {
+        if (indicadorNotaCredito === null || indicadorNotaCredito === undefined) {
+            throw new Error(`IndicadorNotaCredito is required for e-CF type 34 (0 or 1)`);
+        }
+        const inc = Number(indicadorNotaCredito);
+        if (inc !== 0 && inc !== 1) {
+            throw new Error(`IndicadorNotaCredito must be 0 or 1 for e-CF type 34`);
+        }
+    }
+
+    // ------------------------------------------------------------
+    // Cálculos de totales
+    // ------------------------------------------------------------
     const base18 = Number(itbis1Base || subtotal || 0);
     const amount18 = Number(itbis1Amount || itbis || 0);
     const base16 = Number(itbis2Base || 0);
@@ -197,12 +256,42 @@ function buildECFBody(invoiceData, options) {
     const montoGravadoTotal = base18 + base16 + base0;
     const totalITBIS = amount18 + amount16;
 
-    // FechaVencimientoSecuencia solo existe en e-CF 31
-    const fechaVencimientoSecuencia = is31
+    // 🔥 FechaVencimientoSecuencia: 31 y 33 lo llevan; 32 y 34 no.
+    const fechaVencimientoSecuencia = needsFechaVencimiento && sequenceExpiresAt
         ? `<FechaVencimientoSecuencia>${fmtDate(sequenceExpiresAt)}</FechaVencimientoSecuencia>`
         : '';
 
-    // Comprador: contenedor obligatorio en ambos tipos (XSD minOccurs=1)
+    // 🔥 IndicadorNotaCredito: SOLO tipo 34.
+    const indicadorNotaCreditoXml = is34
+        ? `<IndicadorNotaCredito>${Number(indicadorNotaCredito)}</IndicadorNotaCredito>`
+        : '';
+
+    // ------------------------------------------------------------
+    // Bloques de pago (dependientes del tipo)
+    // ------------------------------------------------------------
+    // 🔥 En 34 solo sobrevive FechaLimitePago (que sí está en el XSD 34).
+    //    TablaFormasPago y TerminoPago NO existen en el XSD 34.
+    let paymentBlocks = '';
+    if (supportsPaymentInfo) {
+        // 31, 32, 33 → estructura completa
+        paymentBlocks = `
+      ${paymentType === 2 && paymentDeadline ? `<FechaLimitePago>${fmtDate(paymentDeadline)}</FechaLimitePago>` : ''}
+      ${paymentType === 2 && paymentTerms ? `<TerminoPago>${esc(paymentTerms)}</TerminoPago>` : ''}
+      ${paymentMethods.length > 0 ? `
+      <TablaFormasPago>
+        ${paymentMethods.map(pm => `
+        <FormaDePago>
+          <FormaPago>${pm.method}</FormaPago>
+          <MontoPago>${fmtMoney(pm.amount)}</MontoPago>
+        </FormaDePago>`).join('')}
+      </TablaFormasPago>` : ''}`;
+    } else {
+        // 34 → solo FechaLimitePago (si aplica)
+        paymentBlocks = `
+      ${paymentType === 2 && paymentDeadline ? `<FechaLimitePago>${fmtDate(paymentDeadline)}</FechaLimitePago>` : ''}`;
+    }
+
+    // Comprador: contenedor común a los 4 tipos.
     const compradorBlock = `
     <Comprador>
       ${receiverRnc ? `<RNCComprador>${esc(receiverRnc)}</RNCComprador>` : ''}
@@ -215,20 +304,12 @@ function buildECFBody(invoiceData, options) {
     <IdDoc>
       <TipoeCF>${type}</TipoeCF>
       <eNCF>${esc(ncf)}</eNCF>
+      ${indicadorNotaCreditoXml}
       ${fechaVencimientoSecuencia}
       <IndicadorMontoGravado>0</IndicadorMontoGravado>
       <TipoIngresos>01</TipoIngresos>
       <TipoPago>${paymentType}</TipoPago>
-      ${paymentType === 2 && paymentDeadline ? `<FechaLimitePago>${fmtDate(paymentDeadline)}</FechaLimitePago>` : ''}
-      ${paymentType === 2 && paymentTerms ? `<TerminoPago>${esc(paymentTerms)}</TerminoPago>` : ''}
-      ${paymentMethods.length > 0 ? `
-      <TablaFormasPago>
-        ${paymentMethods.map(pm => `
-        <FormaDePago>
-          <FormaPago>${pm.method}</FormaPago>
-          <MontoPago>${fmtMoney(pm.amount)}</MontoPago>
-        </FormaDePago>`).join('')}
-      </TablaFormasPago>` : ''}
+      ${paymentBlocks}
     </IdDoc>
     <Emisor>
       <RNCEmisor>${esc(issuerRnc)}</RNCEmisor>
@@ -274,9 +355,8 @@ function buildECFBody(invoiceData, options) {
         const indicadorFacturacion = getIndicadorFacturacion(itbisRate);
 
         return `
-    <Item>
+     <Item>
       <NumeroLinea>${lineNumber}</NumeroLinea>
-      <IndicadorFacturacion>${indicadorFacturacion}</IndicadorFacturacion>
       ${line.itemCode ? `
       <TablaCodigosItem>
         <CodigosItem>
@@ -284,6 +364,7 @@ function buildECFBody(invoiceData, options) {
           <CodigoItem>${esc(line.itemCode)}</CodigoItem>
         </CodigosItem>
       </TablaCodigosItem>` : ''}
+      <IndicadorFacturacion>${indicadorFacturacion}</IndicadorFacturacion>
       <NombreItem>${esc(line.description)}</NombreItem>
       <IndicadorBienoServicio>2</IndicadorBienoServicio>
       <CantidadItem>${fmtQuantity(quantity)}</CantidadItem>
@@ -295,11 +376,27 @@ function buildECFBody(invoiceData, options) {
     }).join('')}
   </DetallesItems>`;
 
+    // 🔥 InformacionReferencia: bloque obligatorio en 33 y 34.
+    //    Va DESPUÉS de <DetallesItems> y ANTES de <FechaHoraFirma>.
+    let informacionReferencia = '';
+    if (isNota) {
+        informacionReferencia = `
+  <InformacionReferencia>
+    <NCFModificado>${esc(modifiedNcf)}</NCFModificado>
+    ${modifiedNcfIssuerRnc ? `<RNCOtroContribuyente>${esc(modifiedNcfIssuerRnc)}</RNCOtroContribuyente>` : ''}
+    <FechaNCFModificado>${fmtDate(modifiedNcfDate)}</FechaNCFModificado>
+    <CodigoModificacion>${modificationCode}</CodigoModificacion>
+    ${modificationReason ? `<RazonModificacion>${esc(modificationReason)}</RazonModificacion>` : ''}
+  </InformacionReferencia>`;
+    }
+
     const fechaHoraFirma = `
   <FechaHoraFirma>${fmtDateTime(new Date())}</FechaHoraFirma>`;
 
+    // 🔥 Se inserta informacionReferencia entre DetallesItems y FechaHoraFirma.
+    //    Para 31 y 32 es '' (string vacío), así que el XML es idéntico al anterior.
     let xml = `<?xml version="1.0" encoding="UTF-8"?>
-<ECF>${encabezado}${detallesItems}${fechaHoraFirma}
+<ECF>${encabezado}${detallesItems}${informacionReferencia}${fechaHoraFirma}
 </ECF>`;
 
     xml = removeEmptyTags(xml);
@@ -316,6 +413,21 @@ function generateECF32(invoiceData) {
 
 function generateECF31(invoiceData) {
     return buildECFBody(invoiceData, { type: '31', requireReceiver: true });
+}
+
+// 🔥 e-CF 33: Nota de Débito.
+//    Requiere comprador identificado (en la práctica).
+//    Requiere: modifiedNcf, modifiedNcfDate, modificationCode.
+function generateECF33(invoiceData) {
+    return buildECFBody(invoiceData, { type: '33', requireReceiver: true });
+}
+
+// 🔥 e-CF 34: Nota de Crédito.
+//    Comprador opcional según XSD (minOccurs=0).
+//    Requiere: modifiedNcf, modifiedNcfDate, modificationCode, indicadorNotaCredito.
+//    NO lleva sequenceExpiresAt, paymentMethods ni paymentTerms.
+function generateECF34(invoiceData) {
+    return buildECFBody(invoiceData, { type: '34', requireReceiver: false });
 }
 
 // ============================================================
@@ -517,6 +629,8 @@ module.exports = {
     extractSecurityCode,
     generateECF32,
     generateECF31,
+    generateECF33,
+    generateECF34,
     buildRFCE,
     buildECFBody,
     validateAgainstXSD,
