@@ -126,6 +126,65 @@ const Invoice = sequelize.define('Invoice', {
         type: DataTypes.DATE,
         allowNull: false,
         field: 'issued_at'
+    },
+    // 🔥 NUEVO: campos específicos de Notas de Débito/Crédito (33/34)
+    modifiedNcf: {
+        type: DataTypes.STRING(20),
+        allowNull: true,
+        field: 'modified_ncf',
+        validate: {
+            len: {
+                args: [11, 19],
+                msg: 'Modified NCF must be between 11 and 19 characters'
+            }
+        }
+    },
+    modifiedNcfIssuerRnc: {
+        type: DataTypes.STRING(15),
+        allowNull: true,
+        field: 'modified_ncf_issuer_rnc'
+    },
+    modifiedNcfDate: {
+        type: DataTypes.DATE,
+        allowNull: true,
+        field: 'modified_ncf_date'
+    },
+    modificationCode: {
+        type: DataTypes.SMALLINT,
+        allowNull: true,
+        field: 'modification_code',
+        validate: {
+            min: {
+                args: [1],
+                msg: 'Modification code must be between 1 and 5'
+            },
+            max: {
+                args: [5],
+                msg: 'Modification code must be between 1 and 5'
+            }
+        }
+    },
+    modificationReason: {
+        type: DataTypes.STRING(90),
+        allowNull: true,
+        field: 'modification_reason',
+        validate: {
+            len: {
+                args: [0, 90],
+                msg: 'Modification reason cannot exceed 90 characters'
+            }
+        }
+    },
+    indicadorNotaCredito: {
+        type: DataTypes.SMALLINT,
+        allowNull: true,
+        field: 'indicador_nota_credito',
+        validate: {
+            isIn: {
+                args: [[0, 1]],
+                msg: 'IndicadorNotaCredito must be 0 or 1'
+            }
+        }
     }
 }, {
     tableName: 'invoices',
@@ -140,7 +199,9 @@ const Invoice = sequelize.define('Invoice', {
         { fields: ['issued_at'], name: 'idx_invoices_issued_at' },
         { fields: ['company_id', 'status'], name: 'idx_invoices_company_status' },
         { fields: ['company_id', 'issued_at'], name: 'idx_invoices_company_issued' },
-        { fields: ['company_id', 'ncf'], unique: true, name: 'uq_invoices_company_ncf' }
+        { fields: ['company_id', 'ncf'], unique: true, name: 'uq_invoices_company_ncf' },
+        { fields: ['modified_ncf'], name: 'idx_invoices_modified_ncf' },
+        { fields: ['company_id', 'type', 'modified_ncf'], name: 'idx_invoices_company_type_modified' }
     ]
 });
 
