@@ -195,6 +195,11 @@ const createInvoiceSchema = Joi.object({
 // ------------------------------------------------------------
 // Schema: editar factura (company_admin)
 // ------------------------------------------------------------
+// ------------------------------------------------------------
+// Schema: editar factura (company_admin)
+// Solo permite editar mientras la factura esté en draft.
+// Los campos de referencia de Notas (33/34) NO son editables.
+// ------------------------------------------------------------
 const updateInvoiceSchema = Joi.object({
     receiverRnc: Joi.string().max(15).optional().allow(null, '')
         .messages({
@@ -226,6 +231,36 @@ const updateInvoiceSchema = Joi.object({
         .messages({
             'array.min': 'If items are provided, at least one is required',
             'array.max': 'Invoice cannot have more than 100 items'
+        }),
+
+    // 🔥 NUEVO: campos editables de Notas (33/34) — solo razón y código
+    modificationCode: Joi.number().integer().min(1).max(5).optional()
+        .messages({
+            'number.min': 'CodigoModificacion must be between 1 and 5',
+            'number.max': 'CodigoModificacion must be between 1 and 5'
+        }),
+    modificationReason: Joi.string().max(90).optional().allow(null, '')
+        .messages({
+            'string.max': 'Modification reason cannot exceed 90 characters'
+        }),
+
+    // 🔥 NUEVO: campos de referencia — NO editables nunca
+    // Si el cliente los manda, Joi.forbidden() devuelve 400
+    modifiedNcf: Joi.forbidden()
+        .messages({
+            'any.unknown': 'NCFModificado cannot be changed after creation'
+        }),
+    modifiedNcfIssuerRnc: Joi.forbidden()
+        .messages({
+            'any.unknown': 'RNCOtroContribuyente cannot be changed after creation'
+        }),
+    modifiedNcfDate: Joi.forbidden()
+        .messages({
+            'any.unknown': 'FechaNCFModificado cannot be changed after creation'
+        }),
+    indicadorNotaCredito: Joi.forbidden()
+        .messages({
+            'any.unknown': 'IndicadorNotaCredito cannot be changed after creation'
         })
 }).min(1).messages({
     'object.min': 'At least one field is required to update'

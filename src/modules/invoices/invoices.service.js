@@ -609,6 +609,12 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
 // Editar factura (company_admin)
 // Solo si status === 'draft'
 // ------------------------------------------------------------
+// ------------------------------------------------------------
+// Editar factura (company_admin)
+// Solo si status === 'draft'.
+// Los campos de referencia de Notas (modifiedNcf, etc.) NO se
+// pueden modificar — si intentan, la constraint del modelo falla.
+// ------------------------------------------------------------
 async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo = {}) {
     if (!companyId) {
         throw new AppError(
@@ -643,7 +649,9 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
         issuedAt: invoice.issuedAt,
         subtotal: invoice.subtotal,
         itbis: invoice.itbis,
-        total: invoice.total
+        total: invoice.total,
+        modificationCode: invoice.modificationCode,
+        modificationReason: invoice.modificationReason
     };
 
     // 4. Procesar en transacción
@@ -663,7 +671,6 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
 
         // 4.2. Si se envían items, reemplazar TODAS las líneas
         if (updates.items !== undefined) {
-            // Calcular nuevas líneas
             const calculatedLines = updates.items.map((item, index) => {
                 const totals = calculateLineTotals(item);
                 return {
@@ -680,13 +687,11 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
             updateData.itbis = invoiceTotals.itbis;
             updateData.total = invoiceTotals.total;
 
-            // Borrar líneas anteriores
             await InvoiceLine.destroy({
                 where: { invoiceId: invoice.id },
                 transaction: t
             });
 
-            // Crear nuevas líneas
             await InvoiceLine.bulkCreate(
                 calculatedLines.map((line) => ({
                     invoiceId: invoice.id,
@@ -704,7 +709,36 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
             );
         }
 
-        // 4.3. Actualizar la factura (con datos del encabezado)
+        // 🔥 NUEVO: campos editables de Notas (33/34)
+        // Solo los tipos 33/34 pueden tener estos campos; si un 31/32 intenta
+        // mandarlos, se rechaza (defensa en profundidad — Joi ya lo bloquea).
+        if (updates.modificationCode !== undefined || updates.modificationReason !== undefined) {
+            if (invoice.type !== '33' && invoice.type !== '34') {
+                throw new AppError(
+                    'Modification fields only apply to Notas (33/34)',
+                    409,
+                    'MODIFICATION_FIELDS_NOT_ALLOWED'
+                );
+            }
+
+            if (updates.modificationCode !== undefined) {
+                updateData.modificationCode = updates.modificationCode;
+            }
+            if (updates.modificationReason !== undefined) {
+                updateData.modificationReason = updates.modificationReason || null;
+            }
+        }
+
+        // 🔥 NUEVO: si es 34 y cambia issuedAt, recalcular indicadorNotaCredito
+        // (regla DGII: 0 = ≤30 días, 1 = >30 días desde modifiedNcfDate)
+        if (invoice.type === '34' && updates.issuedAt !== undefined) {
+            const modDate = new Date(invoice.modifiedNcfDate);
+            const newIssuedDate = new Date(updates.issuedAt);
+            const diffDays = (newIssuedDate - modDate) / (1000 * 60 * 60 * 24);
+            updateData.indicadorNotaCredito = diffDays > 30 ? 1 : 0;
+        }
+
+        // 4.3. Actualizar la factura
         await invoice.update(updateData, { transaction: t });
 
         // 4.4. Audit log
