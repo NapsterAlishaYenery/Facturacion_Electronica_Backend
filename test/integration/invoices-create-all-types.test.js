@@ -12,8 +12,6 @@ const testRnc = '130999970';
 const testEmail = 'owner-inv-alltypes@expedinap.com';
 let testCompanyId = null;
 
-// Sequences por tipo (para no compartir la misma y que cada create
-// agarre la secuencia correcta).
 const sequenceIds = {};
 
 async function test(label, condition, extra = '') {
@@ -49,7 +47,6 @@ async function cleanupCompany(rnc) {
     }
 }
 
-// Payloads base reutilizables
 const baseItems = [
     { description: 'Servicio base', quantity: 1, unitPrice: 1000, itbisRate: 18 }
 ];
@@ -62,7 +59,6 @@ const baseItems = [
         await cleanupCompany(testRnc);
         await User.destroy({ where: { email: testEmail } });
 
-        // Crear empresa
         const registerRes = await request('/api/auth/register-company', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -74,7 +70,6 @@ const baseItems = [
         testCompanyId = registerRes.body?.data?.company?.id;
         test('company registered', !!testCompanyId);
 
-        // Crear secuencia por cada tipo
         for (const type of ['31', '32', '33', '34', '41', '43', '44', '45', '46', '47']) {
             const seq = await Sequence.create({
                 companyId: testCompanyId,
@@ -95,8 +90,7 @@ const baseItems = [
         console.log('✅ Setup completed\n');
 
         // ============================================================
-        // TIPO 41 — Compras (Retencion obligatoria no se valida en Joi,
-        // el servicio solo guarda los totales; para MVP probamos el flujo básico)
+        // TIPO 41 — Compras (retención por línea obligatoria)
         // ============================================================
         console.log('--- e-CF 41: Compras ---');
         const res41 = await request('/api/invoices/me', {
@@ -107,7 +101,19 @@ const baseItems = [
                 receiverRnc: '130999888',
                 receiverName: 'Proveedor SRL',
                 totalItbisRetenido: 180.00,
-                items: baseItems
+                items: [
+                    {
+                        description: 'Servicio base',
+                        quantity: 1,
+                        unitPrice: 1000,
+                        itbisRate: 18,
+                        retencion: {
+                            indicador: 1,
+                            montoItbisRetenido: 180.00,
+                            montoIsrRetenido: 0
+                        }
+                    }
+                ]
             })
         });
         test('status 201', res41.status === 201, `got ${res41.status} ${JSON.stringify(res41.body?.error || {})}`);
@@ -118,7 +124,7 @@ const baseItems = [
         test('receiverRnc persisted', inv41?.receiverRnc === '130999888');
 
         // ============================================================
-        // TIPO 43 — Gastos Menores (sin comprador, sin ITBIS)
+        // TIPO 43 — Gastos Menores
         // ============================================================
         console.log('\n--- e-CF 43: Gastos Menores ---');
         const res43 = await request('/api/invoices/me', {
@@ -141,7 +147,7 @@ const baseItems = [
         test('receiverName is null', inv43?.receiverName === null);
 
         // ============================================================
-        // TIPO 44 — Regímenes Especiales (RazonSocial obligatoria, sin RNC)
+        // TIPO 44 — Regímenes Especiales
         // ============================================================
         console.log('\n--- e-CF 44: Regímenes Especiales ---');
         const res44 = await request('/api/invoices/me', {
@@ -165,7 +171,7 @@ const baseItems = [
         test('exemptAmount persisted', Number(inv44?.exemptAmount) === 800);
 
         // ============================================================
-        // TIPO 45 — Gubernamental (RNC + RazonSocial obligatorios)
+        // TIPO 45 — Gubernamental
         // ============================================================
         console.log('\n--- e-CF 45: Gubernamental ---');
         const res45 = await request('/api/invoices/me', {
@@ -186,7 +192,7 @@ const baseItems = [
         test('total persisted', Number(inv45?.total) === 1180);
 
         // ============================================================
-        // TIPO 46 — Exportaciones (identificador extranjero + transporte + ITBIS3 + info adicional)
+        // TIPO 46 — Exportaciones
         // ============================================================
         console.log('\n--- e-CF 46: Exportaciones ---');
         const res46 = await request('/api/invoices/me', {
@@ -245,7 +251,7 @@ const baseItems = [
         test('infoRegimenAduanero persisted', inv46?.infoRegimenAduanero === 'EXPORTACION DEFINITIVA');
 
         // ============================================================
-        // TIPO 47 — Pagos al Exterior (identificador extranjero + transporte reducido + TotalISRRetencion)
+        // TIPO 47 — Pagos al Exterior (retención por línea obligatoria)
         // ============================================================
         console.log('\n--- e-CF 47: Pagos al Exterior ---');
         const res47 = await request('/api/invoices/me', {
@@ -260,7 +266,16 @@ const baseItems = [
                     paisDestino: 'Estados Unidos'
                 },
                 items: [
-                    { description: 'Servicio del exterior', quantity: 1, unitPrice: 1000, itbisRate: 0 }
+                    {
+                        description: 'Servicio del exterior',
+                        quantity: 1,
+                        unitPrice: 1000,
+                        itbisRate: 0,
+                        retencion: {
+                            indicador: 1,
+                            montoIsrRetenido: 270.00
+                        }
+                    }
                 ]
             })
         });
@@ -274,11 +289,10 @@ const baseItems = [
         test('transporteVia is null (reducido)', inv47?.transporteVia === null);
 
         // ============================================================
-        // VALIDACIONES NEGATIVAS (defensa en profundidad)
+        // VALIDACIONES NEGATIVAS
         // ============================================================
         console.log('\n--- Validaciones negativas ---');
 
-        // 43 no admite comprador
         const res43Bad = await request('/api/invoices/me', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Cookie': companyAdminCookie },
@@ -292,7 +306,6 @@ const baseItems = [
         });
         test('43 with buyer rejected (400)', res43Bad.status === 400);
 
-        // 46 sin itbis3Base → 400 (Joi required)
         const res46Bad = await request('/api/invoices/me', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Cookie': companyAdminCookie },
@@ -305,7 +318,6 @@ const baseItems = [
         });
         test('46 without itbis3Base rejected (400)', res46Bad.status === 400);
 
-        // 44 sin RazonSocial → 400 (custom)
         const res44Bad = await request('/api/invoices/me', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Cookie': companyAdminCookie },
@@ -317,7 +329,6 @@ const baseItems = [
         });
         test('44 without receiverName rejected (400)', res44Bad.status === 400);
 
-        // 47 sin identificador extranjero ni RNC → 400 (custom)
         const res47Bad = await request('/api/invoices/me', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Cookie': companyAdminCookie },
@@ -329,7 +340,6 @@ const baseItems = [
         });
         test('47 without foreign ID or RNC rejected (400)', res47Bad.status === 400);
 
-        // 45 sin RNC → 400 (custom)
         const res45Bad = await request('/api/invoices/me', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Cookie': companyAdminCookie },
@@ -341,7 +351,6 @@ const baseItems = [
         });
         test('45 without receiverRnc rejected (400)', res45Bad.status === 400);
 
-        // 41 con transporte → forbidden (41 no lo permite)
         const res41Bad = await request('/api/invoices/me', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Cookie': companyAdminCookie },
@@ -350,10 +359,50 @@ const baseItems = [
                 receiverRnc: '130999888',
                 receiverName: 'Proveedor',
                 transporte: { paisDestino: 'US' },
-                items: baseItems
+                items: [
+                    {
+                        description: 'X',
+                        quantity: 1,
+                        unitPrice: 100,
+                        itbisRate: 18,
+                        retencion: { indicador: 1, montoItbisRetenido: 18 }
+                    }
+                ]
             })
         });
         test('41 with transporte rejected (400)', res41Bad.status === 400);
+
+        // Retención prohibida en tipos distintos a 41/47
+        const res43BadRet = await request('/api/invoices/me', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Cookie': companyAdminCookie },
+            body: JSON.stringify({
+                type: '43',
+                exemptAmount: 500,
+                items: [{
+                    description: 'X',
+                    quantity: 1,
+                    unitPrice: 500,
+                    itbisRate: 0,
+                    retencion: { indicador: 1, montoItbisRetenido: 10 }
+                }]
+            })
+        });
+        test('43 with retencion rejected (400)', res43BadRet.status === 400);
+
+        // 41 sin retención en la línea
+        const res41BadNoRet = await request('/api/invoices/me', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Cookie': companyAdminCookie },
+            body: JSON.stringify({
+                type: '41',
+                receiverRnc: '130999888',
+                receiverName: 'Proveedor',
+                totalItbisRetenido: 180,
+                items: baseItems
+            })
+        });
+        test('41 without retencion on line rejected (400)', res41BadNoRet.status === 400);
 
         // ============================================================
         // VERIFICACIÓN EN DB
@@ -371,6 +420,27 @@ const baseItems = [
 
         const db43 = await Invoice.findByPk(inv43.id);
         test('DB inv43 receiverRnc is null', db43.receiverRnc === null);
+
+        // Verificación de retención por línea
+        const lines41 = await InvoiceLine.findAll({
+            where: { invoiceId: inv41.id },
+            order: [['lineNumber', 'ASC']]
+        });
+        test('inv41 has 1 line', lines41.length === 1, `got ${lines41.length}`);
+        test('inv41 line retencionIndicador=1', Number(lines41[0]?.retencionIndicador) === 1);
+        test('inv41 line montoItbisRetenido=180', Number(lines41[0]?.montoItbisRetenido) === 180);
+        test('inv41 line montoIsrRetenido=0', Number(lines41[0]?.montoIsrRetenido) === 0);
+
+        const lines47 = await InvoiceLine.findAll({
+            where: { invoiceId: inv47.id },
+            order: [['lineNumber', 'ASC']]
+        });
+        test('inv47 has 1 line', lines47.length === 1, `got ${lines47.length}`);
+        test('inv47 line retencionIndicador=1', Number(lines47[0]?.retencionIndicador) === 1);
+        test('inv47 line montoIsrRetenido=270', Number(lines47[0]?.montoIsrRetenido) === 270);
+
+        const lines46 = await InvoiceLine.findAll({ where: { invoiceId: inv46.id } });
+        test('inv46 line has no retencion', lines46.every(l => l.retencionIndicador === null));
 
         // Audit logs de creación
         const auditCount = await AuditLog.count({

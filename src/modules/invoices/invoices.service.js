@@ -583,7 +583,9 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
                 lineNumber: index + 1,
                 itemCode: item.itemCode || null,
                 description: item.description,
-                ...totals
+                ...totals,
+                // 🔥 NUEVO: preservar retención por línea (41, 47)
+                retencion: item.retencion || null
             };
         });
 
@@ -657,7 +659,11 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
                 discount: line.discount,
                 itbisRate: line.itbisRate,
                 itbisAmount: line.itbisAmount,
-                total: line.total
+                total: line.total,
+                // 🔥 NUEVO: retención por línea (41, 47)
+                retencionIndicador: line.retencion?.indicador ?? null,
+                montoItbisRetenido: line.retencion?.montoItbisRetenido ?? null,
+                montoIsrRetenido: line.retencion?.montoIsrRetenido ?? null
             })),
             { transaction: t, returning: true }
         );
@@ -766,6 +772,33 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
         );
     }
 
+    // 🔥 NUEVO: validar coherencia tipo vs retención por línea
+    // (Joi valida forma; aquí validamos contra el tipo real de la factura)
+    if (updates.items !== undefined) {
+        const allowsRetencion = invoice.type === '41' || invoice.type === '47';
+
+        for (let i = 0; i < updates.items.length; i++) {
+            const ret = updates.items[i].retencion;
+            const hasRetencion = ret !== undefined && ret !== null;
+
+            if (hasRetencion && !allowsRetencion) {
+                throw new AppError(
+                    `Item ${i + 1}: retencion only applies to types 41 and 47`,
+                    409,
+                    'RETENCION_NOT_ALLOWED'
+                );
+            }
+            if (allowsRetencion && !hasRetencion) {
+                throw new AppError(
+                    `Item ${i + 1}: retencion is required for types 41 and 47`,
+                    409,
+                    'RETENCION_REQUIRED'
+                );
+            }
+        }
+    }
+
+
     // 3. Guardar estado anterior para audit
     const before = {
         receiverRnc: invoice.receiverRnc,
@@ -801,7 +834,8 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
                     lineNumber: index + 1,
                     itemCode: item.itemCode || null,
                     description: item.description,
-                    ...totals
+                    ...totals,
+                    retencion: item.retencion || null
                 };
             });
 
@@ -827,7 +861,10 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
                     discount: line.discount,
                     itbisRate: line.itbisRate,
                     itbisAmount: line.itbisAmount,
-                    total: line.total
+                    total: line.total,
+                    retencionIndicador: line.retencion?.indicador ?? null,
+                    montoItbisRetenido: line.retencion?.montoItbisRetenido ?? null,
+                    montoIsrRetenido: line.retencion?.montoIsrRetenido ?? null
                 })),
                 { transaction: t }
             );

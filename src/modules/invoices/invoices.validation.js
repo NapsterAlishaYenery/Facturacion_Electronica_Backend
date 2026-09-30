@@ -72,7 +72,19 @@ const itemSchema = Joi.object({
         .messages({
             'number.min': 'ITBIS rate cannot be negative',
             'number.max': 'ITBIS rate cannot exceed 100'
-        })
+        }),
+
+    // 🔥 NUEVO: retención por línea (solo tipos 41 y 47).
+    // La regla de "solo 41/47" se valida en el .custom() del schema padre.
+    retencion: Joi.object({
+        indicador: Joi.number().integer().valid(1, 2).required()
+            .messages({
+                'any.required': 'Retencion.indicador is required',
+                'any.only': 'Retencion.indicador must be 1 (Retención) or 2 (Percepción)'
+            }),
+        montoItbisRetenido: Joi.number().min(0).optional().allow(null),
+        montoIsrRetenido: Joi.number().min(0).optional().allow(null)
+    }).optional().allow(null)
 });
 
 // Transporte — solo aplica en tipos 31, 32, 33, 34, 44, 45, 46, 47
@@ -348,6 +360,28 @@ const createInvoiceSchema = Joi.object({
             }
         }
 
+        // 8. Retención por línea: solo en tipos 41 y 47
+        if (!['41', '47'].includes(value.type)) {
+            for (let i = 0; i < value.items.length; i++) {
+                if (value.items[i].retencion) {
+                    return helpers.error('any.custom', {
+                        message: `Item ${i + 1}: retencion only applies to types 41 and 47`
+                    });
+                }
+            }
+        }
+
+        // 9. Tipos 41 y 47: cada línea DEBE llevar retención
+        if (['41', '47'].includes(value.type)) {
+            for (let i = 0; i < value.items.length; i++) {
+                if (!value.items[i].retencion) {
+                    return helpers.error('any.custom', {
+                        message: `Item ${i + 1}: retencion is required for types 41 and 47`
+                    });
+                }
+            }
+        }
+
         return value;
     })
     .messages({
@@ -416,6 +450,7 @@ const updateInvoiceSchema = Joi.object({
         'object.min': 'At least one field is required to update'
     })
     .custom((value, helpers) => {
+        // 1. issuedAt: no futuro, no más de 30 días atrás
         if (value.issuedAt) {
             const issuedAt = new Date(value.issuedAt);
             const now = new Date();
@@ -429,6 +464,7 @@ const updateInvoiceSchema = Joi.object({
             }
         }
 
+        // 2. Validación por línea: discount no puede superar quantity × unitPrice
         if (value.items) {
             for (let i = 0; i < value.items.length; i++) {
                 const item = value.items[i];
@@ -437,6 +473,22 @@ const updateInvoiceSchema = Joi.object({
                     return helpers.error('any.custom', {
                         message: `Item ${i + 1}: discount cannot exceed (quantity × unitPrice)`
                     });
+                }
+            }
+        }
+
+        // 3. 🔥 NUEVO: retención por línea: validar forma si viene.
+        //    La coherencia con el tipo (41/47) se valida en el servicio,
+        //    porque el tipo real vive en la BD, no en el body.
+        if (value.items) {
+            for (let i = 0; i < value.items.length; i++) {
+                const ret = value.items[i].retencion;
+                if (ret !== undefined && ret !== null) {
+                    if (ret.indicador !== 1 && ret.indicador !== 2) {
+                        return helpers.error('any.custom', {
+                            message: `Item ${i + 1}: retencion.indicador must be 1 (Retención) or 2 (Percepción)`
+                        });
+                    }
                 }
             }
         }

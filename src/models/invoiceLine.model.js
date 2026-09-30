@@ -99,6 +99,33 @@ const InvoiceLine = sequelize.define('InvoiceLine', {
             }
         }
     },
+    retencionIndicador: {
+        type: DataTypes.SMALLINT,
+        allowNull: true,
+        field: 'retencion_indicador',
+        validate: {
+            isIn: {
+                args: [[1, 2]],
+                msg: 'RetencionIndicador must be 1 (Retención) or 2 (Percepción)'
+            }
+        }
+    },
+    montoItbisRetenido: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'monto_itbis_retenido',
+        validate: {
+            min: { args: [0], msg: 'Monto ITBIS retenido cannot be negative' }
+        }
+    },
+    montoIsrRetenido: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'monto_isr_retenido',
+        validate: {
+            min: { args: [0], msg: 'Monto ISR retenido cannot be negative' }
+        }
+    },
     total: {
         type: DataTypes.DECIMAL(15, 2),
         allowNull: false,
