@@ -17,6 +17,16 @@ const files = [
   'docs/dgii/xsd/ecf32/e-CF 32 v.1.0.xsd',
   'docs/dgii/xsd/ecf33/e-CF 33 v.1.0.xsd',   // ← agregado
   'docs/dgii/xsd/ecf34/e-CF 34 v.1.0.xsd',   // ← agregado
+  'docs/dgii/xsd/ecf31/e-CF 31 v.1.0.xsd',
+  'docs/dgii/xsd/ecf32/e-CF 32 v.1.0.xsd',
+  'docs/dgii/xsd/ecf33/e-CF 33 v.1.0.xsd',
+  'docs/dgii/xsd/ecf34/e-CF 34 v.1.0.xsd',
+  'docs/dgii/xsd/ecf41/e-CF 41 v.1.0.xsd',
+  'docs/dgii/xsd/ecf43/e-CF 43 v.1.0.xsd',
+  'docs/dgii/xsd/ecf44/e-CF 44 v.1.0.xsd',
+  'docs/dgii/xsd/ecf45/e-CF 45 v.1.0.xsd',
+  'docs/dgii/xsd/ecf46/e-CF 46 v.1.0.xsd',
+  'docs/dgii/xsd/ecf47/e-CF 47 v.1.0.xsd',
 ];
 
 for (const f of files) {

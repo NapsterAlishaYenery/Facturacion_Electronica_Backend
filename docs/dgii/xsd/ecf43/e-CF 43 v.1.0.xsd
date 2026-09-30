@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8" ?>
+<?xml version="1.0" encoding="utf-8" ?>
 <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
   <xs:element name="ECF">
     <xs:complexType>
@@ -161,7 +161,7 @@
           </xs:complexType>
         </xs:element>
         <xs:element name="FechaHoraFirma" type="DateTimeValidationType" minOccurs="1" maxOccurs="1"/>
-        <xs:any processContents="skip" minOccurs="1" maxOccurs="1"/>
+        <xs:any processContents="skip" minOccurs="0" maxOccurs="1" />
       </xs:sequence>
     </xs:complexType>
   </xs:element>
