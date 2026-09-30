@@ -35,6 +35,56 @@ const ECF_TYPE_NAMES = {
 
 
 // ------------------------------------------------------------
+// Helper: mapear <Transporte> del payload a columnas planas
+// Devuelve {} si no aplica (el Joi ya filtró por tipo)
+// ------------------------------------------------------------
+function mapTransporteFields(transporte) {
+    if (!transporte) return {};
+
+    return {
+        transporteVia: transporte.viaTransporte || null,
+        transportePaisOrigen: transporte.paisOrigen || null,
+        transporteDireccionDestino: transporte.direccionDestino || null,
+        transportePaisDestino: transporte.paisDestino || null,
+        transporteRncCompania: transporte.rncCompaniaTransportista || null,
+        transporteNombreCompania: transporte.nombreCompaniaTransportista || null,
+        transporteNumeroViaje: transporte.numeroViaje || null,
+        transporteConductor: transporte.conductor || null,
+        transporteDocumento: transporte.documentoTransporte || null,
+        transporteFicha: transporte.ficha || null,
+        transportePlaca: transporte.placa || null,
+        transporteRuta: transporte.rutaTransporte || null,
+        transporteZona: transporte.zonaTransporte || null,
+        transporteNumeroAlbaran: transporte.numeroAlbaran || null
+    };
+}
+
+// ------------------------------------------------------------
+// Helper: mapear <InformacionesAdicionales> del payload a columnas
+// planas. Solo aplica a tipo 46 (exportación).
+// ------------------------------------------------------------
+function mapInfoAdicionalFields(info) {
+    if (!info) return {};
+
+    return {
+        infoFechaEmbarque: info.fechaEmbarque ? new Date(info.fechaEmbarque) : null,
+        infoNumeroEmbarque: info.numeroEmbarque || null,
+        infoNumeroContenedor: info.numeroContenedor || null,
+        infoNombrePuertoEmbarque: info.nombrePuertoEmbarque || null,
+        infoCondicionesEntrega: info.condicionesEntrega || null,
+        infoTotalFob: info.totalFob ?? null,
+        infoSeguro: info.seguro ?? null,
+        infoFlete: info.flete ?? null,
+        infoOtrosGastos: info.otrosGastos ?? null,
+        infoTotalCif: info.totalCif ?? null,
+        infoRegimenAduanero: info.regimenAduanero || null,
+        infoNombrePuertoSalida: info.nombrePuertoSalida || null,
+        infoNombrePuertoDesembarque: info.nombrePuertoDesembarque || null
+    };
+}
+
+
+// ------------------------------------------------------------
 // Helper: validar y cargar la factura original que modifica
 // una Nota de Débito/Crédito (33/34)
 // TRANSACCIONAL — se llama dentro de la tx para bloquear la fila
@@ -214,8 +264,6 @@ function calculateInvoiceTotals(lines) {
 // ------------------------------------------------------------
 async function assignNextNCF(companyId, type, transaction) {
     // 1. Buscar la secuencia activa, vigente, con números disponibles, ordenada por vencimiento
-    const { Sequence } = require('../../models');
-    const { Op } = require('sequelize');
 
     const sequence = await Sequence.findOne({
         where: {
@@ -430,9 +478,8 @@ async function getMyInvoiceById(companyId, invoiceId) {
 
 // ------------------------------------------------------------
 // Crear factura (company_admin)
-// ------------------------------------------------------------
-// ------------------------------------------------------------
-// Crear factura (company_admin)
+// Maneja los 10 tipos de e-CF. Qué campos extras se guardan
+// depende de lo que el Joi haya dejado pasar según el tipo.
 // ------------------------------------------------------------
 async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
     if (!companyId) {
@@ -449,7 +496,22 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
         receiverName,
         issuedAt,
         items,
-        // 🔥 NUEVO: campos específicos de Notas (33/34)
+        // Comprador extranjero (46, 47)
+        receiverIdentificadorExtranjero,
+        receiverPais,
+        // Exento (43, 44, 47)
+        exemptAmount,
+        // ITBIS3 (46)
+        itbis3Base,
+        itbis3Amount,
+        // Retenciones encabezado (41, 47)
+        totalItbisRetenido,
+        totalIsrRetencion,
+        // Transporte (varios)
+        transporte,
+        // Info adicional (46)
+        informacionesAdicionales,
+        // Notas (33, 34)
         modifiedNcf,
         modifiedNcfIssuerRnc,
         modifiedNcfDate,
@@ -460,7 +522,7 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
 
     const isNota = type === '33' || type === '34';
 
-    // 1. Verificar que la empresa esté activa
+    // 1. Empresa activa
     const company = await Company.findByPk(companyId);
     if (!company) {
         throw new AppError('Company not found', 404, 'COMPANY_NOT_FOUND');
@@ -473,16 +535,13 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
         );
     }
 
-    // 2. Verificar suscripción activa
+    // 2. Suscripción activa
     const subscription = await Subscription.findOne({
         where: {
             companyId,
             status: ['trial', 'active', 'past_due']
         },
-        include: [{
-            model: Plan,
-            as: 'plan'
-        }],
+        include: [{ model: Plan, as: 'plan' }],
         order: [['createdAt', 'DESC']]
     });
 
@@ -494,7 +553,7 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
         );
     }
 
-    // 3. Verificar límite mensual ANTES de la transacción
+    // 3. Límite mensual
     const planLimit = subscription.plan?.invoicesPerMonth;
     const usedThisMonth = Number(subscription.invoicesUsedThisMonth) || 0;
 
@@ -506,19 +565,18 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
         );
     }
 
-    // 4. Procesar todo en una transacción
+    // 4. Transacción
     const result = await sequelize.transaction(async (t) => {
-        // 4.1. Si es 33/34, resolver la factura original AHORA (dentro de la tx)
-        //      para evitar race conditions y validar que exista y sea modificable
+        // 4.1. Notas (33/34): resolver factura original
         let originalInvoice = null;
         if (isNota) {
             originalInvoice = await resolveModifiedInvoice(companyId, type, modifiedNcf, t);
         }
 
-        // 4.2. Asignar siguiente e-NCF (transaccional)
+        // 4.2. Asignar NCF
         const { sequence, ncf } = await assignNextNCF(companyId, type, t);
 
-        // 4.3. Calcular totales de las líneas
+        // 4.3. Calcular líneas
         const calculatedLines = items.map((item, index) => {
             const totals = calculateLineTotals(item);
             return {
@@ -529,15 +587,13 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
             };
         });
 
-        // 4.4. Calcular totales de la factura
+        // 4.4. Totales factura
         const invoiceTotals = calculateInvoiceTotals(calculatedLines);
 
-        // 4.5. Determinar issuedAt
+        // 4.5. issuedAt
         const finalIssuedAt = issuedAt ? new Date(issuedAt) : new Date();
 
-        // 4.6. Construir los campos de la nota (o nulls si no aplica)
-        //      Nota: si es 33/34, sobreescribimos modifiedNcfDate y modifiedNcfIssuerRnc
-        //      con los datos reales de la factura original (evita manipulación del cliente).
+        // 4.6. Campos de nota
         const notaFields = isNota ? {
             modifiedNcf: originalInvoice.ncf,
             modifiedNcfIssuerRnc: modifiedNcfIssuerRnc || originalInvoice.issuerRnc,
@@ -547,7 +603,7 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
             indicadorNotaCredito: type === '34' ? indicadorNotaCredito : null
         } : {};
 
-        // 4.7. Crear la factura (encabezado)
+        // 4.7. Crear factura
         const invoice = await Invoice.create({
             companyId,
             sequenceId: sequence.id,
@@ -558,14 +614,38 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
             issuerName: company.name,
             receiverRnc: receiverRnc || null,
             receiverName: receiverName || null,
+
+            // Comprador extranjero (46, 47)
+            receiverIdentificadorExtranjero: receiverIdentificadorExtranjero || null,
+            receiverPais: receiverPais || null,
+
+            // Totales base
             subtotal: invoiceTotals.subtotal,
             itbis: invoiceTotals.itbis,
             total: invoiceTotals.total,
+
+            // Exento (43, 44, 47)
+            exemptAmount: exemptAmount ?? null,
+
+            // ITBIS3 (46)
+            itbis3Base: itbis3Base ?? null,
+            itbis3Amount: itbis3Amount ?? null,
+
+            // Retenciones encabezado (41, 47)
+            totalItbisRetenido: totalItbisRetenido ?? null,
+            totalIsrRetencion: totalIsrRetencion ?? null,
+
             issuedAt: finalIssuedAt,
+
+            // Transporte + Info adicional
+            ...mapTransporteFields(transporte),
+            ...mapInfoAdicionalFields(informacionesAdicionales),
+
+            // Notas (33, 34)
             ...notaFields
         }, { transaction: t });
 
-        // 4.8. Crear las líneas
+        // 4.8. Crear líneas
         const lines = await InvoiceLine.bulkCreate(
             calculatedLines.map((line) => ({
                 invoiceId: invoice.id,
@@ -582,13 +662,13 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
             { transaction: t, returning: true }
         );
 
-        // 4.9. Incrementar contador de facturas usadas del mes
+        // 4.9. Incrementar contador
         await subscription.increment('invoicesUsedThisMonth', {
             by: 1,
             transaction: t
         });
 
-        // 4.10. Audit log
+        // 4.10. Audit log (con info nueva siempre)
         try {
             await AuditLog.create({
                 companyId,
@@ -601,8 +681,20 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
                     type: invoice.type,
                     total: invoice.total,
                     lineCount: lines.length,
-                    // 🔥 NUEVO: si es nota, guardar el NCF que modifica
-                    modifiedNcf: invoice.modifiedNcf || null
+                    // Comprador
+                    receiverRnc: invoice.receiverRnc || null,
+                    receiverIdentificadorExtranjero: invoice.receiverIdentificadorExtranjero || null,
+                    // Notas
+                    modifiedNcf: invoice.modifiedNcf || null,
+                    // Exento / ITBIS3
+                    exemptAmount: invoice.exemptAmount || null,
+                    itbis3Base: invoice.itbis3Base || null,
+                    // Retenciones
+                    totalItbisRetenido: invoice.totalItbisRetenido || null,
+                    totalIsrRetencion: invoice.totalIsrRetencion || null,
+                    // Transporte (solo si aplica)
+                    transporteVia: invoice.transporteVia || null,
+                    transportePaisDestino: invoice.transportePaisDestino || null
                 },
                 ip: reqInfo.ip || null,
                 userAgent: reqInfo.userAgent || null
@@ -614,7 +706,7 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
         return { invoice, lines, sequence };
     });
 
-    // 5. Recargar factura con sequence + lines para la respuesta
+    // 5. Recargar con relaciones
     const fullInvoice = await Invoice.findByPk(result.invoice.id, {
         include: [
             {

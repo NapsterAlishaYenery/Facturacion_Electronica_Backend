@@ -6,7 +6,7 @@ const { User, Company, Subscription, Plan, Sequence, Invoice, InvoiceLine, Audit
 
 let companyAdminCookie = null;
 let testRnc = '130999933';
-let testEmail = 'owner-inv-notas@expedinap.com';
+let testEmail = 'owner-inv-create@expedinap.com';
 let testCompanyId = null;
 let testSequence32Id = null;
 let testSequence33Id = null;

@@ -5,7 +5,7 @@ const sequelize = require('../../src/config/database');
 const { User, Company, Subscription, Plan, Sequence, Invoice, InvoiceLine, AuditLog } = require('../../src/models');
 
 let companyAdminCookie = null;
-let testRnc = '130999933';
+let testRnc = '130999963';
 let testEmail = 'owner-inv-notas@expedinap.com';
 let testCompanyId = null;
 let testSequence32Id = null;

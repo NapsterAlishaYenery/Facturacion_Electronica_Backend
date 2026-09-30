@@ -8,8 +8,8 @@ const { User, Company, Subscription, Plan, Sequence, Invoice, InvoiceLine, Audit
 // Estado del test
 // ============================================================
 let companyAdminCookie = null;
-let testRnc = '130999934';
-let testEmail = 'owner-inv-upd-notas@expedinap.com';
+let testRnc = '130999935';
+let testEmail = 'owner-inv-upd-me@expedinap.com';
 let testCompanyId = null;
 let seq32Id = null;
 let seq33Id = null;
@@ -282,7 +282,7 @@ async function cleanupCompany(rnc) {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json', 'Cookie': companyAdminCookie },
             body: JSON.stringify({
-                issuedAt: new Date().toISOString()
+                issuedAt: new Date(Date.now() - 1000).toISOString()
             })
         });
         test('status 200', upd9Res.status === 200);
