@@ -20,6 +20,9 @@ const sequencesRoutes = require('./modules/sequences/sequences.routes');
 const invoicesRoutes = require('./modules/invoices/invoices.routes');
 const dgiiRoutes = require('./modules/dgii/dgii.routes');
 
+// Importar scheduler de jobs programados
+const { startScheduler } = require('./modules/jobs/jobs.scheduler');
+
 //Importar Middlewatres globales propios
 const { errorMiddleware, notFoundMiddleware } = require('./shared/middlewares/error.middleware');
 
@@ -84,6 +87,9 @@ async function startServer() {
 
         // NO usar sync en producción, usar migraciones
         // await sequelize.sync({ alter: false });
+
+        // Arrancar jobs programados (respeta ENABLE_JOBS del .env)
+        startScheduler();
 
         app.listen(port, () => {
             console.log(`🚀 Server running on port ${port} - Facturación Electrónica Ready`);
