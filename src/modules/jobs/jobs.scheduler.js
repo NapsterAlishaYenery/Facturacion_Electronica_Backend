@@ -1,4 +1,4 @@
- // ============================================================
+// ============================================================
 // Scheduler de jobs programados (node-cron)
 //
 // Responsabilidades:
@@ -40,15 +40,15 @@ const logger = require('../../shared/logs/logger');
 function buildJobDefinitions() {
     return [
         // ---------------------------------------------------------
-        // Step 5.2 — Reset mensual de contadores de facturas
+        // Step 5.2 — Ciclo de vida de suscripciones
         // ---------------------------------------------------------
         {
-            name: 'reset-invoices-monthly',
-            schedule: '0 0 1 * *',       // día 1 de cada mes, 00:00
-            enabled: false,
-            handler: null                 // se asigna en Step 5.2
+            name: 'subscription-lifecycle',
+            schedule: '0 0 * * *',       // diario, 00:00
+            enabled: true,
+            handler: require('./jobs/subscription-lifecycle.job')
         },
-
+        
         // ---------------------------------------------------------
         // Step 5.3 — Desactivar secuencias expiradas
         // ---------------------------------------------------------
