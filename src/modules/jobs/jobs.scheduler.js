@@ -48,15 +48,15 @@ function buildJobDefinitions() {
             enabled: true,
             handler: require('./jobs/subscription-lifecycle.job')
         },
-        
+
         // ---------------------------------------------------------
         // Step 5.3 — Desactivar secuencias expiradas
         // ---------------------------------------------------------
         {
             name: 'check-expiring-sequences',
             schedule: '5 0 * * *',       // diario, 00:05
-            enabled: false,
-            handler: null
+            enabled: true,
+            handler: require('./jobs/check-expiring-sequences.job')
         },
 
         // ---------------------------------------------------------
