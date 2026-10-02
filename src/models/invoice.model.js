@@ -400,6 +400,15 @@ const Invoice = sequelize.define('Invoice', {
                 msg: 'IndicadorNotaCredito must be 0 or 1'
             }
         }
+    },
+    sendAttempts: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+        field: 'send_attempts',
+        validate: {
+            min: { args: [0], msg: 'send_attempts cannot be negative' }
+        }
     }
 }, {
     tableName: 'invoices',

@@ -351,3 +351,8 @@ COMMENT ON COLUMN invoices.total_itbis_retenido IS
     'Total ITBIS retenido a nivel encabezado (41, 47)';
 COMMENT ON COLUMN invoices.total_isr_retencion IS
     'Total ISR retenido a nivel encabezado (41, 47)';
+
+    ALTER TABLE invoices
+    ADD COLUMN send_attempts INT NOT NULL DEFAULT 0;
+
+COMMENT ON COLUMN invoices.send_attempts IS 'Número de intentos de envío a DGII (máx 5 antes de rejected)';

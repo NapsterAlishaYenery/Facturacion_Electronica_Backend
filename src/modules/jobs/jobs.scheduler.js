@@ -69,28 +69,19 @@ function buildJobDefinitions() {
             handler: require('./jobs/alert-expiring-certs.job')
         },
 
-        // ---------------------------------------------------------
-        // Step 5.5 — Limpiar audit_logs antiguos
-        // ---------------------------------------------------------
-        {
-            name: 'cleanup-old-audit-logs',
-            schedule: '0 3 * * 0',       // domingos, 03:00
-            enabled: false,
-            handler: null
-        },
 
         // ---------------------------------------------------------
-        // Step 5.6 — Reintentar envíos fallidos a DGII
+        // Step 5.5 — Reintentar envíos fallidos a DGII
         // ---------------------------------------------------------
         {
             name: 'retry-failed-sends',
             schedule: '*/30 * * * *',    // cada 30 min
-            enabled: false,
-            handler: null
+            enabled: true,
+            handler: require('./jobs/retry-failed-sends.job')
         },
 
         // ---------------------------------------------------------
-        // Step 5.7 — Consultar estado de facturas pendientes
+        // Step 5.6 — Consultar estado de facturas pendientes
         // ---------------------------------------------------------
         {
             name: 'poll-pending-status',
@@ -99,8 +90,8 @@ function buildJobDefinitions() {
             handler: null
         },
 
-        // ---------------------------------------------------------
-        // Step 5.8 — Generar RFCE mensual
+        // ----------------------   -----------------------------------
+        // Step 5.7 — Generar RFCE mensual
         // ---------------------------------------------------------
         {
             name: 'generate-monthly-rfce',
