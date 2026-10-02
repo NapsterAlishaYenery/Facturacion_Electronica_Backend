@@ -86,8 +86,8 @@ function buildJobDefinitions() {
         {
             name: 'poll-pending-status',
             schedule: '*/15 * * * *',    // cada 15 min
-            enabled: false,
-            handler: null
+            enabled: true,
+            handler: require('./jobs/poll-pending-status.job')
         },
 
         // ----------------------   -----------------------------------

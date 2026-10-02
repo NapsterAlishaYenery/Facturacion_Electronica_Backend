@@ -1,17 +1,5 @@
 // ============================================================
 // Test de integración: retry-failed-sends.job
-//
-// Verifica:
-//   1. Sin dgii.sender → job retorna affected 0 (stub path)
-//   2. Con dgii.sender mock → procesa facturas
-//   3. Factura enviada OK → status='sent', track_id seteado
-//   4. Factura con error → send_attempts++ pero status sigue signed
-//   5. Factura con 5 intentos fallidos → status='rejected'
-//   6. Facturas recientes (< 30 min) NO se tocan
-//   7. Facturas con track_id NO se tocan
-//
-// Uso:
-//   node test/integration/retry-failed-sends.test.js
 // ============================================================
 
 require('dotenv').config();
@@ -70,6 +58,10 @@ async function cleanup() {
     await Company.destroy({ where: { id: old.id } });
 }
 
+async function purgeInvoices() {
+    await Invoice.destroy({ where: { companyId } });
+}
+
 async function setup() {
     await cleanup();
 
@@ -116,7 +108,7 @@ async function createInvoice(overrides = {}) {
         ncf: nextNcf(),
         status: 'signed',
         issuerRnc: TEST_RNC,
-        issuerName: 'Test Retry Sends SNSL',
+        issuerName: 'Test Retry Sends SRL',
         subtotal: 1000,
         itbis: 180,
         total: 1180,
@@ -127,11 +119,6 @@ async function createInvoice(overrides = {}) {
     });
 }
 
-// ------------------------------------------------------------
-// Inyecta un mock de dgii.sender interceptando Module._load.
-// Esto funciona aunque el archivo real no exista todavía
-// o exista vacío.
-// ------------------------------------------------------------
 let _originalLoad = null;
 
 function installMockSender(sendECFImpl) {
@@ -156,9 +143,6 @@ function uninstallMockSender() {
     }
 }
 
-// ------------------------------------------------------------
-// Fuerza recarga del job para que tome el mock actual
-// ------------------------------------------------------------
 function reloadJob() {
     const jobPath = require.resolve('../../src/modules/jobs/jobs/retry-failed-sends.job');
     delete require.cache[jobPath];
@@ -177,6 +161,7 @@ function reloadJob() {
         // TEST 1: sin dgii.sender → stub path
         // ====================================================
         console.log('--- Test 1: sin dgii.sender (stub) ---');
+        await purgeInvoices();
         const invStub = await createInvoice({ createdAt: minutesAgo(60) });
 
         let runJob = reloadJob();
@@ -194,6 +179,7 @@ function reloadJob() {
         console.log('\n--- Test 2: mock sender OK ---');
         installMockSender(async () => ({ trackId: 'TRK-OK-001' }));
 
+        await purgeInvoices();
         const invOk = await createInvoice({ createdAt: minutesAgo(60) });
         runJob = reloadJob();
         result = await runJob();
@@ -212,6 +198,7 @@ function reloadJob() {
         uninstallMockSender();
         installMockSender(async () => { throw new Error('DGII timeout'); });
 
+        await purgeInvoices();
         const invErr = await createInvoice({ createdAt: minutesAgo(60), sendAttempts: 2 });
         runJob = reloadJob();
         result = await runJob();
@@ -223,6 +210,7 @@ function reloadJob() {
         // TEST 4: mock sender — 5to intento → rejected
         // ====================================================
         console.log('\n--- Test 4: 5to intento fallido → rejected ---');
+        await purgeInvoices();
         const invExhausted = await createInvoice({ createdAt: minutesAgo(60), sendAttempts: 4 });
         result = await runJob();
         await invExhausted.reload();
@@ -233,6 +221,7 @@ function reloadJob() {
         // TEST 5: factura reciente NO se toca
         // ====================================================
         console.log('\n--- Test 5: factura reciente no se toca ---');
+        await purgeInvoices();
         const invRecent = await createInvoice({ createdAt: minutesAgo(5) });
         result = await runJob();
         await invRecent.reload();
@@ -243,6 +232,7 @@ function reloadJob() {
         // TEST 6: factura con track_id NO se toca
         // ====================================================
         console.log('\n--- Test 6: factura con track_id no se toca ---');
+        await purgeInvoices();
         const invWithTrack = await createInvoice({
             createdAt: minutesAgo(60),
             status: 'sent',
@@ -257,6 +247,7 @@ function reloadJob() {
         // TEST 7: factura con send_attempts >= 5 NO se toca
         // ====================================================
         console.log('\n--- Test 7: send_attempts >= 5 no se toca ---');
+        await purgeInvoices();
         const invMax = await createInvoice({ createdAt: minutesAgo(60), sendAttempts: 5 });
         result = await runJob();
         await invMax.reload();
