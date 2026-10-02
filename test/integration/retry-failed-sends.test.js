@@ -16,7 +16,6 @@
 
 require('dotenv').config();
 const { Op } = require('sequelize');
-const path = require('path');
 const Module = require('module');
 const sequelize = require('../../src/config/database');
 const {
@@ -54,9 +53,6 @@ function daysFromNow(n) {
 async function cleanup() {
     const old = await Company.findOne({ where: { rnc: TEST_RNC } });
     if (!old) return;
-
-    const invoices = await Invoice.findAll({ where: { companyId: old.id }, attributes: ['id'] });
-    const invIds = invoices.map(i => i.id);
 
     await AuditLog.destroy({
         where: {
@@ -120,7 +116,7 @@ async function createInvoice(overrides = {}) {
         ncf: nextNcf(),
         status: 'signed',
         issuerRnc: TEST_RNC,
-        issuerName: 'Test Retry Sends SRL',
+        issuerName: 'Test Retry Sends SNSL',
         subtotal: 1000,
         itbis: 180,
         total: 1180,
@@ -132,24 +128,41 @@ async function createInvoice(overrides = {}) {
 }
 
 // ------------------------------------------------------------
-// Inyecta un mock de dgii.sender antes de requerir el job
+// Inyecta un mock de dgii.sender interceptando Module._load.
+// Esto funciona aunque el archivo real no exista todavía
+// o exista vacío.
 // ------------------------------------------------------------
+let _originalLoad = null;
+
 function installMockSender(sendECFImpl) {
-    const dgiiPath = require.resolve('../../src/modules/dgii/dgii.sender');
-    const original = Module._cache[dgiiPath];
-    Module._cache[dgiiPath] = {
-        id: dgiiPath,
-        filename: dgiiPath,
-        loaded: true,
-        exports: { sendECF: sendECFImpl }
+    const original = Module._load;
+    Module._load = function (request, parent, isMain) {
+        if (
+            request.endsWith('dgii.sender') ||
+            request.includes('dgii/dgii.sender') ||
+            request.includes('dgii\\dgii.sender')
+        ) {
+            return { sendECF: sendECFImpl };
+        }
+        return original.apply(this, arguments);
     };
-    return original;
+    _originalLoad = original;
 }
 
-function uninstallMockSender(original) {
-    const dgiiPath = require.resolve('../../src/modules/dgii/dgii.sender');
-    if (original) Module._cache[dgiiPath] = original;
-    else delete Module._cache[dgiiPath];
+function uninstallMockSender() {
+    if (_originalLoad) {
+        Module._load = _originalLoad;
+        _originalLoad = null;
+    }
+}
+
+// ------------------------------------------------------------
+// Fuerza recarga del job para que tome el mock actual
+// ------------------------------------------------------------
+function reloadJob() {
+    const jobPath = require.resolve('../../src/modules/jobs/jobs/retry-failed-sends.job');
+    delete require.cache[jobPath];
+    return require('../../src/modules/jobs/jobs/retry-failed-sends.job')._raw;
 }
 
 (async () => {
@@ -164,11 +177,9 @@ function uninstallMockSender(original) {
         // TEST 1: sin dgii.sender → stub path
         // ====================================================
         console.log('--- Test 1: sin dgii.sender (stub) ---');
-        delete require.cache[require.resolve('../../src/modules/jobs/jobs/retry-failed-sends.job')];
-        let job = require('../../src/modules/jobs/jobs/retry-failed-sends.job');
-        let runJob = job._raw;
-
         const invStub = await createInvoice({ createdAt: minutesAgo(60) });
+
+        let runJob = reloadJob();
         let result = await runJob();
         test('affected = 0 (stub)', result.affected === 0, `got ${result.affected}`);
         test('reason = dgii.sender not implemented', result.reason === 'dgii.sender not implemented');
@@ -181,13 +192,10 @@ function uninstallMockSender(original) {
         // TEST 2: con mock sender — factura enviada OK
         // ====================================================
         console.log('\n--- Test 2: mock sender OK ---');
-        const original = installMockSender(async () => ({ trackId: 'TRK-OK-001' }));
-
-        delete require.cache[require.resolve('../../src/modules/jobs/jobs/retry-failed-sends.job')];
-        job = require('../../src/modules/jobs/jobs/retry-failed-sends.job');
-        runJob = job._raw;
+        installMockSender(async () => ({ trackId: 'TRK-OK-001' }));
 
         const invOk = await createInvoice({ createdAt: minutesAgo(60) });
+        runJob = reloadJob();
         result = await runJob();
         test('affected >= 1', result.affected >= 1, `got ${result.affected}`);
         test('sent = 1', result.sent === 1, `got ${result.sent}`);
@@ -201,14 +209,11 @@ function uninstallMockSender(original) {
         // TEST 3: mock sender — error sin superar max
         // ====================================================
         console.log('\n--- Test 3: mock sender con error (< max) ---');
-        uninstallMockSender(original);
-        const orig2 = installMockSender(async () => { throw new Error('DGII timeout'); });
-
-        delete require.cache[require.resolve('../../src/modules/jobs/jobs/retry-failed-sends.job')];
-        job = require('../../src/modules/jobs/jobs/retry-failed-sends.job');
-        runJob = job._raw;
+        uninstallMockSender();
+        installMockSender(async () => { throw new Error('DGII timeout'); });
 
         const invErr = await createInvoice({ createdAt: minutesAgo(60), sendAttempts: 2 });
+        runJob = reloadJob();
         result = await runJob();
         await invErr.reload();
         test('invErr.status sigue signed', invErr.status === 'signed', `got ${invErr.status}`);
@@ -258,7 +263,7 @@ function uninstallMockSender(original) {
         test('invMax sigue signed (no reintentado)', invMax.status === 'signed');
         test('invMax.sendAttempts = 5', invMax.sendAttempts === 5);
 
-        uninstallMockSender(orig2);
+        uninstallMockSender();
 
         // ====================================================
         // TEST 8: audit log
@@ -276,6 +281,7 @@ function uninstallMockSender(original) {
         console.error(error.stack);
         failed++;
     } finally {
+        uninstallMockSender();
         try {
             await cleanup();
             console.log('\n🧹 Cleaned up');
