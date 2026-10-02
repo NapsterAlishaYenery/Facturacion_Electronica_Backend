@@ -65,8 +65,8 @@ function buildJobDefinitions() {
         {
             name: 'alert-expiring-certs',
             schedule: '0 6 * * *',       // diario, 06:00
-            enabled: false,
-            handler: null
+            enabled: true,
+            handler: require('./jobs/alert-expiring-certs.job')
         },
 
         // ---------------------------------------------------------
