@@ -533,78 +533,158 @@ function generateECF47(invoiceData) { return buildECFBody(invoiceData, { type: '
 
 
 // ============================================================
-// 5. GENERADOR DE RFCE (Resumen de Factura de Consumo)
+// 5. GENERADOR DE RFCE (Resumen de Factura de Consumo < 250K)
+// ============================================================
+// Estructura según:
+//   - RFCE 32 v.1.0.xsd (DGII)
+//   - Formato de Resumen Factura de Consumo Electrónica v1.0 (DGII)
+//
+// IMPORTANTE:
+//   - Recibe los datos de UNA SOLA factura tipo 32 (monto < 250K).
+//   - NO es un resumen consolidado de varias facturas.
+//   - El XML resultante debe validar contra el XSD oficial.
 // ============================================================
 
-function buildRFCE(rfceData) {
-    const { issuerRnc, issuerName, periodFrom, periodTo, issuedAt, invoices } = rfceData;
+/**
+ * Construye el XML del RFCE (Resumen de Factura de Consumo Electrónica < 250K)
+ * a partir de los datos de UNA factura tipo 32.
+ *
+ * @param {object} invoiceData - datos de UNA factura tipo 32 (< 250K)
+ * @param {string} codigoSeguridad - 6 primeros chars del hash de la firma del e-CF 32
+ * @returns {string} XML del RFCE listo para firmar y enviar
+ */
+function buildRFCE(invoiceData, codigoSeguridad) {
+    const {
+        // IdDoc
+        ncf,
+        tipoIngresos = '01',
+        tipoPago = 1,
+        paymentMethods = [],   // [{ method: 1..8, amount: number }, ...] (máx 7)
 
-    if (!invoices || invoices.length === 0) {
-        throw new Error('RFCE requires at least one invoice');
+        // Emisor
+        issuerRnc,
+        issuerName,
+        issuedAt,
+
+        // Comprador (todos opcionales según XSD)
+        receiverRnc,
+        receiverIdentificadorExtranjero,
+        receiverName,
+
+        // Totales (todos opcionales excepto MontoTotal)
+        itbis1Base, itbis1Amount,
+        itbis2Base, itbis2Amount,
+        itbis3Base,
+        exemptAmount,
+        additionalTaxesAmount,   // MontoImpuestoAdicional (opcional, > 0)
+        additionalTaxes = [],    // [{ code, iscEspecifico, iscAdvalorem, otros }] (máx 20)
+        total,
+        montoNoFacturable,
+        montoPeriodo,
+    } = invoiceData;
+
+    // --- Validaciones mínimas alineadas al XSD ---
+    if (!codigoSeguridad || String(codigoSeguridad).length !== 6) {
+        throw new Error('RFCE: codigoSeguridad must be exactly 6 characters');
+    }
+    if (!ncf || String(ncf).length !== 13) {
+        throw new Error('RFCE: eNCF must be exactly 13 characters');
+    }
+    if (!issuerRnc) {
+        throw new Error('RFCE: issuerRnc is required');
+    }
+    if (!issuerName) {
+        throw new Error('RFCE: issuerName is required');
+    }
+    if (total === undefined || total === null) {
+        throw new Error('RFCE: total (MontoTotal) is required');
     }
 
-    let totalMontoGravado = 0;
-    let totalITBIS = 0;
-    let totalMonto = 0;
+    // --- Totales calculados ---
+    const base18 = Number(itbis1Base || 0);
+    const base16 = Number(itbis2Base || 0);
+    const base0 = Number(itbis3Base || 0);
+    const amount18 = Number(itbis1Amount || 0);
+    const amount16 = Number(itbis2Amount || 0);
+    const exempt = Number(exemptAmount || 0);
 
-    for (const inv of invoices) {
-        const base18 = Number(inv.itbis1Base || 0);
-        const base16 = Number(inv.itbis2Base || 0);
-        const base0 = Number(inv.itbis3Base || 0);
-        const amount18 = Number(inv.itbis1Amount || 0);
-        const amount16 = Number(inv.itbis2Amount || 0);
-        const invTotal = Number(inv.total || 0);
+    const montoGravadoTotal = base18 + base16 + base0;
+    const totalITBIS = amount18 + amount16;
 
-        totalMontoGravado += base18 + base16 + base0;
-        totalITBIS += amount18 + amount16;
-        totalMonto += invTotal;
-    }
+    // --- TablaFormasPago (opcional, hasta 7) ---
+    const tablaFormasPagoXml = paymentMethods.length > 0
+        ? `
+      <TablaFormasPago>
+        ${paymentMethods.slice(0, 7).map(pm => `
+        <FormaDePago>
+          <FormaPago>${Number(pm.method)}</FormaPago>
+          <MontoPago>${fmtMoney(pm.amount)}</MontoPago>
+        </FormaDePago>`).join('')}
+      </TablaFormasPago>`
+        : '';
 
-    const detalleECF = invoices.map(inv => {
-        const base18 = Number(inv.itbis1Base || 0);
-        const base16 = Number(inv.itbis2Base || 0);
-        const base0 = Number(inv.itbis3Base || 0);
-        const amount18 = Number(inv.itbis1Amount || 0);
-        const amount16 = Number(inv.itbis2Amount || 0);
+    // --- ImpuestosAdicionales (opcional, hasta 20) ---
+    const impuestosAdicionalesXml = additionalTaxes.length > 0
+        ? `
+      <ImpuestosAdicionales>
+        ${additionalTaxes.slice(0, 20).map(t => `
+        <ImpuestoAdicional>
+          <TipoImpuesto>${esc(String(t.code))}</TipoImpuesto>
+          ${Number(t.iscEspecifico) > 0 ? `<MontoImpuestoSelectivoConsumoEspecifico>${fmtMoney(t.iscEspecifico)}</MontoImpuestoSelectivoConsumoEspecifico>` : ''}
+          ${Number(t.iscAdvalorem) > 0 ? `<MontoImpuestoSelectivoConsumoAdvalorem>${fmtMoney(t.iscAdvalorem)}</MontoImpuestoSelectivoConsumoAdvalorem>` : ''}
+          ${Number(t.otros) > 0 ? `<OtrosImpuestosAdicionales>${fmtMoney(t.otros)}</OtrosImpuestosAdicionales>` : ''}
+        </ImpuestoAdicional>`).join('')}
+      </ImpuestosAdicionales>`
+        : '';
 
-        const montoGravado = base18 + base16 + base0;
-        const itbis = amount18 + amount16;
+    // --- Comprador (bloque opcional pero el XSD lo exige como elemento) ---
+    // El XSD declara <Comprador> sin minOccurs, por defecto es required,
+    // pero todos sus hijos son opcionales. Por eso lo emitimos vacío si no hay datos.
+    const compradorXml = `
+    <Comprador>
+      ${receiverRnc ? `<RNCComprador>${esc(receiverRnc)}</RNCComprador>` : ''}
+      ${receiverIdentificadorExtranjero ? `<IdentificadorExtranjero>${esc(receiverIdentificadorExtranjero)}</IdentificadorExtranjero>` : ''}
+      ${receiverName ? `<RazonSocialComprador>${esc(receiverName)}</RazonSocialComprador>` : ''}
+    </Comprador>`;
 
-        return `
-    <ECFResumen>
-      <eNCF>${esc(inv.ncf)}</eNCF>
-      <FechaEmision>${fmtDate(inv.issuedAt)}</FechaEmision>
-      <MontoGravado>${fmtMoney(montoGravado)}</MontoGravado>
-      <ITBIS>${fmtMoney(itbis)}</ITBIS>
-      <MontoTotal>${fmtMoney(inv.total)}</MontoTotal>
-    </ECFResumen>`;
-    }).join('');
-
-    let xml = `<?xml version="1.0" encoding="UTF-8"?>
+    // --- XML final ---
+    let xml = `<?xml version="1.0" encoding="utf-8"?>
 <RFCE>
   <Encabezado>
     <Version>1.0</Version>
     <IdDoc>
       <TipoeCF>32</TipoeCF>
+      <eNCF>${esc(ncf)}</eNCF>
+      <TipoIngresos>${esc(String(tipoIngresos))}</TipoIngresos>
+      <TipoPago>${Number(tipoPago)}</TipoPago>${tablaFormasPagoXml}
+    </IdDoc>
+    <Emisor>
       <RNCEmisor>${esc(issuerRnc)}</RNCEmisor>
       <RazonSocialEmisor>${esc(issuerName)}</RazonSocialEmisor>
-      <PeriodoDesde>${fmtDate(periodFrom)}</PeriodoDesde>
-      <PeriodoHasta>${fmtDate(periodTo)}</PeriodoHasta>
       <FechaEmision>${fmtDate(issuedAt)}</FechaEmision>
-      <TotalMontoGravado>${fmtMoney(totalMontoGravado)}</TotalMontoGravado>
-      <TotalITBIS>${fmtMoney(totalITBIS)}</TotalITBIS>
-      <TotalMonto>${fmtMoney(totalMonto)}</TotalMonto>
-      <CantidadECF>${invoices.length}</CantidadECF>
-    </IdDoc>
+    </Emisor>${compradorXml}
+    <Totales>
+      ${montoGravadoTotal > 0 ? `<MontoGravadoTotal>${fmtMoney(montoGravadoTotal)}</MontoGravadoTotal>` : ''}
+      ${base18 > 0 ? `<MontoGravadoI1>${fmtMoney(base18)}</MontoGravadoI1>` : ''}
+      ${base16 > 0 ? `<MontoGravadoI2>${fmtMoney(base16)}</MontoGravadoI2>` : ''}
+      ${base0 > 0 ? `<MontoGravadoI3>${fmtMoney(base0)}</MontoGravadoI3>` : ''}
+      ${exempt > 0 ? `<MontoExento>${fmtMoney(exempt)}</MontoExento>` : ''}
+      ${totalITBIS > 0 ? `<TotalITBIS>${fmtMoney(totalITBIS)}</TotalITBIS>` : ''}
+      ${amount18 > 0 ? `<TotalITBIS1>${fmtMoney(amount18)}</TotalITBIS1>` : ''}
+      ${amount16 > 0 ? `<TotalITBIS2>${fmtMoney(amount16)}</TotalITBIS2>` : ''}
+      ${additionalTaxesAmount > 0 ? `<MontoImpuestoAdicional>${fmtMoney(additionalTaxesAmount)}</MontoImpuestoAdicional>` : ''}${impuestosAdicionalesXml}
+      <MontoTotal>${fmtMoney(total)}</MontoTotal>
+      ${montoNoFacturable !== undefined && montoNoFacturable !== null ? `<MontoNoFacturable>${fmtMoney(montoNoFacturable)}</MontoNoFacturable>` : ''}
+      ${montoPeriodo !== undefined && montoPeriodo !== null ? `<MontoPeriodo>${fmtMoney(montoPeriodo)}</MontoPeriodo>` : ''}
+    </Totales>
+    <CodigoSeguridadeCF>${esc(codigoSeguridad)}</CodigoSeguridadeCF>
   </Encabezado>
-  <DetalleECF>${detalleECF}
-  </DetalleECF>
-  <FechaHoraFirma>${fmtDateTime(new Date())}</FechaHoraFirma>
 </RFCE>`;
 
     xml = removeEmptyTags(xml);
     return xml;
 }
+
 
 // ============================================================
 // 6. VALIDACIÓN CONTRA XSD OFICIAL DE DGII
@@ -620,7 +700,8 @@ const XSD_PATH_BY_TYPE = {
     '44': 'docs/dgii/xsd/ecf44/e-CF 44 v.1.0.xsd',
     '45': 'docs/dgii/xsd/ecf45/e-CF 45 v.1.0.xsd',
     '46': 'docs/dgii/xsd/ecf46/e-CF 46 v.1.0.xsd',
-    '47': 'docs/dgii/xsd/ecf47/e-CF 47 v.1.0.xsd'
+    '47': 'docs/dgii/xsd/ecf47/e-CF 47 v.1.0.xsd',
+    'rfce32': 'docs/dgii/xsd/rfce32/RFCE 32 v.1.0.xsd',
 };
 
 const xsdCache = {};

@@ -89,16 +89,6 @@ function buildJobDefinitions() {
             enabled: true,
             handler: require('./jobs/poll-pending-status.job')
         },
-
-        // ----------------------   -----------------------------------
-        // Step 5.7 — Generar RFCE mensual
-        // ---------------------------------------------------------
-        {
-            name: 'generate-monthly-rfce',
-            schedule: '0 4 1 * *',       // día 1 de cada mes, 04:00
-            enabled: false,
-            handler: null
-        }
     ];
 }
 
