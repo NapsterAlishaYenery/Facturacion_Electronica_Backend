@@ -1,10 +1,19 @@
 // ============================================================
-// TEST: adapters/email.adapter (Step 6.3)
+// TEST: adapters/email.adapter (Step 6.5 — actualizado)
 // Ejecutar: node test/unit/notifications_email_adapter.test.js
 //
 // Usa un mock manual de Nodemailer interceptando createTransport.
 // No envía correos reales ni requiere SMTP configurado.
 // ============================================================
+
+// ------------------------------------------------------------
+// Env vars ANTES de requerir el adapter (config las lee una vez)
+// ------------------------------------------------------------
+process.env.SMTP_HOST = 'smtp.test.local';
+process.env.SMTP_PORT = '587';
+process.env.SMTP_USER = 'test@test.local';
+process.env.SMTP_PASS = 'secret';
+process.env.SMTP_FROM = 'Test <test@test.local>';
 
 // ------------------------------------------------------------
 // MOCK: interceptar Nodemailer ANTES de requerir el adapter
@@ -15,8 +24,8 @@ const originalCreateTransport = nodemailer.createTransport;
 let capturedMails = [];
 let mockVerifyResult = true;
 
-nodemailer.createTransport = function mockCreateTransport(config) {
-    mockCreateTransport.lastConfig = config;
+nodemailer.createTransport = function mockCreateTransport(cfg) {
+    mockCreateTransport.lastConfig = cfg;
 
     return {
         sendMail: async (mailOptions) => {
@@ -29,13 +38,6 @@ nodemailer.createTransport = function mockCreateTransport(config) {
         }
     };
 };
-
-// Env vars mínimas para que el adapter pueda construirse
-process.env.SMTP_HOST = 'smtp.test.local';
-process.env.SMTP_PORT = '587';
-process.env.SMTP_USER = 'test@test.local';
-process.env.SMTP_PASS = 'secret';
-process.env.SMTP_FROM = 'Test <test@test.local>';
 
 const adapter = require('../../src/modules/notifications/adapters/email.adapter');
 
@@ -67,13 +69,7 @@ test('exporta send', typeof adapter.send === 'function');
 test('exporta verify', typeof adapter.verify === 'function');
 test('exporta _resetTransporter', typeof adapter._resetTransporter === 'function');
 
-// ------------------------------------------------------------
-// Runner
-// ------------------------------------------------------------
 (async () => {
-    // ------------------------------------------------------------
-    // Happy path
-    // ------------------------------------------------------------
     console.log('\n=== send — happy path ===\n');
     reset();
     {
@@ -97,9 +93,6 @@ test('exporta _resetTransporter', typeof adapter._resetTransporter === 'function
             mail.from === 'Test <test@test.local>');
     }
 
-    // ------------------------------------------------------------
-    // from explícito sobrescribe SMTP_FROM
-    // ------------------------------------------------------------
     console.log('\n=== from explícito ===\n');
     reset();
     {
@@ -109,14 +102,10 @@ test('exporta _resetTransporter', typeof adapter._resetTransporter === 'function
             html: '<p>x</p>',
             from: 'Otro <otro@test.local>'
         });
-
         test('from explícito usado',
             capturedMails[0].from === 'Otro <otro@test.local>');
     }
 
-    // ------------------------------------------------------------
-    // bcc opcional
-    // ------------------------------------------------------------
     console.log('\n=== bcc ===\n');
     reset();
     {
@@ -126,12 +115,10 @@ test('exporta _resetTransporter', typeof adapter._resetTransporter === 'function
             html: '<p>x</p>',
             bcc: 'bcc@test.local'
         });
-
         test('bcc incluido cuando se pasa',
             capturedMails[0].bcc === 'bcc@test.local');
     }
 
-    console.log('\n=== sin bcc ===\n');
     reset();
     {
         await adapter.send({
@@ -139,14 +126,10 @@ test('exporta _resetTransporter', typeof adapter._resetTransporter === 'function
             subject: 'X',
             html: '<p>x</p>'
         });
-
         test('bcc ausente cuando no se pasa',
             capturedMails[0].bcc === undefined);
     }
 
-    // ------------------------------------------------------------
-    // Validaciones
-    // ------------------------------------------------------------
     console.log('\n=== Validaciones ===\n');
     reset();
     {
@@ -172,9 +155,6 @@ test('exporta _resetTransporter', typeof adapter._resetTransporter === 'function
             capturedMails.length === 0);
     }
 
-    // ------------------------------------------------------------
-    // transporter lazy
-    // ------------------------------------------------------------
     console.log('\n=== transporter lazy ===\n');
     reset();
     {
@@ -185,29 +165,13 @@ test('exporta _resetTransporter', typeof adapter._resetTransporter === 'function
 
         const cfg = nodemailer.createTransport.lastConfig;
         test('después del primer send: transporter creado', !!cfg);
-        test('usa SMTP_HOST', cfg.host === 'smtp.test.local');
-        test('usa SMTP_PORT numérico', cfg.port === 587);
+        test('usa SMTP_HOST del config', cfg.host === 'smtp.test.local');
+        test('usa SMTP_PORT del config', cfg.port === 587);
         test('secure=false en puerto 587', cfg.secure === false);
-        test('auth.user correcto', cfg.auth.user === 'test@test.local');
-        test('auth.pass correcto', cfg.auth.pass === 'secret');
+        test('auth.user del config', cfg.auth.user === 'test@test.local');
+        test('auth.pass del config', cfg.auth.pass === 'secret');
     }
 
-    // ------------------------------------------------------------
-    // secure=true con puerto 465
-    // ------------------------------------------------------------
-    console.log('\n=== secure según puerto ===\n');
-    reset();
-    process.env.SMTP_PORT = '465';
-    {
-        await adapter.send({ to: 'a@b.com', subject: 'X', html: 'x' });
-        test('secure=true en puerto 465',
-            nodemailer.createTransport.lastConfig.secure === true);
-    }
-    process.env.SMTP_PORT = '587';
-
-    // ------------------------------------------------------------
-    // transporter reutilizado
-    // ------------------------------------------------------------
     console.log('\n=== reutilización del transporter ===\n');
     reset();
     {
@@ -221,9 +185,6 @@ test('exporta _resetTransporter', typeof adapter._resetTransporter === 'function
         test('2 emails capturados', capturedMails.length === 2);
     }
 
-    // ------------------------------------------------------------
-    // verify
-    // ------------------------------------------------------------
     console.log('\n=== verify ===\n');
     reset();
     {
@@ -236,9 +197,6 @@ test('exporta _resetTransporter', typeof adapter._resetTransporter === 'function
         test('verify=false cuando SMTP falla', fail === false);
     }
 
-    // ------------------------------------------------------------
-    // Error de SMTP se propaga
-    // ------------------------------------------------------------
     console.log('\n=== error de SMTP ===\n');
     reset();
     {
@@ -259,9 +217,6 @@ test('exporta _resetTransporter', typeof adapter._resetTransporter === 'function
         nodemailer.createTransport = original;
     }
 
-    // ------------------------------------------------------------
-    // Restaurar Nodemailer original
-    // ------------------------------------------------------------
     nodemailer.createTransport = originalCreateTransport;
 
     console.log(`\n=== RESULTADO: ${passed} passed, ${failed} failed ===\n`);

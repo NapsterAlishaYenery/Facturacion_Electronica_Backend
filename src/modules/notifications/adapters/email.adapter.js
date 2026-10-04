@@ -11,9 +11,12 @@
 //
 // El transporter se crea de forma LAZY (en el primer send/verify)
 // para que el server arranque aunque SMTP esté mal configurado.
+//
+// Los valores de configuración vienen de config/notifications.js.
 // ============================================================
 
 const nodemailer = require('nodemailer');
+const config = require('../../../config/notifications');
 const BRAND = require('../../../constants/brand');
 
 // ------------------------------------------------------------
@@ -22,27 +25,21 @@ const BRAND = require('../../../constants/brand');
 let transporter = null;
 
 // ------------------------------------------------------------
-// Construir el transporter desde variables de entorno
+// Construir el transporter desde el config centralizado
 // ------------------------------------------------------------
 function buildTransporter() {
-    // 1. Leer y validar env vars
-    const host = process.env.SMTP_HOST;
-    const port = Number(process.env.SMTP_PORT || 587);
-    const user = process.env.SMTP_USER;
-    const pass = process.env.SMTP_PASS;
-
-    if (!host || !user || !pass) {
-        throw new Error(
-            'email.adapter: SMTP_HOST, SMTP_USER and SMTP_PASS must be set'
-        );
-    }
+    // 1. Validar que el config de email esté completo
+    config.validateEmailConfig();
 
     // 2. Crear el transporter
     return nodemailer.createTransport({
-        host,
-        port,
-        secure: port === 465,      // 465 = SSL directo; 587 = STARTTLS
-        auth: { user, pass },
+        host: config.email.host,
+        port: config.email.port,
+        secure: config.email.secure,     // derivado del puerto (getter)
+        auth: {
+            user: config.email.user,
+            pass: config.email.pass
+        },
         tls: {
             // Algunos SMTP (Hostinger incluido) usan certs que Node
             // no reconoce por defecto. Permitimos la conexión.
@@ -68,11 +65,11 @@ function resolveFrom(explicitFrom) {
     // 1. Prioridad: argumento explícito
     if (explicitFrom) return explicitFrom;
 
-    // 2. Luego env var SMTP_FROM
-    if (process.env.SMTP_FROM) return process.env.SMTP_FROM;
+    // 2. Luego config (SMTP_FROM)
+    if (config.email.from) return config.email.from;
 
     // 3. Fallback: nombre de marca + SMTP_USER
-    return `${BRAND.name} <${process.env.SMTP_USER}>`;
+    return `${BRAND.name} <${config.email.user}>`;
 }
 
 // ------------------------------------------------------------
