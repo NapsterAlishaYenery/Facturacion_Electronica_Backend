@@ -42,11 +42,46 @@ async function sendPasswordResetCode({ to, name, code, expiresInMinutes }) {
 }
 
 // ------------------------------------------------------------
+// sendWelcome — correo de bienvenida al dueño de empresa nueva
+// ------------------------------------------------------------
+async function sendWelcome({ to, name, companyName, rnc, planName, trialDays }) {
+    // 1. Renderizar el template
+    const tpl = templates.welcome;
+    const { html, text } = tpl.render({ name, companyName, rnc, planName, trialDays });
+
+    // 2. Enviar
+    const adapter = getAdapter('email');
+    return adapter.send({
+        to,
+        subject: tpl.subject,
+        html,
+        text
+    });
+}
+
+// ------------------------------------------------------------
+// sendNewCompanyAlert — correo interno a Expedinap
+// ------------------------------------------------------------
+async function sendNewCompanyAlert({ to, company, owner, subscription, plan, meta }) {
+    // 1. Renderizar el template
+    const tpl = templates.newCompanyAlert;
+    const { html, text } = tpl.render({ company, owner, subscription, plan, meta });
+
+    // 2. Subject dinámico (incluye nombre de empresa)
+    const subject = tpl.buildSubject({ company });
+
+    // 3. Enviar
+    const adapter = getAdapter('email');
+    return adapter.send({ to, subject, html, text });
+}
+
+// ------------------------------------------------------------
 // Exports
 // ------------------------------------------------------------
 module.exports = {
-    sendPasswordResetCode
-    // sendWelcome,               ← futuro (6.6)
+    sendPasswordResetCode,
+    sendWelcome,
+    sendNewCompanyAlert
     // sendInvoiceAccepted,       ← futuro (6.6)
     // sendInvoiceRejected,       ← futuro (6.6)
 };

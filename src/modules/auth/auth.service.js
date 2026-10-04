@@ -7,8 +7,11 @@ const { hashPassword } = require('../../shared/utils/password');
 const { Op } = require('sequelize');
 const sequelize = require('../../config/database');
 const { User, Company, Subscription, Plan, AuditLog } = require('../../models');
+const { TRIAL_DAYS } = require('../../constants/subscription');
+const notificationsConfig = require('../../config/notifications');
 const { signAccessToken, signRefreshToken } = require('../../shared/utils/jwt');
 const { AppError } = require('../../shared/middlewares/error.middleware');
+const notifications = require('../notifications');
 
 // ------------------------------------------------------------
 // Registrar empresa + dueño en una transacción
@@ -64,7 +67,7 @@ async function registerCompany(data, reqInfo = {}) {
         let subscription = null;
         if (basicPlan) {
             const trialEndsAt = new Date();
-            trialEndsAt.setDate(trialEndsAt.getDate() + 14); // 14 días de prueba
+            trialEndsAt.setDate(trialEndsAt.getDate() + TRIAL_DAYS); // 25 días de prueba
 
             subscription = await Subscription.create({
                 companyId: company.id,
@@ -92,8 +95,41 @@ async function registerCompany(data, reqInfo = {}) {
             userAgent: reqInfo.userAgent || null
         }, { transaction: t });
 
-        return { company, user, subscription };
+        return { company, user, subscription, plan: basicPlan };
     });
+
+    
+    // 6. Enviar notificaciones (fuera de la transacción)
+    //    try/catch individual: si una falla, la otra igual se intenta,
+    //    y ninguna rompe el registro (la empresa ya está creada).
+    try {
+        await notifications.sendWelcome({
+            to: result.user.email,
+            name: result.user.firstName,
+            companyName: result.company.name,
+            rnc: result.company.rnc,
+            planName: result.plan?.name || null,
+            trialDays: TRIAL_DAYS
+        });
+    } catch (err) {
+        console.error('[auth.registerCompany] Welcome email failed:', err.message);
+    }
+
+    try {
+        const notifyEmail = notificationsConfig.alerts.registrationNotifyEmail;
+        if (notifyEmail) {
+            await notifications.sendNewCompanyAlert({
+                to: notifyEmail,
+                company: result.company,
+                owner: result.user,
+                subscription: result.subscription,
+                plan: result.plan,
+                meta: { ip: reqInfo.ip, userAgent: reqInfo.userAgent }
+            });
+        }
+    } catch (err) {
+        console.error('[auth.registerCompany] Internal alert email failed:', err.message);
+    }
 
     // Generar tokens
     const accessToken = signAccessToken({
@@ -358,12 +394,20 @@ async function forgotPassword(email, reqInfo = {}) {
         expiresAt
     });
 
-    // 6. Enviar email (por ahora solo log en consola)
-    console.log('\n🔐 PASSWORD RESET CODE');
-    console.log(`   Email: ${user.email}`);
-    console.log(`   Code: ${code}`);
-    console.log(`   Expires at: ${expiresAt.toISOString()}`);
-    console.log('');
+    // 6. Enviar email con el código de recuperación
+    //    try/catch: si SMTP falla, no rompemos el flujo.
+    //    El usuario ya tiene el código en BD; solo no lo recibió.
+    //    No revelamos el fallo al cliente por seguridad.
+    try {
+        await notifications.sendPasswordResetCode({
+            to: user.email,
+            name: user.firstName,
+            code,
+            expiresInMinutes: 15
+        });
+    } catch (err) {
+        console.error('[auth.forgotPassword] Email send failed:', err.message);
+    }
 
     // TODO: Integrar con nodemailer o Resend en producción
 

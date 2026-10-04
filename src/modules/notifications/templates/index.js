@@ -9,7 +9,8 @@
 
 module.exports = {
     passwordResetCode: require('./password-reset-code'),
-    // welcome: require('./welcome'),                     // ← futuro
+    welcome: require('./welcome'),
+    newCompanyAlert: require('./new-company-alert')
     // invoiceAccepted: require('./invoice-accepted'),    // ← futuro
     // invoiceRejected: require('./invoice-rejected'),    // ← futuro
 };

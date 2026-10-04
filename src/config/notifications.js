@@ -39,6 +39,15 @@ const email = {
 };
 
 // ------------------------------------------------------------
+// Sección: alertas internas
+// Buzones donde Expedinap recibe notificaciones del sistema
+// ------------------------------------------------------------
+const alerts = {
+    // Buzón que recibe alertas de nuevas empresas registradas
+    registrationNotifyEmail: readEnv('REGISTRATION_NOTIFY_EMAIL')
+};
+
+// ------------------------------------------------------------
 // Validación diferida: no lanzamos al requerir, sino cuando
 // el adapter intenta usar el config. Esto permite que el server
 // arranque aunque SMTP no esté configurado (útil en dev/test).
@@ -62,5 +71,6 @@ function validateEmailConfig() {
 // ------------------------------------------------------------
 module.exports = {
     email,
+    alerts,
     validateEmailConfig
 };
