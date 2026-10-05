@@ -10,7 +10,10 @@
 module.exports = {
     passwordResetCode: require('./password-reset-code'),
     welcome: require('./welcome'),
-    newCompanyAlert: require('./new-company-alert')
+    newCompanyAlert: require('./new-company-alert'),
+    newCompanyAlert: require('./new-company-alert'),
+    newUser: require('./new-user'),
+    userStatusChanged: require('./user-status-changed')
     // invoiceAccepted: require('./invoice-accepted'),    // ← futuro
     // invoiceRejected: require('./invoice-rejected'),    // ← futuro
 };

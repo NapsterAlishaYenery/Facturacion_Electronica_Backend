@@ -6,6 +6,7 @@
 // ============================================================
 
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 
 const SALT_ROUNDS = 12;
 
@@ -58,8 +59,53 @@ function checkPasswordStrength(password) {
     };
 }
 
+// ------------------------------------------------------------
+// Generar contraseña temporal aleatoria (para usuarios nuevos)
+// Retorna string de 12 caracteres con mayúscula, minúscula,
+// dígito y símbolo. Excluye caracteres ambiguos (0, O, I, l, 1).
+// ------------------------------------------------------------
+function generateTemporaryPassword(length = 12) {
+    if (length < 8) {
+        throw new Error('Password length must be at least 8 characters');
+    }
+
+    // 1. Char sets (sin caracteres ambiguos)
+    const UPPERCASE = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+    const LOWERCASE = 'abcdefghijkmnpqrstuvwxyz';
+    const DIGITS = '23456789';
+    const SYMBOLS = '!@#$%&*-_';
+    const ALL = UPPERCASE + LOWERCASE + DIGITS + SYMBOLS;
+
+    // 2. Picker seguro con crypto (no Math.random)
+    const pick = (charset) => charset[crypto.randomInt(0, charset.length)];
+
+    // 3. Garantizar al menos 1 de cada tipo
+    const required = [
+        pick(UPPERCASE),
+        pick(LOWERCASE),
+        pick(DIGITS),
+        pick(SYMBOLS)
+    ];
+
+    // 4. Rellenar el resto
+    const rest = [];
+    for (let i = required.length; i < length; i++) {
+        rest.push(pick(ALL));
+    }
+
+    // 5. Mezclar (Fisher-Yates) para no dejar los "requeridos" al inicio
+    const all = [...required, ...rest];
+    for (let i = all.length - 1; i > 0; i--) {
+        const j = crypto.randomInt(0, i + 1);
+        [all[i], all[j]] = [all[j], all[i]];
+    }
+
+    return all.join('');
+}
+
 module.exports = {
     hashPassword,
     comparePassword,
-    checkPasswordStrength
+    checkPasswordStrength,
+    generateTemporaryPassword
 };

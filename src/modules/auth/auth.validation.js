@@ -137,12 +137,6 @@ const resetPasswordSchema = Joi.object({
 // ------------------------------------------------------------
 const adminCreateUserSchema = Joi.object({
     email: Joi.string().email().max(150).required(),
-    password: Joi.string().min(8).max(100)
-        .pattern(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/)
-        .required()
-        .messages({
-            'string.pattern.base': 'Password must contain uppercase, lowercase and a number'
-        }),
     firstName: Joi.string().min(2).max(80).required(),
     middleName: Joi.string().max(80).optional().allow(null, ''),
     lastName: Joi.string().min(2).max(80).required(),
@@ -156,9 +150,6 @@ const adminCreateUserSchema = Joi.object({
 // ------------------------------------------------------------
 const companyCreateUserSchema = Joi.object({
     email: Joi.string().email().max(150).required(),
-    password: Joi.string().min(8).max(100)
-        .pattern(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/)
-        .required(),
     firstName: Joi.string().min(2).max(80).required(),
     middleName: Joi.string().max(80).optional().allow(null, ''),
     lastName: Joi.string().min(2).max(80).required(),

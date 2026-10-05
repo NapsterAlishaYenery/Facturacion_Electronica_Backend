@@ -3,7 +3,7 @@
 // Contiene TODA la lógica de negocio del módulo auth
 // Nunca toca req ni res
 // ============================================================
-const { hashPassword } = require('../../shared/utils/password');
+const { hashPassword, generateTemporaryPassword } = require('../../shared/utils/password');
 const { Op } = require('sequelize');
 const sequelize = require('../../config/database');
 const { User, Company, Subscription, Plan, AuditLog } = require('../../models');
@@ -98,7 +98,7 @@ async function registerCompany(data, reqInfo = {}) {
         return { company, user, subscription, plan: basicPlan };
     });
 
-    
+
     // 6. Enviar notificaciones (fuera de la transacción)
     //    try/catch individual: si una falla, la otra igual se intenta,
     //    y ninguna rompe el registro (la empresa ya está creada).
@@ -356,6 +356,21 @@ async function changePassword(userId, currentPassword, newPassword, reqInfo = {}
         // Ignorar errores de audit
     }
 
+    // 6. Enviar correo de confirmación (alerta de seguridad)
+    //    try/catch: si SMTP falla, no rompemos el cambio de contraseña.
+    //    El usuario ya cambió su clave; solo no recibió el aviso.
+    try {
+        await notifications.sendPasswordReset({
+            to: user.email,
+            name: user.firstName,
+            when: new Date(),
+            ip: reqInfo.ip || null
+        });
+    } catch (err) {
+        console.error('[auth.changePassword] Confirmation email failed:', err.message);
+    }
+
+
     return { success: true };
 }
 
@@ -484,6 +499,20 @@ async function resetPassword(email, code, newPassword, reqInfo = {}) {
         // Ignorar errores de audit
     }
 
+    // 7. Enviar correo de confirmación (alerta de seguridad)
+    //    try/catch: si SMTP falla, no rompemos el reset exitoso.
+    //    El usuario ya cambió su contraseña; solo no recibió el aviso.
+    try {
+        await notifications.sendPasswordReset({
+            to: user.email,
+            name: user.firstName,
+            when: new Date(),
+            ip: reqInfo.ip || null
+        });
+    } catch (err) {
+        console.error('[auth.resetPassword] Confirmation email failed:', err.message);
+    }
+
     return { success: true };
 }
 
@@ -603,10 +632,13 @@ async function createUser(reqUser, userData, reqInfo = {}) {
         throw new AppError('A user with this email already exists', 409, 'EMAIL_ALREADY_EXISTS');
     }
 
-    // Crear el usuario
+    // Generar contraseña temporal segura (no se pide en el payload)
+    const temporaryPassword = generateTemporaryPassword();
+
+    // Crear el usuario con la contraseña temporal
     const user = await User.create({
         email: data.email.toLowerCase().trim(),
-        password: data.password,
+        password: temporaryPassword,
         firstName: data.firstName,
         middleName: data.middleName || null,
         lastName: data.lastName,
@@ -633,6 +665,25 @@ async function createUser(reqUser, userData, reqInfo = {}) {
         });
     } catch (err) {
         // Ignorar errores de audit
+    }
+
+    // Enviar correo de bienvenida con credenciales
+    // try/catch: si SMTP falla, no rompemos la creación del usuario.
+    try {
+        // Buscar el nombre de la empresa si aplica
+        const company = user.companyId
+            ? await Company.findByPk(user.companyId)
+            : null;
+
+        await notifications.sendNewUser({
+            to: user.email,
+            name: user.firstName,
+            email: user.email,
+            password: temporaryPassword,
+            companyName: company?.name || null
+        });
+    } catch (err) {
+        console.error('[auth.createUser] Welcome email failed:', err.message);
     }
 
     return sanitizeUser(user);
@@ -714,6 +765,9 @@ async function updateUser(reqUser, targetUserId, updates, reqInfo = {}) {
 // ------------------------------------------------------------
 // Eliminar usuario (admin: hard delete; company_admin: soft delete)
 // ------------------------------------------------------------
+// ------------------------------------------------------------
+// Eliminar usuario (admin: hard delete; company_admin: soft delete)
+// ------------------------------------------------------------
 async function deleteUser(reqUser, targetUserId, reqInfo = {}) {
     // 1. Buscar el usuario objetivo
     const targetUser = await User.findByPk(targetUserId);
@@ -748,6 +802,25 @@ async function deleteUser(reqUser, targetUserId, reqInfo = {}) {
             });
         } catch (err) { /* ignorar */ }
 
+        // Notificar al company_admin que ejecutó la acción
+        // try/catch: si SMTP falla, no rompemos la desactivación.
+        try {
+            await notifications.sendUserStatusChanged({
+                to: reqUser.email,
+                action: 'deactivated',
+                targetUser: {
+                    id: targetUser.id,
+                    email: targetUser.email,
+                    fullName: targetUser.fullName,
+                    role: targetUser.role
+                },
+                companyName: null,
+                executor: reqUser.firstName
+            });
+        } catch (err) {
+            console.error('[auth.deleteUser] Deactivation email failed:', err.message);
+        }
+
         return { deleted: false, deactivated: true };
     }
 
@@ -755,7 +828,8 @@ async function deleteUser(reqUser, targetUserId, reqInfo = {}) {
     const before = {
         email: targetUser.email,
         role: targetUser.role,
-        companyId: targetUser.companyId
+        companyId: targetUser.companyId,
+        fullName: targetUser.fullName    // ← capturar antes del destroy
     };
 
     await targetUser.destroy();
@@ -773,6 +847,25 @@ async function deleteUser(reqUser, targetUserId, reqInfo = {}) {
             userAgent: reqInfo.userAgent || null
         });
     } catch (err) { /* ignorar */ }
+
+    // Notificar al admin que ejecutó la acción
+    // try/catch: si SMTP falla, no rompemos el borrado.
+    try {
+        await notifications.sendUserStatusChanged({
+            to: reqUser.email,
+            action: 'deleted',                    // ← 'deleted', no 'deactivated'
+            targetUser: {
+                id: targetUserId,
+                email: before.email,
+                fullName: before.fullName,        // ← del snapshot, no del destroy
+                role: before.role
+            },
+            companyName: null,
+            executor: reqUser.firstName
+        });
+    } catch (err) {
+        console.error('[auth.deleteUser] Deletion email failed:', err.message);
+    }
 
     return { deleted: true, deactivated: false };
 }

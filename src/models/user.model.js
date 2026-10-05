@@ -113,18 +113,44 @@ const User = sequelize.define('User', {
         { fields: ['is_active'], name: 'idx_users_is_active' },
         { fields: ['last_name'], name: 'idx_users_last_name' }
     ],
-    //Diferentes hook posibles
-    //beforeValidate → validación → afterValidate → beforeCreate → INSERT → afterCreate
     hooks: {
+        // ------------------------------------------------------------
+        // Antes de validar (creación y updates): hashear password si llega
+        // ------------------------------------------------------------
         beforeValidate: async (user) => {
             if (user.password) {
+                // Defensa: si no es string, avisar y salir sin reventar.
+                // Cubre casos como pasar la función en vez de su resultado,
+                // null, undefined desde el payload, objetos, etc.
+                if (typeof user.password !== 'string') {
+                    console.warn(
+                        '[User.beforeValidate] password is not a string (got ' +
+                        typeof user.password + '). Skipping hash.'
+                    );
+                    user.password = undefined;
+                    return;
+                }
+
                 const salt = await bcrypt.genSalt(12);
                 user.passwordHash = await bcrypt.hash(user.password, salt);
                 user.password = undefined;
             }
         },
+
+        // ------------------------------------------------------------
+        // Antes de actualizar: hashear solo si password cambió
+        // ------------------------------------------------------------
         beforeUpdate: async (user) => {
             if (user.changed('password') && user.password) {
+                if (typeof user.password !== 'string') {
+                    console.warn(
+                        '[User.beforeUpdate] password is not a string (got ' +
+                        typeof user.password + '). Skipping hash.'
+                    );
+                    user.password = undefined;
+                    return;
+                }
+
                 const salt = await bcrypt.genSalt(12);
                 user.passwordHash = await bcrypt.hash(user.password, salt);
                 user.password = undefined;

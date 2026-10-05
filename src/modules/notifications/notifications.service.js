@@ -76,12 +76,66 @@ async function sendNewCompanyAlert({ to, company, owner, subscription, plan, met
 }
 
 // ------------------------------------------------------------
+// sendPasswordReset — confirmación al usuario tras cambiar la clave
+// ------------------------------------------------------------
+async function sendPasswordReset({ to, name, when, ip }) {
+    // 1. Renderizar el template
+    const tpl = templates.passwordReset;
+    const { html, text } = tpl.render({ name, when, ip });
+
+    // 2. Enviar
+    const adapter = getAdapter('email');
+    return adapter.send({
+        to,
+        subject: tpl.subject,
+        html,
+        text
+    });
+}
+
+// ------------------------------------------------------------
+// sendNewUser — bienvenida al usuario recién creado
+// ------------------------------------------------------------
+async function sendNewUser({ to, name, email, password, companyName, loginUrl }) {
+    // 1. Renderizar el template
+    const tpl = templates.newUser;
+    const { html, text } = tpl.render({ name, email, password, companyName, loginUrl });
+
+    // 2. Subject dinámico (depende de si tiene empresa)
+    const subject = tpl.buildSubject({ companyName });
+
+    // 3. Enviar
+    const adapter = getAdapter('email');
+    return adapter.send({ to, subject, html, text });
+}
+
+// ------------------------------------------------------------
+// sendUserStatusChanged — confirmación al ejecutor tras
+// desactivar o eliminar un usuario
+// ------------------------------------------------------------
+async function sendUserStatusChanged({ to, action, targetUser, companyName, executor }) {
+    // 1. Renderizar el template
+    const tpl = templates.userStatusChanged;
+    const { html, text } = tpl.render({ action, targetUser, companyName, executor });
+
+    // 2. Subject dinámico
+    const subject = tpl.buildSubject({ action, targetUser });
+
+    // 3. Enviar
+    const adapter = getAdapter('email');
+    return adapter.send({ to, subject, html, text });
+}
+
+// ------------------------------------------------------------
 // Exports
 // ------------------------------------------------------------
 module.exports = {
     sendPasswordResetCode,
+    sendPasswordReset, 
     sendWelcome,
-    sendNewCompanyAlert
+    sendNewCompanyAlert,
+    sendNewUser,
+    sendUserStatusChanged
     // sendInvoiceAccepted,       ← futuro (6.6)
     // sendInvoiceRejected,       ← futuro (6.6)
 };
