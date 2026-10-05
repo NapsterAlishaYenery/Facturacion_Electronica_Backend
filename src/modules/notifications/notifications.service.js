@@ -127,6 +127,38 @@ async function sendUserStatusChanged({ to, action, targetUser, companyName, exec
 }
 
 // ------------------------------------------------------------
+// sendCertificateExpiring — aviso de certificado por vencer/vencido
+// ------------------------------------------------------------
+async function sendCertificateExpiring({
+    to,
+    bcc,
+    companyName,
+    rnc,
+    ownerName,
+    expiresAt,
+    daysLeft,
+    expired
+}) {
+    // 1. Renderizar el template
+    const tpl = templates.certificateExpiring;
+    const { html, text } = tpl.render({
+        companyName,
+        rnc,
+        ownerName,
+        expiresAt,
+        daysLeft,
+        expired
+    });
+
+    // 2. Subject dinámico
+    const subject = tpl.buildSubject({ companyName, daysLeft, expired });
+
+    // 3. Enviar
+    const adapter = getAdapter('email');
+    return adapter.send({ to, bcc, subject, html, text });
+}
+
+// ------------------------------------------------------------
 // Exports
 // ------------------------------------------------------------
 module.exports = {
@@ -135,7 +167,8 @@ module.exports = {
     sendWelcome,
     sendNewCompanyAlert,
     sendNewUser,
-    sendUserStatusChanged
+    sendUserStatusChanged,
+    sendCertificateExpiring
     // sendInvoiceAccepted,       ← futuro (6.6)
     // sendInvoiceRejected,       ← futuro (6.6)
 };

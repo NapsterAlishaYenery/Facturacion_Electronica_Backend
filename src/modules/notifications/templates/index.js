@@ -13,7 +13,8 @@ module.exports = {
     newCompanyAlert: require('./new-company-alert'),
     newCompanyAlert: require('./new-company-alert'),
     newUser: require('./new-user'),
-    userStatusChanged: require('./user-status-changed')
+    userStatusChanged: require('./user-status-changed'),
+    certificateExpiring: require('./certificate-expiring')
     // invoiceAccepted: require('./invoice-accepted'),    // ← futuro
     // invoiceRejected: require('./invoice-rejected'),    // ← futuro
 };
