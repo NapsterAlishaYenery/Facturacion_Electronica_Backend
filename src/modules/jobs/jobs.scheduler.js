@@ -50,14 +50,14 @@ function buildJobDefinitions() {
         },
 
         // ---------------------------------------------------------
-        // Step 5.3 — Desactivar secuencias expiradas
+        // Step 5.3 — Health check de secuencias NCF
         // ---------------------------------------------------------
         {
-            name: 'check-expiring-sequences',
+            name: 'sequences-health-check',
             schedule: '5 0 * * *',       // diario, 00:05
             enabled: true,
-            handler: require('./jobs/check-expiring-sequences.job')
-        },
+            handler: require('./jobs/sequences-health-check.job')
+        },,
 
         // ---------------------------------------------------------
         // Step 5.4 — Alertar certificados por expirar

@@ -159,6 +159,22 @@ async function sendCertificateExpiring({
 }
 
 // ------------------------------------------------------------
+// sendSequencesAlert — aviso agrupado de secuencias con problemas
+// ------------------------------------------------------------
+async function sendSequencesAlert({ to, bcc, companyName, rnc, ownerName, reason, sequences }) {
+    // 1. Renderizar el template
+    const tpl = templates.sequencesAlert;
+    const { html, text } = tpl.render({ companyName, rnc, ownerName, reason, sequences });
+
+    // 2. Subject dinámico
+    const subject = tpl.buildSubject({ companyName, count: sequences.length, reason });
+
+    // 3. Enviar
+    const adapter = getAdapter('email');
+    return adapter.send({ to, bcc, subject, html, text });
+}
+
+// ------------------------------------------------------------
 // Exports
 // ------------------------------------------------------------
 module.exports = {
@@ -168,7 +184,8 @@ module.exports = {
     sendNewCompanyAlert,
     sendNewUser,
     sendUserStatusChanged,
-    sendCertificateExpiring
+    sendCertificateExpiring,
+    sendSequencesAlert
     // sendInvoiceAccepted,       ← futuro (6.6)
     // sendInvoiceRejected,       ← futuro (6.6)
 };

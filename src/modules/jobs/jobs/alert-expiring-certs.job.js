@@ -39,9 +39,10 @@ const KEY_DAYS = new Set([30, 15, 7, 3, 1, 0, -1, -7]);
 // Calcular días restantes (puede ser negativo si ya venció)
 // ------------------------------------------------------------
 function daysUntil(targetDate, now = new Date()) {
-    return Math.ceil(
-        (new Date(targetDate).getTime() - now.getTime()) / DAY_MS
-    );
+    const diff = new Date(targetDate).getTime() - now.getTime();
+    return diff >= 0
+        ? Math.floor(diff / DAY_MS)
+        : Math.ceil(diff / DAY_MS);
 }
 
 // ------------------------------------------------------------
