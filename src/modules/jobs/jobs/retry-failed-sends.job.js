@@ -16,7 +16,9 @@
 // ============================================================
 
 const { Op } = require('sequelize');
-const { Invoice } = require('../../../models');
+const notifications = require('../../notifications');
+const notificationsConfig = require('../../../config/notifications');
+const { Invoice, Company } = require('../../../models');
 const {
     withErrorHandling,
     recordJobAudit
@@ -41,6 +43,37 @@ function loadDgiiSender() {
         // El módulo dgii.sender aún no existe (Fase 8).
         return null;
     }
+}
+
+// ------------------------------------------------------------
+// Notificar a Expedinap cuando se agota el envío
+// Fire-and-forget: no bloquea el loop ni rompe el job.
+// ------------------------------------------------------------
+async function notifyExhausted(invoice, attempts, errorMessage) {
+    const notifyEmail = notificationsConfig.alerts.registrationNotifyEmail;
+    if (!notifyEmail) return;
+
+    // Cargar datos de empresa para el correo
+    const company = await Company.findByPk(invoice.companyId, {
+        attributes: ['id', 'rnc', 'name', 'email']
+    });
+
+    await notifications.sendInvoiceRejected({
+        to: notifyEmail,
+        invoice: {
+            id: invoice.id,
+            ncf: invoice.ncf,
+            type: invoice.type,
+            total: invoice.total,
+            issuedAt: invoice.issuedAt,
+            createdAt: invoice.createdAt
+        },
+        company: company
+            ? { id: company.id, rnc: company.rnc, name: company.name, email: company.email }
+            : { id: invoice.companyId, rnc: 'N/A', name: 'Empresa desconocida' },
+        attempts,
+        error: errorMessage
+    });
 }
 
 async function runRetryFailedSends() {
@@ -102,6 +135,14 @@ async function runRetryFailedSends() {
                     dgiiResponse: { error: err.message, attempts: newAttempts }
                 });
                 exhausted++;
+
+                // Notificar a Expedinap (fire-and-forget)
+                notifyExhausted(inv, newAttempts, err.message).catch(notifyErr => {
+                    logger.error(`[JOB:${JOB_NAME}] alert email failed`, {
+                        invoiceId: inv.id,
+                        error: notifyErr.message
+                    });
+                });
             } else {
                 await inv.update({
                     sendAttempts: newAttempts,

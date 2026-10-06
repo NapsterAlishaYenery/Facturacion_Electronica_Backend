@@ -209,6 +209,55 @@ async function sendSubscriptionExpiring({
 }
 
 // ------------------------------------------------------------
+// sendInvoiceRejected — alerta interna cuando una factura se
+// rechaza definitivamente tras agotar reintentos de envío
+// ------------------------------------------------------------
+async function sendInvoiceRejected({ to, invoice, company, attempts, error }) {
+    // 1. Renderizar el template
+    const tpl = templates.invoiceRejected;
+    const { html, text } = tpl.render({ invoice, company, attempts, error });
+
+    // 2. Subject dinámico
+    const subject = tpl.buildSubject({ invoice, company });
+
+    // 3. Enviar
+    const adapter = getAdapter('email');
+    return adapter.send({ to, subject, html, text });
+}
+
+// ------------------------------------------------------------
+// sendInvoiceAccepted — notifica que la DGII aceptó una factura
+// ------------------------------------------------------------
+async function sendInvoiceAccepted({ to, bcc, invoice, company }) {
+    // 1. Renderizar el template
+    const tpl = templates.invoiceAccepted;
+    const { html, text } = tpl.render({ invoice, company });
+
+    // 2. Subject
+    const subject = tpl.buildSubject({ invoice, company });
+
+    // 3. Enviar
+    const adapter = getAdapter('email');
+    return adapter.send({ to, bcc, subject, html, text });
+}
+
+// ------------------------------------------------------------
+// sendInvoiceRejectedByDgii — notifica que la DGII rechazó una factura
+// ------------------------------------------------------------
+async function sendInvoiceRejectedByDgii({ to, bcc, invoice, company, reason }) {
+    // 1. Renderizar el template
+    const tpl = templates.invoiceRejectedByDgii;
+    const { html, text } = tpl.render({ invoice, company, reason });
+
+    // 2. Subject
+    const subject = tpl.buildSubject({ invoice, company });
+
+    // 3. Enviar
+    const adapter = getAdapter('email');
+    return adapter.send({ to, bcc, subject, html, text });
+}
+
+// ------------------------------------------------------------
 // Exports
 // ------------------------------------------------------------
 module.exports = {
@@ -220,7 +269,8 @@ module.exports = {
     sendUserStatusChanged,
     sendCertificateExpiring,
     sendSequencesAlert,
-    sendSubscriptionExpiring
-    // sendInvoiceAccepted,       ← futuro (6.6)
-    // sendInvoiceRejected,       ← futuro (6.6)
+    sendSubscriptionExpiring,
+    sendInvoiceRejected,
+    sendInvoiceAccepted,
+    sendInvoiceRejectedByDgii
 };

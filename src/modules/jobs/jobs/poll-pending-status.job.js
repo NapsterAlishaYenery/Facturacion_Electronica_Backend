@@ -17,7 +17,9 @@
 // ============================================================
 
 const { Op } = require('sequelize');
-const { Invoice } = require('../../../models');
+const { Invoice, Company, User } = require('../../../models');
+const notifications = require('../../notifications');
+const notificationsConfig = require('../../../config/notifications');
 const {
     withErrorHandling,
     recordJobAudit
@@ -54,6 +56,85 @@ function normalizeStatus(raw) {
     if (s.includes('rechaz') || s === 'rejected' || s === 'error') return 'rejected';
 
     return 'pending';
+}
+
+// ------------------------------------------------------------
+// Enviar notificación a los destinatarios (owner + company + bcc)
+// Fire-and-forget: no bloquea el loop.
+// ------------------------------------------------------------
+async function notifyInvoiceStatusChanged(invoice, status, response) {
+    // 1. Cargar empresa + owner
+    const company = await Company.findByPk(invoice.companyId, {
+        attributes: ['id', 'rnc', 'name', 'email'],
+        include: [{
+            model: User,
+            as: 'users',
+            where: { role: 'company_admin', isActive: true },
+            required: false,
+            attributes: ['id', 'email', 'firstName']
+        }]
+    });
+
+    if (!company) return;
+
+    const owner = company.users?.[0] || null;
+    const bcc = notificationsConfig.alerts.registrationNotifyEmail || undefined;
+
+    // 2. Destinatarios únicos
+    const recipients = new Set();
+    if (owner?.email) recipients.add(owner.email);
+    if (company.email) recipients.add(company.email);
+
+    if (recipients.size === 0) return;
+
+    // 3. Payload común
+    const invoiceData = {
+        id: invoice.id,
+        ncf: invoice.ncf,
+        type: invoice.type,
+        total: invoice.total,
+        issuedAt: invoice.issuedAt,
+        createdAt: invoice.createdAt
+    };
+    const companyData = {
+        id: company.id,
+        rnc: company.rnc,
+        name: company.name,
+        email: company.email
+    };
+
+    // 4. Extraer motivo del rechazo si aplica
+    const reason = status === 'rejected'
+        ? (response?.motivo || response?.mensaje || response?.message || response?.error || null)
+        : null;
+
+    // 5. Enviar a cada destinatario
+    for (const to of recipients) {
+        try {
+            if (status === 'accepted') {
+                await notifications.sendInvoiceAccepted({
+                    to,
+                    bcc,
+                    invoice: invoiceData,
+                    company: companyData
+                });
+            } else if (status === 'rejected') {
+                await notifications.sendInvoiceRejectedByDgii({
+                    to,
+                    bcc,
+                    invoice: invoiceData,
+                    company: companyData,
+                    reason
+                });
+            }
+        } catch (err) {
+            logger.error(`[JOB:${JOB_NAME}] notification failed`, {
+                invoiceId: invoice.id,
+                to,
+                error: err.message
+            });
+        }
+    }
 }
 
 async function runPollPendingStatus() {
@@ -96,12 +177,26 @@ async function runPollPendingStatus() {
                     dgiiResponse: response
                 });
                 accepted++;
+
+                // Notificar al dueño (fire-and-forget)
+                notifyInvoiceStatusChanged(inv, 'accepted', response).catch(err => {
+                    logger.error(`[JOB:${JOB_NAME}] accept notification failed`, {
+                        invoiceId: inv.id, error: err.message
+                    });
+                });
             } else if (newStatus === 'rejected') {
                 await inv.update({
                     status: 'rejected',
                     dgiiResponse: response
                 });
                 rejected++;
+
+                // Notificar al dueño (fire-and-forget)
+                notifyInvoiceStatusChanged(inv, 'rejected', response).catch(err => {
+                    logger.error(`[JOB:${JOB_NAME}] reject notification failed`, {
+                        invoiceId: inv.id, error: err.message
+                    });
+                });
             } else {
                 // pending: actualizamos dgii_response pero no el status
                 await inv.update({ dgiiResponse: response });
