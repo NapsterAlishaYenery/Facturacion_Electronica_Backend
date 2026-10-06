@@ -15,7 +15,8 @@ module.exports = {
     newUser: require('./new-user'),
     userStatusChanged: require('./user-status-changed'),
     certificateExpiring: require('./certificate-expiring'),
-    sequencesAlert: require('./sequences-alert')
+    sequencesAlert: require('./sequences-alert'),
+    subscriptionExpiring: require('./subscription-expiring')
     // invoiceAccepted: require('./invoice-accepted'),    // ← futuro
     // invoiceRejected: require('./invoice-rejected'),    // ← futuro
 };

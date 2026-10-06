@@ -175,6 +175,40 @@ async function sendSequencesAlert({ to, bcc, companyName, rnc, ownerName, reason
 }
 
 // ------------------------------------------------------------
+// sendSubscriptionExpiring — aviso preventivo de vencimiento
+// ------------------------------------------------------------
+async function sendSubscriptionExpiring({
+    to,
+    bcc,
+    companyName,
+    rnc,
+    ownerName,
+    status,
+    planName,
+    expiresAt,
+    daysLeft
+}) {
+    // 1. Renderizar el template
+    const tpl = templates.subscriptionExpiring;
+    const { html, text } = tpl.render({
+        companyName,
+        rnc,
+        ownerName,
+        status,
+        planName,
+        expiresAt,
+        daysLeft
+    });
+
+    // 2. Subject dinámico
+    const subject = tpl.buildSubject({ companyName, status, planName, daysLeft });
+
+    // 3. Enviar
+    const adapter = getAdapter('email');
+    return adapter.send({ to, bcc, subject, html, text });
+}
+
+// ------------------------------------------------------------
 // Exports
 // ------------------------------------------------------------
 module.exports = {
@@ -185,7 +219,8 @@ module.exports = {
     sendNewUser,
     sendUserStatusChanged,
     sendCertificateExpiring,
-    sendSequencesAlert
+    sendSequencesAlert,
+    sendSubscriptionExpiring
     // sendInvoiceAccepted,       ← futuro (6.6)
     // sendInvoiceRejected,       ← futuro (6.6)
 };
