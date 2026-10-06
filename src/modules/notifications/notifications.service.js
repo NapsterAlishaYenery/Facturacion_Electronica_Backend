@@ -258,6 +258,39 @@ async function sendInvoiceRejectedByDgii({ to, bcc, invoice, company, reason }) 
 }
 
 // ------------------------------------------------------------
+// sendNoActiveSequence — alerta urgente cuando no hay secuencia NCF
+// disponible para emitir una factura del tipo solicitado
+// ------------------------------------------------------------
+async function sendNoActiveSequence({
+    to,
+    bcc,
+    companyName,
+    rnc,
+    ownerName,
+    type,
+    typeName,
+    attemptedAt
+}) {
+    // 1. Renderizar el template
+    const tpl = templates.noActiveSequence;
+    const { html, text } = tpl.render({
+        companyName,
+        rnc,
+        ownerName,
+        type,
+        typeName,
+        attemptedAt
+    });
+
+    // 2. Subject
+    const subject = tpl.buildSubject({ type, typeName, companyName });
+
+    // 3. Enviar
+    const adapter = getAdapter('email');
+    return adapter.send({ to, bcc, subject, html, text });
+}
+
+// ------------------------------------------------------------
 // Exports
 // ------------------------------------------------------------
 module.exports = {
@@ -272,5 +305,6 @@ module.exports = {
     sendSubscriptionExpiring,
     sendInvoiceRejected,
     sendInvoiceAccepted,
-    sendInvoiceRejectedByDgii
+    sendInvoiceRejectedByDgii,
+    sendNoActiveSequence
 };

@@ -19,7 +19,8 @@ module.exports = {
     subscriptionExpiring: require('./subscription-expiring'),
     invoiceRejected: require('./invoice-rejected'),
     invoiceAccepted: require('./invoice-accepted'),
-    invoiceRejectedByDgii: require('./invoice-rejected-by-dgii')
+    invoiceRejectedByDgii: require('./invoice-rejected-by-dgii'),
+    noActiveSequence: require('./no-active-sequence')
     // invoiceAccepted: require('./invoice-accepted'),    // ← futuro
     // invoiceRejected: require('./invoice-rejected'),    // ← futuro
 };
