@@ -9,10 +9,17 @@ const router = express.Router();
 const authMiddleware = require('../../../shared/middlewares/auth.middleware');
 const roleMiddleware = require('../../../shared/middlewares/role.middleware');
 const validate = require('../../../shared/middlewares/validate.middleware');
-const { readLimiter, writeLimiter } = require('../../../shared/middlewares/rateLimit.middleware');
+const {
+    readLimiter,
+    writeLimiter
+} = require('../../../shared/middlewares/rateLimit.middleware');
 
 // Validaciones
-const { listPlansQuerySchema, createPlanSchema } = require('./plans.validation');
+const {
+    listPlansQuerySchema,
+    createPlanSchema,
+    updatePlanSchema
+} = require('./plans.validation');
 
 // Controlador
 const plansController = require('./plans.controller');
@@ -52,6 +59,14 @@ router.post('/',
     writeLimiter,
     validate(createPlanSchema),
     plansController.createPlan
+);
+
+router.patch('/:id',
+    authMiddleware,
+    roleMiddleware('admin'),
+    writeLimiter,
+    validate(updatePlanSchema),
+    plansController.updatePlanById
 );
 
 module.exports = router;

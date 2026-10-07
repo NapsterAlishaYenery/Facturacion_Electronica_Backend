@@ -106,8 +106,80 @@ async function createPlan(data, reqUser, reqInfo = {}) {
     return plan;
 }
 
+// ------------------------------------------------------------
+// Actualizar un plan (admin)
+// ------------------------------------------------------------
+async function updatePlanById(planId, updates, reqUser, reqInfo = {}) {
+    // 1. Buscar el plan
+    const plan = await Plan.findByPk(planId);
+    if (!plan) {
+        throw new AppError('Plan not found', 404, 'PLAN_NOT_FOUND');
+    }
+
+    // 2. Si cambia el code, verificar que no choque con otro plan
+    if (updates.code && updates.code !== plan.code) {
+        const existing = await Plan.findOne({ where: { code: updates.code } });
+        if (existing) {
+            throw new AppError(
+                `A plan with code "${updates.code}" already exists`,
+                409,
+                'PLAN_CODE_ALREADY_EXISTS'
+            );
+        }
+    }
+
+    // 3. Filtrar solo campos editables (doble protección)
+    const allowedFields = [
+        'code', 'name', 'description', 'priceDop', 'priceUsd',
+        'invoicesPerMonth', 'maxUsers', 'maxSequences', 'features'
+    ];
+    const updateData = {};
+    const before = {};
+
+    for (const field of allowedFields) {
+        if (updates[field] !== undefined) {
+            // Guardar before solo si realmente cambia
+            if (plan[field] !== updates[field]) {
+                before[field] = plan[field];
+                updateData[field] = updates[field];
+            }
+        }
+    }
+
+    if (Object.keys(updateData).length === 0) {
+        throw new AppError(
+            'No changes detected. Provide at least one field with a different value.',
+            400,
+            'NO_CHANGES_DETECTED'
+        );
+    }
+
+    // 4. Actualizar
+    await plan.update(updateData);
+
+    // 5. Audit log
+    try {
+        await AuditLog.create({
+            companyId: null,
+            userId: reqUser.id,
+            action: 'plan.updated',
+            entity: 'plan',
+            entityId: plan.id,
+            before,
+            after: updateData,
+            ip: reqInfo.ip || null,
+            userAgent: reqInfo.userAgent || null
+        });
+    } catch (err) {
+        // Ignorar errores de audit
+    }
+
+    return plan;
+}
+
 module.exports = {
     listPlans,
     getPlanById,
-    createPlan
+    createPlan,
+    updatePlanById
 };

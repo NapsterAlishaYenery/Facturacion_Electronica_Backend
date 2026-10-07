@@ -47,8 +47,32 @@ const createPlan = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// PATCH /api/plans/:id (admin)
+// ------------------------------------------------------------
+const updatePlanById = catchAsync(async (req, res) => {
+    const reqInfo = {
+        ip: req.ip,
+        userAgent: req.get('user-agent')
+    };
+
+    const plan = await plansService.updatePlanById(
+        req.params.id,
+        req.body,
+        req.user,
+        reqInfo
+    );
+
+    res.json({
+        success: true,
+        message: 'Plan updated successfully',
+        data: { plan }
+    });
+});
+
 module.exports = {
     listPlans,
     getPlanById,
-    createPlan
+    createPlan,
+    updatePlanById
 };
