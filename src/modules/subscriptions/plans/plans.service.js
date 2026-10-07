@@ -2,7 +2,7 @@
 // Servicio de planes
 // ============================================================
 
-const { Plan, AuditLog } = require('../../../models');
+const { Plan, Subscription, AuditLog } = require('../../../models');
 const { AppError } = require('../../../shared/middlewares/error.middleware');
 
 // ------------------------------------------------------------
@@ -177,9 +177,64 @@ async function updatePlanById(planId, updates, reqUser, reqInfo = {}) {
     return plan;
 }
 
+// ------------------------------------------------------------
+// Desactivar un plan (admin, soft delete)
+// ------------------------------------------------------------
+async function deletePlan(planId, reqUser, reqInfo = {}) {
+    // 1. Buscar el plan
+    const plan = await Plan.findByPk(planId);
+    if (!plan) {
+        throw new AppError('Plan not found', 404, 'PLAN_NOT_FOUND');
+    }
+
+    // 2. Idempotencia: si ya está inactivo, no hacemos nada
+    if (!plan.isActive) {
+        return plan;
+    }
+
+    // 3. Verificar que no haya suscripciones en uso con este plan
+    const inUseCount = await Subscription.count({
+        where: {
+            planId,
+            status: ['trial', 'active', 'past_due']
+        }
+    });
+
+    if (inUseCount > 0) {
+        throw new AppError(
+            `Cannot delete plan. It is currently in use by ${inUseCount} subscription(s).`,
+            409,
+            'PLAN_IN_USE'
+        );
+    }
+
+    // 4. Soft delete
+    await plan.update({ isActive: false });
+
+    // 5. Audit log
+    try {
+        await AuditLog.create({
+            companyId: null,
+            userId: reqUser.id,
+            action: 'plan.deleted',
+            entity: 'plan',
+            entityId: plan.id,
+            before: { isActive: true },
+            after: { isActive: false },
+            ip: reqInfo.ip || null,
+            userAgent: reqInfo.userAgent || null
+        });
+    } catch (err) {
+        // Ignorar errores de audit
+    }
+
+    return plan;
+}
+
 module.exports = {
     listPlans,
     getPlanById,
     createPlan,
-    updatePlanById
+    updatePlanById,
+    deletePlan
 };

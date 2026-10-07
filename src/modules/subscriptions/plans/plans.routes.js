@@ -69,4 +69,12 @@ router.patch('/:id',
     plansController.updatePlanById
 );
 
+// DELETE /api/plans/:id — Desactivar plan (solo admin, soft delete)
+router.delete('/:id',
+    authMiddleware,
+    roleMiddleware('admin'),
+    writeLimiter,
+    plansController.deletePlan
+);
+
 module.exports = router;

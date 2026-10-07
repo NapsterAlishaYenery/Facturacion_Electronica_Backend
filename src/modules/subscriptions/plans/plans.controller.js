@@ -70,9 +70,32 @@ const updatePlanById = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// DELETE /api/plans/:id (admin, soft delete)
+// ------------------------------------------------------------
+const deletePlan = catchAsync(async (req, res) => {
+    const reqInfo = {
+        ip: req.ip,
+        userAgent: req.get('user-agent')
+    };
+
+    const plan = await plansService.deletePlan(
+        req.params.id,
+        req.user,
+        reqInfo
+    );
+
+    res.json({
+        success: true,
+        message: 'Plan deactivated successfully',
+        data: { plan }
+    });
+});
+
 module.exports = {
     listPlans,
     getPlanById,
     createPlan,
-    updatePlanById
+    updatePlanById,
+    deletePlan
 };
