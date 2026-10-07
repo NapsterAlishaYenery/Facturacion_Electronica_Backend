@@ -29,7 +29,26 @@ const getPlanById = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// POST /api/plans (admin)
+// ------------------------------------------------------------
+const createPlan = catchAsync(async (req, res) => {
+    const reqInfo = {
+        ip: req.ip,
+        userAgent: req.get('user-agent')
+    };
+
+    const plan = await plansService.createPlan(req.body, req.user, reqInfo);
+
+    res.status(201).json({
+        success: true,
+        message: 'Plan created successfully',
+        data: { plan }
+    });
+});
+
 module.exports = {
     listPlans,
-    getPlanById
+    getPlanById,
+    createPlan
 };

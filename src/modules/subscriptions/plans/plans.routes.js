@@ -6,11 +6,13 @@ const express = require('express');
 const router = express.Router();
 
 // Middlewares
+const authMiddleware = require('../../../shared/middlewares/auth.middleware');
+const roleMiddleware = require('../../../shared/middlewares/role.middleware');
 const validate = require('../../../shared/middlewares/validate.middleware');
-const { readLimiter } = require('../../../shared/middlewares/rateLimit.middleware');
+const { readLimiter, writeLimiter } = require('../../../shared/middlewares/rateLimit.middleware');
 
 // Validaciones
-const { listPlansQuerySchema } = require('./plans.validation');
+const { listPlansQuerySchema, createPlanSchema } = require('./plans.validation');
 
 // Controlador
 const plansController = require('./plans.controller');
@@ -37,6 +39,19 @@ router.get('/',
 router.get('/:id',
     readLimiter,
     plansController.getPlanById
+);
+
+// ============================================================
+// Rutas Privadas
+// ============================================================
+
+// POST /api/plans — Crear plan (solo admin)
+router.post('/',
+    authMiddleware,
+    roleMiddleware('admin'),
+    writeLimiter,
+    validate(createPlanSchema),
+    plansController.createPlan
 );
 
 module.exports = router;

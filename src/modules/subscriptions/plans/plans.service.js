@@ -2,7 +2,7 @@
 // Servicio de planes
 // ============================================================
 
-const { Plan } = require('../../../models');
+const { Plan, AuditLog } = require('../../../models');
 const { AppError } = require('../../../shared/middlewares/error.middleware');
 
 // ------------------------------------------------------------
@@ -50,7 +50,64 @@ async function getPlanById(planId) {
     return plan;
 }
 
+// ------------------------------------------------------------
+// Crear un plan (admin)
+// ------------------------------------------------------------
+async function createPlan(data, reqUser, reqInfo = {}) {
+    // 1. Verificar que el code no exista (mejor UX que el unique constraint)
+    const existing = await Plan.findOne({ where: { code: data.code } });
+    if (existing) {
+        throw new AppError(
+            `A plan with code "${data.code}" already exists`,
+            409,
+            'PLAN_CODE_ALREADY_EXISTS'
+        );
+    }
+
+    // 2. Crear el plan
+    const plan = await Plan.create({
+        code: data.code,
+        name: data.name,
+        description: data.description ?? null,
+        priceDop: data.priceDop,
+        priceUsd: data.priceUsd ?? null,
+        invoicesPerMonth: data.invoicesPerMonth,
+        maxUsers: data.maxUsers,
+        maxSequences: data.maxSequences,
+        features: data.features ?? null,
+        isActive: true
+    });
+
+    // 3. Audit log
+    try {
+        await AuditLog.create({
+            companyId: null,
+            userId: reqUser.id,
+            action: 'plan.created',
+            entity: 'plan',
+            entityId: plan.id,
+            after: {
+                code: plan.code,
+                name: plan.name,
+                priceDop: plan.priceDop,
+                priceUsd: plan.priceUsd,
+                invoicesPerMonth: plan.invoicesPerMonth,
+                maxUsers: plan.maxUsers,
+                maxSequences: plan.maxSequences,
+                isActive: plan.isActive
+            },
+            ip: reqInfo.ip || null,
+            userAgent: reqInfo.userAgent || null
+        });
+    } catch (err) {
+        // Ignorar errores de audit
+    }
+
+    return plan;
+}
+
 module.exports = {
     listPlans,
-    getPlanById
+    getPlanById,
+    createPlan
 };
