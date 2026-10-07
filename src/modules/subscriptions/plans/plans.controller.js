@@ -17,6 +17,19 @@ const listPlans = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// GET /api/plans/:id (público)
+// ------------------------------------------------------------
+const getPlanById = catchAsync(async (req, res) => {
+    const plan = await plansService.getPlanById(req.params.id);
+
+    res.json({
+        success: true,
+        data: { plan }
+    });
+});
+
 module.exports = {
-    listPlans
+    listPlans,
+    getPlanById
 };

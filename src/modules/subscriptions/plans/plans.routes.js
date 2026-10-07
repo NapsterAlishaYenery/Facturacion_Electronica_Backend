@@ -33,4 +33,10 @@ router.get('/',
     plansController.listPlans
 );
 
+// GET /api/plans/:id — Detalle de un plan (público)
+router.get('/:id',
+    readLimiter,
+    plansController.getPlanById
+);
+
 module.exports = router;
