@@ -17,6 +17,22 @@ const getMySubscription = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// GET /api/subscriptions/me/payments (company_admin)
+// ------------------------------------------------------------
+const listMyPayments = catchAsync(async (req, res) => {
+    const result = await subscriptionsService.listMyPayments(
+        req.user.companyId,
+        req.validated.query
+    );
+
+    res.json({
+        success: true,
+        data: result
+    });
+});
+
 module.exports = {
-    getMySubscription
+    getMySubscription,
+    listMyPayments
 };

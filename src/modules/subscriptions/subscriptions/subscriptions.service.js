@@ -2,7 +2,13 @@
 // Servicio de suscripciones
 // ============================================================
 
-const { Subscription, Plan, User, Sequence } = require('../../../models');
+const {
+    Subscription,
+    SubscriptionPayment,
+    Plan,
+    User,
+    Sequence
+} = require('../../../models');
 const { AppError } = require('../../../shared/middlewares/error.middleware');
 
 // ------- helpers -------
@@ -131,6 +137,50 @@ async function getMySubscription(companyId) {
     };
 }
 
+// ------------------------------------------------------------
+// Listar mis pagos (company_admin)
+// ------------------------------------------------------------
+async function listMyPayments(companyId, filters = {}) {
+    if (!companyId) {
+        throw new AppError(
+            'You do not belong to any company',
+            400,
+            'NO_COMPANY_ASSIGNED'
+        );
+    }
+
+    const where = { companyId };
+    if (filters.status) {
+        where.status = filters.status;
+    }
+
+    const page = Number(filters.page) || 1;
+    const limit = Number(filters.limit) || 50;
+    const offset = (page - 1) * limit;
+
+    const { count, rows } = await SubscriptionPayment.findAndCountAll({
+        where,
+        order: [['createdAt', 'DESC']],
+        limit,
+        offset
+    });
+
+    const totalPages = Math.ceil(count / limit);
+
+    return {
+        items: rows,
+        pagination: {
+            page,
+            limit,
+            totalItems: count,
+            totalPages,
+            hasNextPage: page < totalPages,
+            hasPrevPage: page > 1
+        }
+    };
+}
+
 module.exports = {
-    getMySubscription
+    getMySubscription,
+    listMyPayments
 };
