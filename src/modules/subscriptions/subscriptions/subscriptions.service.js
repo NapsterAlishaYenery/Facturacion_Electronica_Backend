@@ -469,10 +469,77 @@ async function listSubscriptions(filters = {}) {
     };
 }
 
+// ------------------------------------------------------------
+// Ver una suscripción específica (admin)
+// ------------------------------------------------------------
+async function getSubscriptionById(subscriptionId) {
+    // 1. Buscar la suscripción con sus relaciones
+    const subscription = await Subscription.findByPk(subscriptionId, {
+        include: [
+            {
+                model: Company,
+                as: 'company',
+                attributes: ['id', 'rnc', 'name', 'tradeName', 'email', 'phone', 'isActive']
+            },
+            {
+                model: Plan,
+                as: 'plan'
+            },
+            {
+                model: SubscriptionPayment,
+                as: 'payments',
+                separate: true,
+                limit: 10,
+                order: [['createdAt', 'DESC']]
+            }
+        ]
+    });
+
+    if (!subscription) {
+        throw new AppError('Subscription not found', 404, 'SUBSCRIPTION_NOT_FOUND');
+    }
+
+    // 2. Contar uso actual
+    const usersCount = await User.count({
+        where: { companyId: subscription.companyId, isActive: true }
+    });
+    const sequencesCount = await Sequence.count({
+        where: { companyId: subscription.companyId, isActive: true }
+    });
+
+    // 3. Construir bloque de uso
+    const plan = subscription.plan;
+    const usedInvoices = Number(subscription.invoicesUsedThisMonth) || 0;
+
+    const usage = {
+        invoices: buildUsageBlock(usedInvoices, plan?.invoicesPerMonth ?? 0),
+        users: buildUsageBlock(usersCount, plan?.maxUsers ?? 0),
+        sequences: buildUsageBlock(sequencesCount, plan?.maxSequences ?? 0)
+    };
+
+    // 4. Vencimiento y días restantes
+    const expiresAt = getEffectiveExpiry(subscription);
+    const daysLeft = expiresAt
+        ? Math.max(0, daysUntil(expiresAt))
+        : 0;
+
+    return {
+        subscription,
+        company: subscription.company,
+        plan,
+        payments: subscription.payments || [],
+        usage,
+        expiresAt,
+        daysLeft
+    };
+}
+
+
 module.exports = {
     getMySubscription,
     listMyPayments,
     changePlan,
     cancelMySubscription,
-    listSubscriptions
+    listSubscriptions,
+    getSubscriptionById
 };

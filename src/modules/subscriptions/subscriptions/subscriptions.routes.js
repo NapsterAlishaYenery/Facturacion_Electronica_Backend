@@ -81,4 +81,12 @@ router.get('/',
     subscriptionsController.listSubscriptions
 );
 
+// GET /api/subscriptions/:id — Ver una específica (admin)
+router.get('/:id',
+    authMiddleware,
+    roleMiddleware('admin'),
+    readLimiter,
+    subscriptionsController.getSubscriptionById
+);
+
 module.exports = router;

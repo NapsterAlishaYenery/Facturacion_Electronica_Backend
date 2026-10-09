@@ -89,10 +89,23 @@ const listSubscriptions = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// GET /api/subscriptions/:id (admin)
+// ------------------------------------------------------------
+const getSubscriptionById = catchAsync(async (req, res) => {
+    const result = await subscriptionsService.getSubscriptionById(req.params.id);
+
+    res.json({
+        success: true,
+        data: result
+    });
+});
+
 module.exports = {
     getMySubscription,
     listMyPayments,
     changePlan,
     cancelMySubscription,
-    listSubscriptions
+    listSubscriptions,
+    getSubscriptionById
 };
