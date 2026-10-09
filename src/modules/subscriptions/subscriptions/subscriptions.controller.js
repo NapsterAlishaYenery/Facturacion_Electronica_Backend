@@ -101,11 +101,35 @@ const getSubscriptionById = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// PATCH /api/subscriptions/:id (admin)
+// ------------------------------------------------------------
+const updateSubscriptionById = catchAsync(async (req, res) => {
+    const reqInfo = {
+        ip: req.ip,
+        userAgent: req.get('user-agent')
+    };
+
+    const subscription = await subscriptionsService.updateSubscriptionById(
+        req.params.id,
+        req.body,
+        req.user,
+        reqInfo
+    );
+
+    res.json({
+        success: true,
+        message: 'Subscription updated successfully',
+        data: { subscription }
+    });
+});
+
 module.exports = {
     getMySubscription,
     listMyPayments,
     changePlan,
     cancelMySubscription,
     listSubscriptions,
-    getSubscriptionById
+    getSubscriptionById,
+    updateSubscriptionById
 };

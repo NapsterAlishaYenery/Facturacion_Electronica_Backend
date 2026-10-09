@@ -534,6 +534,107 @@ async function getSubscriptionById(subscriptionId) {
     };
 }
 
+// ------------------------------------------------------------
+// Actualizar una suscripción (admin)
+// ------------------------------------------------------------
+async function updateSubscriptionById(subscriptionId, updates, reqUser, reqInfo = {}) {
+    // 1. Buscar la suscripción
+    const subscription = await Subscription.findByPk(subscriptionId);
+    if (!subscription) {
+        throw new AppError('Subscription not found', 404, 'SUBSCRIPTION_NOT_FOUND');
+    }
+
+    // 2. Filtrar solo campos editables
+    const allowedFields = [
+        'status', 'trialEndsAt', 'currentPeriodStart', 'currentPeriodEnd',
+        'endsAt', 'cancelledAt', 'invoicesUsedThisMonth'
+    ];
+
+    const updateData = {};
+    const before = {};
+
+    for (const field of allowedFields) {
+        if (updates[field] !== undefined) {
+            // Comparación tolerante: números y fechas se comparan por valor
+            const oldVal = subscription[field];
+            const newVal = updates[field];
+
+            const changed = (() => {
+                if (oldVal === newVal) return false;
+                // Fechas: comparar timestamps
+                if (oldVal instanceof Date && newVal instanceof Date) {
+                    return oldVal.getTime() !== newVal.getTime();
+                }
+                if (oldVal instanceof Date && typeof newVal === 'string') {
+                    return oldVal.getTime() !== new Date(newVal).getTime();
+                }
+                // Números: puede venir string, comparar como número
+                if (typeof oldVal === 'number' || typeof newVal === 'number') {
+                    return Number(oldVal) !== Number(newVal);
+                }
+                return true;
+            })();
+
+            if (changed) {
+                before[field] = oldVal;
+                updateData[field] = newVal;
+            }
+        }
+    }
+
+    if (Object.keys(updateData).length === 0) {
+        throw new AppError(
+            'No changes detected. Provide at least one field with a different value.',
+            400,
+            'NO_CHANGES_DETECTED'
+        );
+    }
+
+    // 3. Auto-seteos según el nuevo status
+    const newStatus = updateData.status;
+
+    if (newStatus === 'cancelled') {
+        if (updateData.cancelledAt === undefined && !subscription.cancelledAt) {
+            updateData.cancelledAt = new Date();
+        }
+        if (updateData.endsAt === undefined && !subscription.endsAt) {
+            updateData.endsAt = subscription.currentPeriodEnd || subscription.trialEndsAt || new Date();
+        }
+    }
+
+    // Reactivación: cancelled/expired → active/trial/past_due
+    if (newStatus === 'active' || newStatus === 'trial' || newStatus === 'past_due') {
+        const oldStatus = subscription.status;
+        if (oldStatus === 'cancelled' || oldStatus === 'expired') {
+            // Resetear flags de cancelación
+            if (updateData.cancelledAt === undefined) updateData.cancelledAt = null;
+            if (updateData.endsAt === undefined) updateData.endsAt = null;
+        }
+    }
+
+    // 4. Actualizar
+    await subscription.update(updateData);
+
+    // 5. Audit log
+    try {
+        await AuditLog.create({
+            companyId: subscription.companyId,
+            userId: reqUser.id,
+            action: 'subscription.updated_by_admin',
+            entity: 'subscription',
+            entityId: subscription.id,
+            before,
+            after: updateData,
+            ip: reqInfo.ip || null,
+            userAgent: reqInfo.userAgent || null
+        });
+    } catch (err) {
+        // Ignorar errores de audit
+    }
+
+    return subscription;
+}
+
 
 module.exports = {
     getMySubscription,
@@ -541,5 +642,6 @@ module.exports = {
     changePlan,
     cancelMySubscription,
     listSubscriptions,
-    getSubscriptionById
+    getSubscriptionById,
+    updateSubscriptionById
 };

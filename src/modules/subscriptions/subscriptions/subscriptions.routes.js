@@ -17,7 +17,8 @@ const validate = require('../../../shared/middlewares/validate.middleware');
 const {
     listMyPaymentsQuerySchema,
     changePlanSchema,
-    listSubscriptionsQuerySchema
+    listSubscriptionsQuerySchema,
+    updateSubscriptionSchema
 } = require('./subscriptions.validation');
 
 // Controlador
@@ -87,6 +88,15 @@ router.get('/:id',
     roleMiddleware('admin'),
     readLimiter,
     subscriptionsController.getSubscriptionById
+);
+
+// PATCH /api/subscriptions/:id — Actualizar (admin)
+router.patch('/:id',
+    authMiddleware,
+    roleMiddleware('admin'),
+    writeLimiter,
+    validate(updateSubscriptionSchema),
+    subscriptionsController.updateSubscriptionById
 );
 
 module.exports = router;
