@@ -1,31 +1,26 @@
 // ============================================================
 // Job: subscription-lifecycle
 //
-// Gestiona el ciclo de vida de las suscripciones (transiciones
-// de estado) y notifica a los dueños antes de que venzan.
-//
 // Corre diario a las 00:00 (timezone RD).
-//
-// Fase 6 Step 6.9: agrega notificaciones preventivas.
 //
 // FASE 1 (preventiva): notificar suscripciones que vencen en
 //   días clave (15, 7, 3, 1) — antes de la transición.
 //
-// FASE 2 (transiciones): las mismas 3 reglas de siempre.
-//   trial     + trial_ends_at <= now()                    → past_due
-//   past_due  + (trial_ends_at o current_period_end) + 3d → expired
-//   active    + current_period_end <= now()               → past_due
+// FASE 2 (renovación): al vencer currentPeriodEnd de una
+//   suscripción active, se crea un SubscriptionPayment pending
+//   para el próximo período y se avanza el período. El status
+//   NO se toca: el bloqueo es decisión del admin.
 //
-// Estados que NO toca:
-//   - cancelled (decisión manual del usuario)
-//   - expired   (esperando pago)
-//
-// La notificación de cambio de estado (past_due, expired) queda
-// pendiente para un step posterior.
+// Estados que NO toca: trial, past_due, cancelled, expired.
+// Todos ellos los gestiona el admin manualmente via
+// PATCH /api/subscriptions/:id (Fase 7 Step 7.12).
 // ============================================================
 
 const { Op } = require('sequelize');
-const { Subscription, Company, User, Plan } = require('../../../models');
+const sequelize = require('../../../config/database');
+const {
+    Subscription, Company, User, Plan, SubscriptionPayment, AuditLog
+} = require('../../../models');
 const {
     withErrorHandling,
     recordJobAudit
@@ -35,8 +30,8 @@ const notifications = require('../../notifications');
 const notificationsConfig = require('../../../config/notifications');
 
 const JOB_NAME = 'subscription-lifecycle';
-const GRACE_DAYS = 3;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const PERIOD_DAYS = 30;
 
 // ------------------------------------------------------------
 // Ventana preventiva y días clave
@@ -45,7 +40,7 @@ const ALERT_WINDOW_DAYS = 15;
 const KEY_DAYS = new Set([15, 7, 3, 1]);
 
 // ------------------------------------------------------------
-// Días completos restantes (mismo helper que otros jobs)
+// Días completos restantes
 // ------------------------------------------------------------
 function daysUntil(targetDate, now = new Date()) {
     const diff = new Date(targetDate).getTime() - now.getTime();
@@ -55,7 +50,7 @@ function daysUntil(targetDate, now = new Date()) {
 }
 
 // ------------------------------------------------------------
-// Calcular la fecha de vencimiento efectiva según el status
+// Vencimiento efectivo según status
 // ------------------------------------------------------------
 function getEffectiveExpiry(sub) {
     if (sub.status === 'trial') return sub.trialEndsAt;
@@ -69,8 +64,6 @@ function getEffectiveExpiry(sub) {
 async function notifyExpiringSoon(now) {
     const cutoff = new Date(now.getTime() + ALERT_WINDOW_DAYS * DAY_MS);
 
-    // 1. Buscar suscripciones en trial o active cuya fecha efectiva
-    //    cae dentro de la ventana preventiva (no incluye las ya vencidas).
     const subs = await Subscription.findAll({
         where: {
             status: ['trial', 'active'],
@@ -107,7 +100,6 @@ async function notifyExpiringSoon(now) {
         ]
     });
 
-    // 2. Filtrar por días clave y notificar
     let affected = 0;
     const notified = [];
     const notifyBcc = notificationsConfig.alerts.registrationNotifyEmail;
@@ -122,7 +114,6 @@ async function notifyExpiringSoon(now) {
         const company = sub.company;
         const owner = company.users?.[0] || null;
 
-        // Destinatarios únicos
         const recipients = new Set();
         if (owner?.email) recipients.add(owner.email);
         if (company.email) recipients.add(company.email);
@@ -169,54 +160,80 @@ async function notifyExpiringSoon(now) {
 }
 
 // ============================================================
-// FASE 2 — Transiciones de estado (lógica existente)
+// FASE 2 — Renovar períodos vencidos (sin bloquear)
+//
+// Para cada suscripción active con currentPeriodEnd <= now:
+//   1. Crea un SubscriptionPayment pending para el próximo período.
+//   2. Avanza currentPeriodStart / currentPeriodEnd y resetea
+//      invoicesUsedThisMonth.
+//   3. NO cambia el status. El bloqueo lo decide el admin.
 // ============================================================
-async function applyStateTransitions(now) {
-    const graceCutoff = new Date(now.getTime() - GRACE_DAYS * DAY_MS);
+async function renewExpiredPeriods(now) {
+    const expired = await Subscription.findAll({
+        where: {
+            status: 'active',
+            currentPeriodEnd: { [Op.ne]: null, [Op.lte]: now }
+        },
+        include: [
+            { model: Plan, as: 'plan', required: true },
+            { model: Company, as: 'company', required: true, attributes: ['id', 'name'] }
+        ]
+    });
+
     const details = {
-        trialToPastDue: 0,
-        pastDueToExpired: 0,
-        activeToPastDue: 0
+        renewed: 0,
+        paymentsCreated: 0,
+        errors: 0
     };
 
-    // 1. trial → past_due
-    const [trialToPastDue] = await Subscription.update(
-        { status: 'past_due' },
-        {
-            where: {
-                status: 'trial',
-                trialEndsAt: { [Op.lte]: now, [Op.ne]: null }
-            }
-        }
-    );
-    details.trialToPastDue = trialToPastDue;
+    for (const sub of expired) {
+        const plan = sub.plan;
 
-    // 2. past_due → expired (pasaron los 3 días de gracia)
-    const [pastDueToExpired] = await Subscription.update(
-        { status: 'expired' },
-        {
-            where: {
-                status: 'past_due',
-                [Op.or]: [
-                    { trialEndsAt: { [Op.lte]: graceCutoff, [Op.ne]: null } },
-                    { currentPeriodEnd: { [Op.lte]: graceCutoff, [Op.ne]: null } }
-                ]
-            }
+        if (!plan) {
+            logger.warn(`[JOB:${JOB_NAME}] sin plan`, { subscriptionId: sub.id });
+            details.errors++;
+            continue;
         }
-    );
-    details.pastDueToExpired = pastDueToExpired;
 
-    // 3. active → past_due
-    const [activeToPastDue] = await Subscription.update(
-        { status: 'past_due' },
-        {
-            where: {
-                status: 'active',
-                currentPeriodEnd: { [Op.lte]: now, [Op.ne]: null }
-            }
+        const periodStart = now;
+        const periodEnd = new Date(now.getTime() + PERIOD_DAYS * DAY_MS);
+
+        try {
+            await sequelize.transaction(async (t) => {
+                // 1. Crear pago pending
+                await SubscriptionPayment.create({
+                    subscriptionId: sub.id,
+                    companyId: sub.companyId,
+                    amount: plan.priceDop,
+                    currency: 'DOP',
+                    paymentMethod: null,
+                    reference: null,
+                    periodStart,
+                    periodEnd,
+                    status: 'pending',
+                    paidAt: null,
+                    notes: `Auto-renewal: ${plan.code}`
+                }, { transaction: t });
+
+                // 2. Avanzar período
+                await sub.update({
+                    currentPeriodStart: periodStart,
+                    currentPeriodEnd: periodEnd,
+                    invoicesUsedThisMonth: 0
+                }, { transaction: t });
+            });
+
+            details.renewed++;
+            details.paymentsCreated++;
+
+        } catch (err) {
+            logger.error(
+                `[JOB:${JOB_NAME}] renew failed`,
+                { subscriptionId: sub.id, error: err.message }
+            );
+            details.errors++;
         }
-    );
-    details.activeToPastDue = activeToPastDue;
+    }
 
     return details;
 }
@@ -227,30 +244,24 @@ async function applyStateTransitions(now) {
 async function runSubscriptionLifecycle() {
     const now = new Date();
 
-    // ══════════════════════════════════════════════════════════
-    // FASE 1 — Notificar antes de vencer (preventivo)
-    // ══════════════════════════════════════════════════════════
+    // FASE 1 — Notificar antes de vencer
     const expiring = await notifyExpiringSoon(now);
 
-    // ══════════════════════════════════════════════════════════
-    // FASE 2 — Aplicar transiciones de estado
-    // ══════════════════════════════════════════════════════════
-    const transitions = await applyStateTransitions(now);
+    // FASE 2 — Renovar períodos vencidos (sin bloquear)
+    const renewals = await renewExpiredPeriods(now);
 
     const totalAffected =
         expiring.affected +
-        transitions.trialToPastDue +
-        transitions.pastDueToExpired +
-        transitions.activeToPastDue;
+        renewals.renewed;
 
-    // ══════════════════════════════════════════════════════════
     // FASE 3 — Audit
-    // ══════════════════════════════════════════════════════════
     if (totalAffected > 0) {
         await recordJobAudit(JOB_NAME, totalAffected, {
             entity: 'subscription',
             expiringNotified: expiring.affected,
-            ...transitions
+            renewed: renewals.renewed,
+            paymentsCreated: renewals.paymentsCreated,
+            errors: renewals.errors
         });
     }
 
@@ -258,7 +269,9 @@ async function runSubscriptionLifecycle() {
         affected: totalAffected,
         expiringNotified: expiring.affected,
         notifiedEmails: expiring.notified.length,
-        ...transitions
+        renewed: renewals.renewed,
+        paymentsCreated: renewals.paymentsCreated,
+        errors: renewals.errors
     });
 
     return {
@@ -266,7 +279,9 @@ async function runSubscriptionLifecycle() {
         entity: 'subscription',
         expiringNotified: expiring.affected,
         notifiedEmails: expiring.notified.length,
-        ...transitions
+        renewed: renewals.renewed,
+        paymentsCreated: renewals.paymentsCreated,
+        errors: renewals.errors
     };
 }
 
@@ -276,6 +291,6 @@ async function runSubscriptionLifecycle() {
 module.exports = withErrorHandling(JOB_NAME, runSubscriptionLifecycle);
 module.exports._raw = runSubscriptionLifecycle;
 module.exports.JOB_NAME = JOB_NAME;
-module.exports.GRACE_DAYS = GRACE_DAYS;
 module.exports.ALERT_WINDOW_DAYS = ALERT_WINDOW_DAYS;
 module.exports.KEY_DAYS = KEY_DAYS;
+module.exports.PERIOD_DAYS = PERIOD_DAYS;
