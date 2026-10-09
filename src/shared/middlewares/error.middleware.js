@@ -11,10 +11,12 @@ const { ValidationError, UniqueConstraintError, ForeignKeyConstraintError } = re
 // Uso: throw new AppError('Message', 400, 'ERROR_CODE')
 // ------------------------------------------------------------
 class AppError extends Error {
-    constructor(message, statusCode = 500, code = 'INTERNAL_ERROR') {
+    //constructor(message, statusCode = 500, code = 'INTERNAL_ERROR') {
+    constructor(message, statusCode = 500, code = 'INTERNAL_ERROR', details = null) {
         super(message);
         this.statusCode = statusCode;
         this.code = code;
+        this.details = details;
         this.isOperational = true; // Distingue errores controlados de bugs
         Error.captureStackTrace(this, this.constructor);
     }
@@ -61,7 +63,8 @@ function normalizeError(err) {
         return {
             statusCode: err.statusCode,
             code: err.code,
-            message: err.message
+            message: err.message,
+            details: err.details || undefined
         };
     }
 
