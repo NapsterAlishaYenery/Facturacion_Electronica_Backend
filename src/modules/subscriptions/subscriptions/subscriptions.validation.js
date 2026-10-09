@@ -24,7 +24,22 @@ const changePlanSchema = Joi.object({
         })
 });
 
+// ------------------------------------------------------------
+// Schema: listar todas las suscripciones (admin)
+// ------------------------------------------------------------
+const listSubscriptionsQuerySchema = Joi.object({
+    status: Joi.string()
+        .valid('trial', 'active', 'past_due', 'cancelled', 'expired')
+        .optional(),
+    planId: Joi.string().uuid().optional(),
+    companyId: Joi.string().uuid().optional(),
+    search: Joi.string().max(100).optional().allow(''),
+    page: Joi.number().integer().min(1).default(1),
+    limit: Joi.number().integer().min(1).max(100).default(50)
+});
+
 module.exports = {
     listMyPaymentsQuerySchema,
-    changePlanSchema
+    changePlanSchema,
+    listSubscriptionsQuerySchema
 };

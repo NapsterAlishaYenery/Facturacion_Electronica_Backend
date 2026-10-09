@@ -77,9 +77,22 @@ const cancelMySubscription = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// GET /api/subscriptions (admin)
+// ------------------------------------------------------------
+const listSubscriptions = catchAsync(async (req, res) => {
+    const result = await subscriptionsService.listSubscriptions(req.validated.query);
+
+    res.json({
+        success: true,
+        data: result
+    });
+});
+
 module.exports = {
     getMySubscription,
     listMyPayments,
     changePlan,
-    cancelMySubscription
+    cancelMySubscription,
+    listSubscriptions
 };

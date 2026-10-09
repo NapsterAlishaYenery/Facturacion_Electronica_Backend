@@ -16,7 +16,8 @@ const validate = require('../../../shared/middlewares/validate.middleware');
 
 const {
     listMyPaymentsQuerySchema,
-    changePlanSchema
+    changePlanSchema,
+    listSubscriptionsQuerySchema
 } = require('./subscriptions.validation');
 
 // Controlador
@@ -65,6 +66,19 @@ router.post('/me/cancel',
     roleMiddleware('company_admin'),
     writeLimiter,
     subscriptionsController.cancelMySubscription
+);
+
+// ============================================================
+// Rutas de admin (TODAS las suscripciones)
+// ============================================================
+
+// GET /api/subscriptions — Listar todas (admin)
+router.get('/',
+    authMiddleware,
+    roleMiddleware('admin'),
+    readLimiter,
+    validate(listSubscriptionsQuerySchema, 'query'),
+    subscriptionsController.listSubscriptions
 );
 
 module.exports = router;

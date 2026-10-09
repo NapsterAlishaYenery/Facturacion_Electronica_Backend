@@ -1,13 +1,14 @@
 // ============================================================
 // Servicio de suscripciones
 // ============================================================
-
+const { Op } = require('sequelize');
 const {
     Subscription,
     SubscriptionPayment,
     Plan,
     User,
-    Sequence
+    Sequence,
+    Company
 } = require('../../../models');
 const { AppError } = require('../../../shared/middlewares/error.middleware');
 const sequelize = require('../../../config/database');
@@ -343,8 +344,8 @@ async function cancelMySubscription(companyId, reqUser, reqInfo = {}) {
     // 3. Calcular endsAt (fin de período actual)
     const now = new Date();
     const accessUntil = subscription.currentPeriodEnd ||
-                        subscription.trialEndsAt ||
-                        now;
+        subscription.trialEndsAt ||
+        now;
 
     // 4. Actualizar
     await subscription.update({
@@ -390,9 +391,88 @@ async function cancelMySubscription(companyId, reqUser, reqInfo = {}) {
     };
 }
 
+// ------------------------------------------------------------
+// Listar TODAS las suscripciones (admin)
+// ------------------------------------------------------------
+async function listSubscriptions(filters = {}) {
+    const where = {};
+
+    // Filtros opcionales
+    if (filters.status) {
+        where.status = filters.status;
+    }
+
+    if (filters.planId) {
+        where.planId = filters.planId;
+    }
+
+    if (filters.companyId) {
+        where.companyId = filters.companyId;
+    }
+
+     // Búsqueda por RNC o nombre de la empresa
+    let companyWhere;
+    if (filters.search) {
+        companyWhere = {
+            [Op.or]: [
+                { rnc: { [Op.iLike]: `%${filters.search}%` } },
+                { name: { [Op.iLike]: `%${filters.search}%` } },
+                { tradeName: { [Op.iLike]: `%${filters.search}%` } }
+            ]
+        };
+    }
+
+    // Paginación
+    const page = Number(filters.page) || 1;
+    const limit = Number(filters.limit) || 50;
+    const offset = (page - 1) * limit;
+
+    // Query
+    const { count, rows } = await Subscription.findAndCountAll({
+        where,
+        include: [
+            {
+                model: Company,
+                as: 'company',
+                required: !!filters.search,
+                //where: Object.keys(companyWhere).length > 0 ? companyWhere : undefined,
+                where: companyWhere,
+                attributes: ['id', 'rnc', 'name', 'tradeName', 'email', 'isActive']
+            },
+            {
+                model: Plan,
+                as: 'plan',
+                attributes: [
+                    'id', 'code', 'name', 'priceDop', 'priceUsd',
+                    'invoicesPerMonth', 'maxUsers', 'maxSequences'
+                ]
+            }
+        ],
+        order: [['createdAt', 'DESC']],
+        limit,
+        offset,
+        distinct: true
+    });
+
+    const totalPages = Math.ceil(count / limit);
+
+    return {
+        items: rows,
+        pagination: {
+            page,
+            limit,
+            totalItems: count,
+            totalPages,
+            hasNextPage: page < totalPages,
+            hasPrevPage: page > 1
+        }
+    };
+}
+
 module.exports = {
     getMySubscription,
     listMyPayments,
     changePlan,
-    cancelMySubscription
+    cancelMySubscription,
+    listSubscriptions
 };
