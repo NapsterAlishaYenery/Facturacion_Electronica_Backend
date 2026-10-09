@@ -782,6 +782,89 @@ async function listSubscriptionPayments(subscriptionId, filters = {}) {
     };
 }
 
+// ------------------------------------------------------------
+// Listar TODOS los pagos del sistema (admin)
+// ------------------------------------------------------------
+async function listAllPayments(filters = {}) {
+    const where = {};
+
+    // Filtros directos
+    if (filters.status) {
+        where.status = filters.status;
+    }
+
+    if (filters.companyId) {
+        where.companyId = filters.companyId;
+    }
+
+    if (filters.subscriptionId) {
+        where.subscriptionId = filters.subscriptionId;
+    }
+
+    if (filters.paymentMethod) {
+        where.paymentMethod = filters.paymentMethod;
+    }
+
+    // Filtro por rango de fechas (sobre createdAt)
+    if (filters.from || filters.to) {
+        where.createdAt = {};
+        if (filters.from) where.createdAt[Op.gte] = new Date(filters.from);
+        if (filters.to) where.createdAt[Op.lte] = new Date(filters.to);
+    }
+
+    // Búsqueda por empresa
+    const companyWhere = {};
+    if (filters.search) {
+        companyWhere[Op.or] = [
+            { rnc: { [Op.iLike]: `%${filters.search}%` } },
+            { name: { [Op.iLike]: `%${filters.search}%` } },
+            { tradeName: { [Op.iLike]: `%${filters.search}%` } }
+        ];
+    }
+
+    // Paginación
+    const page = Number(filters.page) || 1;
+    const limit = Number(filters.limit) || 50;
+    const offset = (page - 1) * limit;
+
+    // Query
+    const { count, rows } = await SubscriptionPayment.findAndCountAll({
+        where,
+        include: [
+            {
+                model: Company,
+                as: 'company',
+                required: !!filters.search,
+                where: filters.search ? companyWhere : undefined,
+                attributes: ['id', 'rnc', 'name', 'tradeName', 'email']
+            },
+            {
+                model: Subscription,
+                as: 'subscription',
+                attributes: ['id', 'companyId', 'planId', 'status', 'currentPeriodStart', 'currentPeriodEnd']
+            }
+        ],
+        order: [['createdAt', 'DESC']],
+        limit,
+        offset,
+        distinct: true
+    });
+
+    const totalPages = Math.ceil(count / limit);
+
+    return {
+        items: rows,
+        pagination: {
+            page,
+            limit,
+            totalItems: count,
+            totalPages,
+            hasNextPage: page < totalPages,
+            hasPrevPage: page > 1
+        }
+    };
+}
+
 
 module.exports = {
     getMySubscription,
@@ -792,5 +875,6 @@ module.exports = {
     getSubscriptionById,
     updateSubscriptionById,
     registerPayment,
-    listSubscriptionPayments
+    listSubscriptionPayments,
+    listAllPayments
 };

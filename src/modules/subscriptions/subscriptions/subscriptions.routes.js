@@ -20,7 +20,8 @@ const {
     listSubscriptionsQuerySchema,
     updateSubscriptionSchema,
     registerPaymentSchema,
-    listSubscriptionPaymentsQuerySchema
+    listSubscriptionPaymentsQuerySchema,
+    listAllPaymentsQuerySchema
 } = require('./subscriptions.validation');
 
 // Controlador
@@ -82,6 +83,15 @@ router.get('/',
     readLimiter,
     validate(listSubscriptionsQuerySchema, 'query'),
     subscriptionsController.listSubscriptions
+);
+
+// GET /api/subscriptions/payments — Todos los pagos (admin)
+router.get('/payments',
+    authMiddleware,
+    roleMiddleware('admin'),
+    readLimiter,
+    validate(listAllPaymentsQuerySchema, 'query'),
+    subscriptionsController.listAllPayments
 );
 
 // GET /api/subscriptions/:id/payments — pagos de una (admin) 

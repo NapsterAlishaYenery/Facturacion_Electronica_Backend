@@ -164,6 +164,18 @@ const listSubscriptionPayments = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// GET /api/subscriptions/payments (admin, global)
+// ------------------------------------------------------------
+const listAllPayments = catchAsync(async (req, res) => {
+    const result = await subscriptionsService.listAllPayments(req.validated.query);
+
+    res.json({
+        success: true,
+        data: result
+    });
+});
+
 module.exports = {
     getMySubscription,
     listMyPayments,
@@ -173,5 +185,6 @@ module.exports = {
     getSubscriptionById,
     updateSubscriptionById,
     registerPayment,
-    listSubscriptionPayments
+    listSubscriptionPayments,
+    listAllPayments
 };

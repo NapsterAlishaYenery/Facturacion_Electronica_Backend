@@ -98,11 +98,29 @@ const listSubscriptionPaymentsQuerySchema = Joi.object({
     limit: Joi.number().integer().min(1).max(100).default(50)
 });
 
+// ------------------------------------------------------------
+// Schema: listar todos los pagos del sistema (admin)
+// ------------------------------------------------------------
+const listAllPaymentsQuerySchema = Joi.object({
+    status: Joi.string().valid('pending', 'paid', 'failed', 'refunded').optional(),
+    companyId: Joi.string().uuid().optional(),
+    subscriptionId: Joi.string().uuid().optional(),
+    paymentMethod: Joi.string()
+        .valid('cash', 'transfer', 'card', 'stripe', 'paypal')
+        .optional(),
+    from: Joi.date().iso().optional(),
+    to: Joi.date().iso().optional(),
+    search: Joi.string().max(100).optional().allow(''),
+    page: Joi.number().integer().min(1).default(1),
+    limit: Joi.number().integer().min(1).max(100).default(50)
+});
+
 module.exports = {
     listMyPaymentsQuerySchema,
     changePlanSchema,
     listSubscriptionsQuerySchema,
     updateSubscriptionSchema,
     registerPaymentSchema,
-    listSubscriptionPaymentsQuerySchema
+    listSubscriptionPaymentsQuerySchema,
+    listAllPaymentsQuerySchema
 };
