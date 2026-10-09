@@ -635,6 +635,105 @@ async function updateSubscriptionById(subscriptionId, updates, reqUser, reqInfo 
     return subscription;
 }
 
+// ------------------------------------------------------------
+// Registrar un pago (admin)
+// ------------------------------------------------------------
+async function registerPayment(subscriptionId, data, reqUser, reqInfo = {}) {
+    // 1. Buscar la suscripción
+    const subscription = await Subscription.findByPk(subscriptionId);
+    if (!subscription) {
+        throw new AppError('Subscription not found', 404, 'SUBSCRIPTION_NOT_FOUND');
+    }
+
+    // 2. Preparar datos del pago
+    const now = new Date();
+    const isPaid = data.status === 'paid';
+
+    const paymentData = {
+        subscriptionId: subscription.id,
+        companyId: subscription.companyId,
+        amount: data.amount,
+        currency: data.currency || 'DOP',
+        paymentMethod: data.paymentMethod ?? null,
+        reference: data.reference ?? null,
+        periodStart: new Date(data.periodStart),
+        periodEnd: new Date(data.periodEnd),
+        status: data.status || 'pending',
+        paidAt: isPaid
+            ? (data.paidAt ? new Date(data.paidAt) : now)
+            : (data.paidAt ? new Date(data.paidAt) : null),
+        notes: data.notes ?? null
+    };
+
+    // 3. Guardar before de la suscripción si va a cambiar
+    const subscriptionBefore = isPaid ? {
+        status: subscription.status,
+        currentPeriodStart: subscription.currentPeriodStart,
+        currentPeriodEnd: subscription.currentPeriodEnd,
+        invoicesUsedThisMonth: subscription.invoicesUsedThisMonth,
+        cancelledAt: subscription.cancelledAt,
+        endsAt: subscription.endsAt
+    } : null;
+
+    // 4. Transacción
+    const result = await sequelize.transaction(async (t) => {
+        // 4.1. Crear pago
+        const payment = await SubscriptionPayment.create(paymentData, { transaction: t });
+
+        // 4.2. Si está 'paid', reactivar la suscripción
+        if (isPaid) {
+            await subscription.update({
+                status: 'active',
+                currentPeriodStart: paymentData.periodStart,
+                currentPeriodEnd: paymentData.periodEnd,
+                invoicesUsedThisMonth: 0,
+                cancelledAt: null,
+                endsAt: null
+            }, { transaction: t });
+        }
+
+        // 4.3. Audit log
+        try {
+            await AuditLog.create({
+                companyId: subscription.companyId,
+                userId: reqUser.id,
+                action: 'subscription.payment_registered',
+                entity: 'subscription_payment',
+                entityId: payment.id,
+                before: subscriptionBefore,
+                after: isPaid ? {
+                    paymentId: payment.id,
+                    amount: payment.amount,
+                    currency: payment.currency,
+                    status: payment.status,
+                    periodStart: payment.periodStart,
+                    periodEnd: payment.periodEnd,
+                    subscriptionStatus: 'active'
+                } : {
+                    paymentId: payment.id,
+                    amount: payment.amount,
+                    currency: payment.currency,
+                    status: payment.status
+                },
+                ip: reqInfo.ip || null,
+                userAgent: reqInfo.userAgent || null
+            }, { transaction: t });
+        } catch (err) {
+            // Ignorar errores de audit
+        }
+
+        return payment;
+    });
+
+    // 5. Recargar subscription (puede haber cambiado)
+    const updatedSubscription = await Subscription.findByPk(subscriptionId);
+
+    return {
+        payment: result,
+        subscription: updatedSubscription
+    };
+}
+
 
 module.exports = {
     getMySubscription,
@@ -643,5 +742,6 @@ module.exports = {
     cancelMySubscription,
     listSubscriptions,
     getSubscriptionById,
-    updateSubscriptionById
+    updateSubscriptionById,
+    registerPayment
 };

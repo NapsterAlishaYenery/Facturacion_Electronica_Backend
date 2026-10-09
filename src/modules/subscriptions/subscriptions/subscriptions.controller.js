@@ -124,6 +124,31 @@ const updateSubscriptionById = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// POST /api/subscriptions/:id/payments (admin)
+// ------------------------------------------------------------
+const registerPayment = catchAsync(async (req, res) => {
+    const reqInfo = {
+        ip: req.ip,
+        userAgent: req.get('user-agent')
+    };
+
+    const result = await subscriptionsService.registerPayment(
+        req.params.id,
+        req.body,
+        req.user,
+        reqInfo
+    );
+
+    res.status(201).json({
+        success: true,
+        message: result.payment.status === 'paid'
+            ? 'Payment registered and subscription reactivated'
+            : 'Payment registered',
+        data: result
+    });
+});
+
 module.exports = {
     getMySubscription,
     listMyPayments,
@@ -131,5 +156,6 @@ module.exports = {
     cancelMySubscription,
     listSubscriptions,
     getSubscriptionById,
-    updateSubscriptionById
+    updateSubscriptionById,
+    registerPayment
 };

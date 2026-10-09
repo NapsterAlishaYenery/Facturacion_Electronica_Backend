@@ -18,7 +18,8 @@ const {
     listMyPaymentsQuerySchema,
     changePlanSchema,
     listSubscriptionsQuerySchema,
-    updateSubscriptionSchema
+    updateSubscriptionSchema,
+    registerPaymentSchema
 } = require('./subscriptions.validation');
 
 // Controlador
@@ -97,6 +98,15 @@ router.patch('/:id',
     writeLimiter,
     validate(updateSubscriptionSchema),
     subscriptionsController.updateSubscriptionById
+);
+
+// POST /api/subscriptions/:id/payments — Registrar pago (admin)
+router.post('/:id/payments',
+    authMiddleware,
+    roleMiddleware('admin'),
+    writeLimiter,
+    validate(registerPaymentSchema),
+    subscriptionsController.registerPayment
 );
 
 module.exports = router;

@@ -58,9 +58,41 @@ const updateSubscriptionSchema = Joi.object({
     'object.min': 'At least one field is required to update'
 });
 
+// ------------------------------------------------------------
+// Schema: registrar pago (admin)
+// ------------------------------------------------------------
+const registerPaymentSchema = Joi.object({
+    amount: Joi.number().positive().precision(2).required()
+        .messages({
+            'number.positive': 'Amount must be greater than 0',
+            'any.required': 'Amount is required'
+        }),
+    currency: Joi.string().valid('DOP', 'USD').default('DOP'),
+    paymentMethod: Joi.string()
+        .valid('cash', 'transfer', 'card', 'stripe', 'paypal')
+        .allow(null)
+        .optional(),
+    reference: Joi.string().max(100).allow(null, '').optional(),
+    periodStart: Joi.date().iso().required()
+        .messages({
+            'any.required': 'periodStart is required'
+        }),
+    periodEnd: Joi.date().iso().greater(Joi.ref('periodStart')).required()
+        .messages({
+            'date.greater': 'periodEnd must be after periodStart',
+            'any.required': 'periodEnd is required'
+        }),
+    status: Joi.string()
+        .valid('pending', 'paid', 'failed', 'refunded')
+        .default('pending'),
+    paidAt: Joi.date().iso().allow(null).optional(),
+    notes: Joi.string().max(2000).allow(null, '').optional()
+});
+
 module.exports = {
     listMyPaymentsQuerySchema,
     changePlanSchema,
     listSubscriptionsQuerySchema,
-    updateSubscriptionSchema
+    updateSubscriptionSchema,
+    registerPaymentSchema
 };
