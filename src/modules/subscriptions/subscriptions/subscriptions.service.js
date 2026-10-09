@@ -303,8 +303,96 @@ async function changePlan(companyId, newPlanId, reqUser, reqInfo = {}) {
     };
 }
 
+// ------------------------------------------------------------
+// Cancelar mi suscripción (company_admin)
+// ------------------------------------------------------------
+async function cancelMySubscription(companyId, reqUser, reqInfo = {}) {
+    if (!companyId) {
+        throw new AppError(
+            'You do not belong to any company',
+            400,
+            'NO_COMPANY_ASSIGNED'
+        );
+    }
+
+    // 1. Buscar suscripción activa
+    const subscription = await Subscription.findOne({
+        where: {
+            companyId,
+            status: ['trial', 'active', 'past_due']
+        },
+        include: [{ model: Plan, as: 'plan' }],
+        order: [['createdAt', 'DESC']]
+    });
+
+    if (!subscription) {
+        throw new AppError(
+            'No active subscription found to cancel',
+            404,
+            'NO_ACTIVE_SUBSCRIPTION'
+        );
+    }
+
+    // 2. Guardar estado anterior
+    const before = {
+        status: subscription.status,
+        cancelledAt: subscription.cancelledAt,
+        endsAt: subscription.endsAt
+    };
+
+    // 3. Calcular endsAt (fin de período actual)
+    const now = new Date();
+    const accessUntil = subscription.currentPeriodEnd ||
+                        subscription.trialEndsAt ||
+                        now;
+
+    // 4. Actualizar
+    await subscription.update({
+        status: 'cancelled',
+        cancelledAt: now,
+        endsAt: accessUntil
+    });
+
+    // 5. Audit log
+    try {
+        await AuditLog.create({
+            companyId,
+            userId: reqUser.id,
+            action: 'subscription.cancelled',
+            entity: 'subscription',
+            entityId: subscription.id,
+            before,
+            after: {
+                status: 'cancelled',
+                cancelledAt: now,
+                endsAt: accessUntil
+            },
+            ip: reqInfo.ip || null,
+            userAgent: reqInfo.userAgent || null
+        });
+    } catch (err) {
+        // Ignorar errores de audit
+    }
+
+    // 6. Notificación (placeholder — módulo notifications lo hará después)
+    // Notificar a todos los company_admin activos de la empresa
+
+    // 7. Calcular días restantes
+    const daysLeft = accessUntil
+        ? Math.max(0, Math.floor((new Date(accessUntil).getTime() - now.getTime()) / (24 * 60 * 60 * 1000)))
+        : 0;
+
+    return {
+        subscription,
+        plan: subscription.plan,
+        accessUntil,
+        daysLeft
+    };
+}
+
 module.exports = {
     getMySubscription,
     listMyPayments,
-    changePlan
+    changePlan,
+    cancelMySubscription
 };

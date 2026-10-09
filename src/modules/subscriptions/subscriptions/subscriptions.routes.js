@@ -59,4 +59,12 @@ router.post('/me/change-plan',
     subscriptionsController.changePlan
 );
 
+// POST /api/subscriptions/me/cancel — Cancelar suscripción
+router.post('/me/cancel',
+    authMiddleware,
+    roleMiddleware('company_admin'),
+    writeLimiter,
+    subscriptionsController.cancelMySubscription
+);
+
 module.exports = router;

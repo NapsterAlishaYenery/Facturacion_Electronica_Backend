@@ -55,8 +55,31 @@ const changePlan = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// POST /api/subscriptions/me/cancel (company_admin)
+// ------------------------------------------------------------
+const cancelMySubscription = catchAsync(async (req, res) => {
+    const reqInfo = {
+        ip: req.ip,
+        userAgent: req.get('user-agent')
+    };
+
+    const result = await subscriptionsService.cancelMySubscription(
+        req.user.companyId,
+        req.user,
+        reqInfo
+    );
+
+    res.json({
+        success: true,
+        message: 'Subscription cancelled. You keep access until the end of the current period.',
+        data: result
+    });
+});
+
 module.exports = {
     getMySubscription,
     listMyPayments,
-    changePlan
+    changePlan,
+    cancelMySubscription
 };
