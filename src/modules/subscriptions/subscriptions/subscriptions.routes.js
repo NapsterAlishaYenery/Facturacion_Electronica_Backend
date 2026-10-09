@@ -19,7 +19,8 @@ const {
     changePlanSchema,
     listSubscriptionsQuerySchema,
     updateSubscriptionSchema,
-    registerPaymentSchema
+    registerPaymentSchema,
+    listSubscriptionPaymentsQuerySchema
 } = require('./subscriptions.validation');
 
 // Controlador
@@ -82,6 +83,16 @@ router.get('/',
     validate(listSubscriptionsQuerySchema, 'query'),
     subscriptionsController.listSubscriptions
 );
+
+// GET /api/subscriptions/:id/payments — pagos de una (admin) 
+router.get('/:id/payments',
+    authMiddleware,
+    roleMiddleware('admin'),
+    readLimiter,
+    validate(listSubscriptionPaymentsQuerySchema, 'query'),
+    subscriptionsController.listSubscriptionPayments
+);
+
 
 // GET /api/subscriptions/:id — Ver una específica (admin)
 router.get('/:id',

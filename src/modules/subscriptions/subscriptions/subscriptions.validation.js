@@ -89,10 +89,20 @@ const registerPaymentSchema = Joi.object({
     notes: Joi.string().max(2000).allow(null, '').optional()
 });
 
+// ------------------------------------------------------------
+// Schema: listar pagos de una suscripción (admin)
+// ------------------------------------------------------------
+const listSubscriptionPaymentsQuerySchema = Joi.object({
+    status: Joi.string().valid('pending', 'paid', 'failed', 'refunded').optional(),
+    page: Joi.number().integer().min(1).default(1),
+    limit: Joi.number().integer().min(1).max(100).default(50)
+});
+
 module.exports = {
     listMyPaymentsQuerySchema,
     changePlanSchema,
     listSubscriptionsQuerySchema,
     updateSubscriptionSchema,
-    registerPaymentSchema
+    registerPaymentSchema,
+    listSubscriptionPaymentsQuerySchema
 };

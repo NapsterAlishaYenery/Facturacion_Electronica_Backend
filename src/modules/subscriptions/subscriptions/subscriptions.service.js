@@ -734,6 +734,54 @@ async function registerPayment(subscriptionId, data, reqUser, reqInfo = {}) {
     };
 }
 
+// ------------------------------------------------------------
+// Listar pagos de una suscripción (admin)
+// ------------------------------------------------------------
+async function listSubscriptionPayments(subscriptionId, filters = {}) {
+    // 1. Verificar que la suscripción existe
+    const subscription = await Subscription.findByPk(subscriptionId, {
+        attributes: ['id', 'companyId', 'planId', 'status']
+    });
+
+    if (!subscription) {
+        throw new AppError('Subscription not found', 404, 'SUBSCRIPTION_NOT_FOUND');
+    }
+
+    // 2. Filtros
+    const where = { subscriptionId };
+    if (filters.status) {
+        where.status = filters.status;
+    }
+
+    // 3. Paginación
+    const page = Number(filters.page) || 1;
+    const limit = Number(filters.limit) || 50;
+    const offset = (page - 1) * limit;
+
+    // 4. Query
+    const { count, rows } = await SubscriptionPayment.findAndCountAll({
+        where,
+        order: [['createdAt', 'DESC']],
+        limit,
+        offset
+    });
+
+    const totalPages = Math.ceil(count / limit);
+
+    return {
+        subscription,
+        items: rows,
+        pagination: {
+            page,
+            limit,
+            totalItems: count,
+            totalPages,
+            hasNextPage: page < totalPages,
+            hasPrevPage: page > 1
+        }
+    };
+}
+
 
 module.exports = {
     getMySubscription,
@@ -743,5 +791,6 @@ module.exports = {
     listSubscriptions,
     getSubscriptionById,
     updateSubscriptionById,
-    registerPayment
+    registerPayment,
+    listSubscriptionPayments
 };
