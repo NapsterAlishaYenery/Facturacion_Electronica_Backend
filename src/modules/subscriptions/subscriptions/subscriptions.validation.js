@@ -13,6 +13,18 @@ const listMyPaymentsQuerySchema = Joi.object({
     limit: Joi.number().integer().min(1).max(100).default(50)
 });
 
+// ------------------------------------------------------------
+// Schema: cambiar de plan (company_admin)
+// ------------------------------------------------------------
+const changePlanSchema = Joi.object({
+    planId: Joi.string().uuid().required()
+        .messages({
+            'string.guid': 'planId must be a valid UUID',
+            'any.required': 'planId is required'
+        })
+});
+
 module.exports = {
-    listMyPaymentsQuerySchema
+    listMyPaymentsQuerySchema,
+    changePlanSchema
 };

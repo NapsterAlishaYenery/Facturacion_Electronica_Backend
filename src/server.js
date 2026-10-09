@@ -1,10 +1,10 @@
 // Dependencias principales y middleware de seguridad
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
 const cookieParser = require('cookie-parser');
-require('dotenv').config();
 const path = require('path');
 
 // Importar las relaciones de los modelos desde el index

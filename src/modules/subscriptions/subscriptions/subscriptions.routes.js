@@ -8,11 +8,15 @@ const router = express.Router();
 // Middlewares
 const authMiddleware = require('../../../shared/middlewares/auth.middleware');
 const roleMiddleware = require('../../../shared/middlewares/role.middleware');
-const { readLimiter } = require('../../../shared/middlewares/rateLimit.middleware');
+const {
+    readLimiter,
+    writeLimiter,
+} = require('../../../shared/middlewares/rateLimit.middleware');
 const validate = require('../../../shared/middlewares/validate.middleware');
 
 const {
     listMyPaymentsQuerySchema,
+    changePlanSchema
 } = require('./subscriptions.validation');
 
 // Controlador
@@ -44,6 +48,15 @@ router.get('/me/payments',
     readLimiter,
     validate(listMyPaymentsQuerySchema, 'query'),
     subscriptionsController.listMyPayments
+);
+
+// POST /api/subscriptions/me/change-plan — Cambiar de plan
+router.post('/me/change-plan',
+    authMiddleware,
+    roleMiddleware('company_admin'),
+    writeLimiter,
+    validate(changePlanSchema),
+    subscriptionsController.changePlan
 );
 
 module.exports = router;

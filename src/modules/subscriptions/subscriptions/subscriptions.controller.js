@@ -32,7 +32,31 @@ const listMyPayments = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// POST /api/subscriptions/me/change-plan (company_admin)
+// ------------------------------------------------------------
+const changePlan = catchAsync(async (req, res) => {
+    const reqInfo = {
+        ip: req.ip,
+        userAgent: req.get('user-agent')
+    };
+
+    const result = await subscriptionsService.changePlan(
+        req.user.companyId,
+        req.body.planId,
+        req.user,
+        reqInfo
+    );
+
+    res.json({
+        success: true,
+        message: 'Plan changed successfully. A payment is now pending.',
+        data: result
+    });
+});
+
 module.exports = {
     getMySubscription,
-    listMyPayments
+    listMyPayments,
+    changePlan
 };

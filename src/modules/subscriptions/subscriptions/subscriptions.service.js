@@ -10,6 +10,7 @@ const {
     Sequence
 } = require('../../../models');
 const { AppError } = require('../../../shared/middlewares/error.middleware');
+const sequelize = require('../../../config/database');
 
 // ------- helpers -------
 
@@ -180,7 +181,130 @@ async function listMyPayments(companyId, filters = {}) {
     };
 }
 
+// ------------------------------------------------------------
+// Cambiar de plan (company_admin)
+// ------------------------------------------------------------
+async function changePlan(companyId, newPlanId, reqUser, reqInfo = {}) {
+    if (!companyId) {
+        throw new AppError(
+            'You do not belong to any company',
+            400,
+            'NO_COMPANY_ASSIGNED'
+        );
+    }
+
+    // 1. Suscripción activa
+    const subscription = await Subscription.findOne({
+        where: {
+            companyId,
+            status: ['trial', 'active', 'past_due']
+        },
+        order: [['createdAt', 'DESC']]
+    });
+
+    if (!subscription) {
+        throw new AppError(
+            'No active subscription found',
+            404,
+            'NO_ACTIVE_SUBSCRIPTION'
+        );
+    }
+
+    // 2. Plan destino existe y está activo
+    const newPlan = await Plan.findByPk(newPlanId);
+    if (!newPlan || !newPlan.isActive) {
+        throw new AppError('Plan not found or inactive', 404, 'PLAN_NOT_FOUND');
+    }
+
+    // 3. No es el mismo plan actual
+    if (subscription.planId === newPlanId) {
+        throw new AppError(
+            'You are already subscribed to this plan',
+            400,
+            'SAME_PLAN'
+        );
+    }
+
+    // 4. Plan actual (para audit + notes)
+    const oldPlan = await Plan.findByPk(subscription.planId);
+    const oldPlanCode = oldPlan?.code || 'unknown';
+    const oldPlanId = subscription.planId;
+
+    // 5. Período nuevo (30 días desde ahora)
+    const now = new Date();
+    const periodEnd = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    // 6. Transacción
+    const result = await sequelize.transaction(async (t) => {
+        // 6.1. Actualizar suscripción
+        await subscription.update({
+            planId: newPlanId,
+            status: 'active',
+            currentPeriodStart: now,
+            currentPeriodEnd: periodEnd,
+            invoicesUsedThisMonth: 0
+        }, { transaction: t });
+
+        // 6.2. Crear pago pendiente
+        const payment = await SubscriptionPayment.create({
+            subscriptionId: subscription.id,
+            companyId,
+            amount: newPlan.priceDop,
+            currency: 'DOP',
+            paymentMethod: null,
+            reference: null,
+            periodStart: now,
+            periodEnd,
+            status: 'pending',
+            paidAt: null,
+            notes: `Plan change: ${oldPlanCode} → ${newPlan.code}`
+        }, { transaction: t });
+
+        // 6.3. Audit log
+        try {
+            await AuditLog.create({
+                companyId,
+                userId: reqUser.id,
+                action: 'subscription.plan_changed',
+                entity: 'subscription',
+                entityId: subscription.id,
+                before: { planId: oldPlanId, planCode: oldPlanCode },
+                after: {
+                    planId: newPlanId,
+                    planCode: newPlan.code,
+                    paymentId: payment.id,
+                    amount: payment.amount,
+                    periodStart: now,
+                    periodEnd
+                },
+                ip: reqInfo.ip || null,
+                userAgent: reqInfo.userAgent || null
+            }, { transaction: t });
+        } catch (err) {
+            // Ignorar errores de audit
+        }
+
+        return { payment };
+    });
+
+    // 7. Recargar subscription con el nuevo plan
+    const updatedSubscription = await Subscription.findByPk(subscription.id, {
+        include: [{ model: Plan, as: 'plan' }]
+    });
+
+    // 8. Notificar a todos los company_admin activos
+    //    (template pendiente en módulo notifications)
+
+
+    return {
+        subscription: updatedSubscription,
+        plan: newPlan,
+        payment: result.payment
+    };
+}
+
 module.exports = {
     getMySubscription,
-    listMyPayments
+    listMyPayments,
+    changePlan
 };
