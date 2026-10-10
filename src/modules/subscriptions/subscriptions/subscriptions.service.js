@@ -103,6 +103,59 @@ async function notifySubscriptionCancelled({ subscription, plan, cancelledAt, ac
     }
 }
 
+// ------------------------------------------------------------
+// Notificar a todos los company_admin activos cuando se cambia
+// de plan. Fire-and-forget.
+// ------------------------------------------------------------
+async function notifyPlanChanged({
+    subscription,
+    oldPlan,
+    newPlan,
+    periodStart,
+    periodEnd
+}) {
+    const company = subscription.company;
+    if (!company) return;
+
+    const admins = company.users || [];
+    const notifyBcc = notificationsConfig.alerts.registrationNotifyEmail || undefined;
+    const paymentDueAt = new Date(periodStart.getTime() + PAYMENT_DUE_DAYS * 24 * 60 * 60 * 1000);
+
+    // 1. Destinatarios únicos
+    const recipients = new Set();
+    for (const admin of admins) {
+        if (admin.email) recipients.add(admin.email);
+    }
+    if (company.email) recipients.add(company.email);
+
+    if (recipients.size === 0) return;
+
+    // 2. Nombre representativo (primer admin)
+    const representative = admins[0] || null;
+
+    // 3. Enviar a cada destinatario
+    for (const to of recipients) {
+        try {
+            await notifications.sendPlanChanged({
+                to,
+                bcc: notifyBcc,
+                companyName: company.name,
+                rnc: company.rnc,
+                ownerName: representative?.firstName || null,
+                oldPlanName: oldPlan?.name || null,
+                newPlanName: newPlan.name,
+                amount: newPlan.priceDop,
+                currency: 'DOP',
+                periodStart,
+                periodEnd,
+                paymentDueAt
+            });
+        } catch (err) {
+            console.error('[subscriptions.notifyPlanChanged] Send failed:', err.message);
+        }
+    }
+}
+
 
 
 // ------- Module Funstions -------
@@ -285,12 +338,25 @@ async function changePlan(companyId, newPlanId, reqUser, reqInfo = {}) {
         );
     }
 
-    // 1. Suscripción activa
+    // 1. Suscripción activa (con relaciones para notificar)
     const subscription = await Subscription.findOne({
         where: {
             companyId,
             status: ['trial', 'active', 'past_due']
         },
+        include: [{
+            model: Company,
+            as: 'company',
+            required: false,
+            attributes: ['id', 'name', 'rnc', 'email'],
+            include: [{
+                model: User,
+                as: 'users',
+                where: { role: 'company_admin', isActive: true },
+                required: false,
+                attributes: ['id', 'email', 'firstName']
+            }]
+        }],
         order: [['createdAt', 'DESC']]
     });
 
@@ -385,7 +451,15 @@ async function changePlan(companyId, newPlanId, reqUser, reqInfo = {}) {
     });
 
     // 8. Notificar a todos los company_admin activos
-    //    (template pendiente en módulo notifications)
+    notifyPlanChanged({
+        subscription,
+        oldPlan,
+        newPlan,
+        periodStart: now,
+        periodEnd
+    }).catch(err => {
+        console.error('[subscriptions.changePlan] Notify failed:', err.message);
+    });
 
 
     return {

@@ -433,6 +433,43 @@ async function sendSubscriptionCancelled({
 }
 
 // ------------------------------------------------------------
+// sendPlanChanged — confirmación de cambio de plan + pago pendiente
+// ------------------------------------------------------------
+async function sendPlanChanged({
+    to,
+    bcc,
+    companyName,
+    rnc,
+    ownerName,
+    oldPlanName,
+    newPlanName,
+    amount,
+    currency,
+    periodStart,
+    periodEnd,
+    paymentDueAt
+}) {
+    const tpl = templates.planChanged;
+    const { html, text } = tpl.render({
+        companyName,
+        rnc,
+        ownerName,
+        oldPlanName,
+        newPlanName,
+        amount,
+        currency,
+        periodStart,
+        periodEnd,
+        paymentDueAt
+    });
+
+    const subject = tpl.buildSubject({ companyName, newPlanName });
+
+    const adapter = getAdapter('email');
+    return adapter.send({ to, bcc, subject, html, text });
+}
+
+// ------------------------------------------------------------
 // Exports
 // ------------------------------------------------------------
 module.exports = {
@@ -452,5 +489,6 @@ module.exports = {
     sendPaymentPending,
     sendPaymentPendingAlert,
     sendPaymentReceived,
-    sendSubscriptionCancelled
+    sendSubscriptionCancelled,
+    sendPlanChanged
 };
