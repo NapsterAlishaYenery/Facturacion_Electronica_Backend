@@ -24,4 +24,5 @@ module.exports = {
     paymentPending: require('./payment-pending'),
     paymentPendingAlert: require('./payment-pending-alert'),
     paymentReceived: require('./payment-received'),
+    subscriptionCancelled: require('./subscription-cancelled'),
 };

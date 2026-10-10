@@ -402,6 +402,37 @@ async function sendPaymentReceived({
 }
 
 // ------------------------------------------------------------
+// sendSubscriptionCancelled — confirmación de cancelación
+// ------------------------------------------------------------
+async function sendSubscriptionCancelled({
+    to,
+    bcc,
+    companyName,
+    rnc,
+    ownerName,
+    planName,
+    cancelledAt,
+    accessUntil,
+    daysLeft
+}) {
+    const tpl = templates.subscriptionCancelled;
+    const { html, text } = tpl.render({
+        companyName,
+        rnc,
+        ownerName,
+        planName,
+        cancelledAt,
+        accessUntil,
+        daysLeft
+    });
+
+    const subject = tpl.buildSubject({ companyName });
+
+    const adapter = getAdapter('email');
+    return adapter.send({ to, bcc, subject, html, text });
+}
+
+// ------------------------------------------------------------
 // Exports
 // ------------------------------------------------------------
 module.exports = {
@@ -420,5 +451,6 @@ module.exports = {
     sendNoActiveSequence,
     sendPaymentPending,
     sendPaymentPendingAlert,
-    sendPaymentReceived
+    sendPaymentReceived,
+    sendSubscriptionCancelled
 };

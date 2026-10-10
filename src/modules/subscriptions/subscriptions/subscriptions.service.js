@@ -59,6 +59,52 @@ async function notifyPaymentReceived({ subscription, payment }) {
     }
 }
 
+// ------------------------------------------------------------
+// Notificar a todos los company_admin activos cuando se cancela
+// la suscripción. Fire-and-forget.
+// ------------------------------------------------------------
+async function notifySubscriptionCancelled({ subscription, plan, cancelledAt, accessUntil, daysLeft }) {
+    const company = subscription.company;
+    if (!company) return;
+
+    const admins = company.users || [];
+    const notifyBcc = notificationsConfig.alerts.registrationNotifyEmail || undefined;
+
+    // 1. Destinatarios únicos: todos los admins + company.email
+    const recipients = new Set();
+    for (const admin of admins) {
+        if (admin.email) recipients.add(admin.email);
+    }
+    if (company.email) recipients.add(company.email);
+
+    if (recipients.size === 0) return;
+
+    // 2. Enviar a cada destinatario
+    //    Nota: ownerName es el primero de la lista (representativo);
+    //    si hay varios admins, el nombre mostrado es uno de ellos.
+    const representative = admins[0] || null;
+
+    for (const to of recipients) {
+        try {
+            await notifications.sendSubscriptionCancelled({
+                to,
+                bcc: notifyBcc,
+                companyName: company.name,
+                rnc: company.rnc,
+                ownerName: representative?.firstName || null,
+                planName: plan?.name || null,
+                cancelledAt,
+                accessUntil,
+                daysLeft
+            });
+        } catch (err) {
+            console.error('[subscriptions.notifySubscriptionCancelled] Send failed:', err.message);
+        }
+    }
+}
+
+
+
 // ------- Module Funstions -------
 // Días completos restantes hasta una fecha
 function daysUntil(targetDate, now = new Date()) {
@@ -361,13 +407,28 @@ async function cancelMySubscription(companyId, reqUser, reqInfo = {}) {
         );
     }
 
-    // 1. Buscar suscripción activa
+    // 1. Buscar suscripción activa (con relaciones para notificar)
     const subscription = await Subscription.findOne({
         where: {
             companyId,
             status: ['trial', 'active', 'past_due']
         },
-        include: [{ model: Plan, as: 'plan' }],
+        include: [
+            { model: Plan, as: 'plan' },
+            {
+                model: Company,
+                as: 'company',
+                required: false,
+                attributes: ['id', 'name', 'rnc', 'email'],
+                include: [{
+                    model: User,
+                    as: 'users',
+                    where: { role: 'company_admin', isActive: true },
+                    required: false,
+                    attributes: ['id', 'email', 'firstName']
+                }]
+            }
+        ],
         order: [['createdAt', 'DESC']]
     });
 
@@ -420,13 +481,22 @@ async function cancelMySubscription(companyId, reqUser, reqInfo = {}) {
         // Ignorar errores de audit
     }
 
-    // 6. Notificación (placeholder — módulo notifications lo hará después)
-    // Notificar a todos los company_admin activos de la empresa
 
-    // 7. Calcular días restantes
+    // 6. Calcular días restantes
     const daysLeft = accessUntil
         ? Math.max(0, Math.floor((new Date(accessUntil).getTime() - now.getTime()) / (24 * 60 * 60 * 1000)))
         : 0;
+
+    // 7. Notificar a todos los admins (fire-and-forget)
+    notifySubscriptionCancelled({
+        subscription,
+        plan: subscription.plan,
+        cancelledAt: now,
+        accessUntil,
+        daysLeft
+    }).catch(err => {
+        console.error('[subscriptions.cancelMySubscription] Notify failed:', err.message);
+    });
 
     return {
         subscription,
