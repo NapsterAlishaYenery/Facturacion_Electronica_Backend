@@ -67,9 +67,26 @@ const toggleCompanyActiveSchema = Joi.object({
         })
 });
 
+// ------------------------------------------------------------
+// Schema: subir certificado digital .p12
+// El archivo va en multipart/form-data (campo "certificate")
+// y multer lo valida antes de llegar aquí.
+// Este schema solo valida el password del .p12.
+// ------------------------------------------------------------
+const uploadCertificateSchema = Joi.object({
+    password: Joi.string().min(1).max(100).required()
+        .messages({
+            'string.empty': 'Certificate password is required',
+            'string.min': 'Certificate password is required',
+            'string.max': 'Certificate password cannot exceed 100 characters',
+            'any.required': 'Certificate password is required'
+        })
+});
+
 module.exports = {
     updateMyCompanySchema,
     listCompaniesQuerySchema,
     updateCompanyByIdSchema,
-    toggleCompanyActiveSchema
+    toggleCompanyActiveSchema,
+    uploadCertificateSchema
 };
