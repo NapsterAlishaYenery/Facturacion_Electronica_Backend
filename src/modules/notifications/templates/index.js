@@ -20,7 +20,9 @@ module.exports = {
     invoiceRejected: require('./invoice-rejected'),
     invoiceAccepted: require('./invoice-accepted'),
     invoiceRejectedByDgii: require('./invoice-rejected-by-dgii'),
-    noActiveSequence: require('./no-active-sequence')
+    noActiveSequence: require('./no-active-sequence'),
+    paymentPending: require('./payment-pending'),
+    paymentPendingAlert: require('./payment-pending-alert')
     // invoiceAccepted: require('./invoice-accepted'),    // ← futuro
     // invoiceRejected: require('./invoice-rejected'),    // ← futuro
 };

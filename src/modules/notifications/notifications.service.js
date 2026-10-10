@@ -291,6 +291,78 @@ async function sendNoActiveSequence({
 }
 
 // ------------------------------------------------------------
+// sendPaymentPending — aviso al cliente de un pago pendiente
+// ------------------------------------------------------------
+async function sendPaymentPending({
+    to,
+    bcc,
+    companyName,
+    rnc,
+    ownerName,
+    planName,
+    amount,
+    currency,
+    periodStart,
+    periodEnd,
+    paymentDueAt
+}) {
+    const tpl = templates.paymentPending;
+    const { html, text } = tpl.render({
+        companyName,
+        rnc,
+        ownerName,
+        planName,
+        amount,
+        currency,
+        periodStart,
+        periodEnd,
+        paymentDueAt
+    });
+
+    const subject = tpl.buildSubject({ companyName, planName });
+
+    const adapter = getAdapter('email');
+    return adapter.send({ to, bcc, subject, html, text });
+}
+
+// ------------------------------------------------------------
+// sendPaymentPendingAlert — resumen interno a Expedinap
+// ------------------------------------------------------------
+async function sendPaymentPendingAlert({
+    to,
+    company,
+    owner,
+    plan,
+    amount,
+    currency,
+    periodStart,
+    periodEnd,
+    paymentDueAt
+}) {
+    const tpl = templates.paymentPendingAlert;
+    const { html, text } = tpl.render({
+        company,
+        owner,
+        plan,
+        amount,
+        currency,
+        periodStart,
+        periodEnd,
+        paymentDueAt
+    });
+
+    const subject = tpl.buildSubject({
+        companyName: company?.name,
+        planName: plan?.name,
+        amount,
+        currency
+    });
+
+    const adapter = getAdapter('email');
+    return adapter.send({ to, subject, html, text });
+}
+
+// ------------------------------------------------------------
 // Exports
 // ------------------------------------------------------------
 module.exports = {
@@ -306,5 +378,8 @@ module.exports = {
     sendInvoiceRejected,
     sendInvoiceAccepted,
     sendInvoiceRejectedByDgii,
-    sendNoActiveSequence
+    sendNoActiveSequence,
+    sendPaymentPending,
+    sendPaymentPendingAlert
+    
 };

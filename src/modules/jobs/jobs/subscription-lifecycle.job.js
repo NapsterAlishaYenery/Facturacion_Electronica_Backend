@@ -33,6 +33,9 @@ const JOB_NAME = 'subscription-lifecycle';
 const DAY_MS = 24 * 60 * 60 * 1000;
 const PERIOD_DAYS = 30;
 
+// Días de gracia para pagar desde el inicio del nuevo período (renovaciones)
+const PAYMENT_DUE_DAYS = 10;
+
 // ------------------------------------------------------------
 // Ventana preventiva y días clave
 // ------------------------------------------------------------
@@ -159,6 +162,78 @@ async function notifyExpiringSoon(now) {
     return { affected, notified };
 }
 
+// ------------------------------------------------------------
+// Notificar al cliente + alerta interna cuando se crea un
+// pago pendiente. Fire-and-forget.
+// ------------------------------------------------------------
+async function notifyPaymentPending({ sub, plan, periodStart, periodEnd }) {
+    const company = sub.company;
+    if (!company) return;
+
+    const owner = company.users?.[0] || null;
+    const notifyBcc = notificationsConfig.alerts.registrationNotifyEmail || undefined;
+    const paymentDueAt = new Date(periodStart.getTime() + PAYMENT_DUE_DAYS * DAY_MS);
+
+    // 1. Destinatarios del correo al cliente
+    const recipients = new Set();
+    if (owner?.email) recipients.add(owner.email);
+    if (company.email) recipients.add(company.email);
+
+    // 2. Correo al cliente (uno por destinatario único)
+    for (const to of recipients) {
+        try {
+            await notifications.sendPaymentPending({
+                to,
+                bcc: notifyBcc,
+                companyName: company.name,
+                rnc: company.rnc,
+                ownerName: owner?.firstName || null,
+                planName: plan.name,
+                amount: plan.priceDop,
+                currency: 'DOP',
+                periodStart,
+                periodEnd,
+                paymentDueAt
+            });
+        } catch (err) {
+            logger.error(
+                `[JOB:${JOB_NAME}] payment pending email failed`,
+                { subscriptionId: sub.id, to, error: err.message }
+            );
+        }
+    }
+
+    // 3. Alerta interna a Expedinap
+    if (notifyBcc) {
+        try {
+            await notifications.sendPaymentPendingAlert({
+                to: notifyBcc,
+                company: {
+                    id: company.id,
+                    name: company.name,
+                    rnc: company.rnc,
+                    email: company.email
+                },
+                owner: owner ? {
+                    firstName: owner.firstName,
+                    email: owner.email
+                } : null,
+                plan: { name: plan.name },
+                amount: plan.priceDop,
+                currency: 'DOP',
+                periodStart,
+                periodEnd,
+                paymentDueAt
+            });
+        } catch (err) {
+            logger.error(
+                `[JOB:${JOB_NAME}] payment pending alert failed`,
+                { subscriptionId: sub.id, error: err.message }
+            );
+        }
+    }
+}
+
 // ============================================================
 // FASE 2 — Renovar períodos vencidos (sin bloquear)
 //
@@ -176,7 +251,19 @@ async function renewExpiredPeriods(now) {
         },
         include: [
             { model: Plan, as: 'plan', required: true },
-            { model: Company, as: 'company', required: true, attributes: ['id', 'name'] }
+            {
+                model: Company,
+                as: 'company',
+                required: true,
+                attributes: ['id', 'name', 'rnc', 'email'],
+                include: [{
+                    model: User,
+                    as: 'users',
+                    where: { role: 'company_admin', isActive: true },
+                    required: false,
+                    attributes: ['id', 'email', 'firstName']
+                }]
+            }
         ]
     });
 
@@ -225,6 +312,20 @@ async function renewExpiredPeriods(now) {
 
             details.renewed++;
             details.paymentsCreated++;
+
+            // Notificar al cliente + alerta interna a Expedinap
+            // fire-and-forget (dentro del for, no bloquea al siguiente)
+            notifyPaymentPending({
+                sub,
+                plan,
+                periodStart,
+                periodEnd
+            }).catch(err => {
+                logger.error(
+                    `[JOB:${JOB_NAME}] payment pending notification failed`,
+                    { subscriptionId: sub.id, error: err.message }
+                );
+            });
 
         } catch (err) {
             logger.error(
@@ -294,3 +395,4 @@ module.exports.JOB_NAME = JOB_NAME;
 module.exports.ALERT_WINDOW_DAYS = ALERT_WINDOW_DAYS;
 module.exports.KEY_DAYS = KEY_DAYS;
 module.exports.PERIOD_DAYS = PERIOD_DAYS;
+module.exports.PAYMENT_DUE_DAYS = PAYMENT_DUE_DAYS;
