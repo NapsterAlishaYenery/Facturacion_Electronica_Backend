@@ -31,7 +31,10 @@ certs/
 # UPLOADS (carpeta vacía se mantiene, contenido se ignora)
 # ============================================================
 uploads/*
-!.gitkeep
+!uploads/.gitkeep
+!uploads/certs/
+uploads/certs/*
+!uploads/certs/.gitkeep
 
 # ============================================================
 # ARCHIVOS TEMPORALES, LOGS, CACHÉ

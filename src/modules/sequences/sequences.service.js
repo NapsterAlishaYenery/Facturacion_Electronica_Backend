@@ -3,7 +3,6 @@
 // ============================================================
 
 const { Op } = require('sequelize');
-const sequelize = require('../../config/database');
 const { Sequence, Company, Invoice, AuditLog } = require('../../models');
 const { AppError } = require('../../shared/middlewares/error.middleware');
 
