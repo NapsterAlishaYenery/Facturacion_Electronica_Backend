@@ -12,9 +12,54 @@ const {
 } = require('../../../models');
 const { AppError } = require('../../../shared/middlewares/error.middleware');
 const sequelize = require('../../../config/database');
+const notifications = require('../../notifications');
+const notificationsConfig = require('../../../config/notifications');
 
 // ------- helpers -------
+// ------------------------------------------------------------
+// Notificar al cliente cuando se registra un pago 'paid'
+// Fire-and-forget.
+// ------------------------------------------------------------
+async function notifyPaymentReceived({ subscription, payment }) {
+    const company = subscription.company;
+    if (!company) return;
 
+    const owner = company.users?.[0] || null;
+    const plan = subscription.plan;
+    const notifyBcc = notificationsConfig.alerts.registrationNotifyEmail || undefined;
+
+    // 1. Destinatarios únicos
+    const recipients = new Set();
+    if (owner?.email) recipients.add(owner.email);
+    if (company.email) recipients.add(company.email);
+
+    if (recipients.size === 0) return;
+
+    // 2. Enviar a cada destinatario
+    for (const to of recipients) {
+        try {
+            await notifications.sendPaymentReceived({
+                to,
+                bcc: notifyBcc,
+                companyName: company.name,
+                rnc: company.rnc,
+                ownerName: owner?.firstName || null,
+                planName: plan?.name || null,
+                amount: payment.amount,
+                currency: payment.currency,
+                paymentMethod: payment.paymentMethod,
+                reference: payment.reference,
+                periodStart: payment.periodStart,
+                periodEnd: payment.periodEnd,
+                paidAt: payment.paidAt
+            });
+        } catch (err) {
+            console.error('[subscriptions.notifyPaymentReceived] Send failed:', err.message);
+        }
+    }
+}
+
+// ------- Module Funstions -------
 // Días completos restantes hasta una fecha
 function daysUntil(targetDate, now = new Date()) {
     const diff = new Date(targetDate).getTime() - now.getTime();
@@ -410,7 +455,7 @@ async function listSubscriptions(filters = {}) {
         where.companyId = filters.companyId;
     }
 
-     // Búsqueda por RNC o nombre de la empresa
+    // Búsqueda por RNC o nombre de la empresa
     let companyWhere;
     if (filters.search) {
         companyWhere = {
@@ -639,8 +684,25 @@ async function updateSubscriptionById(subscriptionId, updates, reqUser, reqInfo 
 // Registrar un pago (admin)
 // ------------------------------------------------------------
 async function registerPayment(subscriptionId, data, reqUser, reqInfo = {}) {
-    // 1. Buscar la suscripción
-    const subscription = await Subscription.findByPk(subscriptionId);
+    // 1. Buscar la suscripción (con relaciones para notificar)
+    const subscription = await Subscription.findByPk(subscriptionId, {
+        include: [
+            { model: Plan, as: 'plan', required: false, attributes: ['id', 'code', 'name'] },
+            {
+                model: Company,
+                as: 'company',
+                required: false,
+                attributes: ['id', 'name', 'rnc', 'email'],
+                include: [{
+                    model: User,
+                    as: 'users',
+                    where: { role: 'company_admin', isActive: true },
+                    required: false,
+                    attributes: ['id', 'email', 'firstName']
+                }]
+            }
+        ]
+    });
     if (!subscription) {
         throw new AppError('Subscription not found', 404, 'SUBSCRIPTION_NOT_FOUND');
     }
@@ -727,6 +789,17 @@ async function registerPayment(subscriptionId, data, reqUser, reqInfo = {}) {
 
     // 5. Recargar subscription (puede haber cambiado)
     const updatedSubscription = await Subscription.findByPk(subscriptionId);
+
+    // 6. Notificar al cliente si el pago quedó 'paid'
+    //    Fire-and-forget: no bloquea la respuesta.
+    if (isPaid) {
+        notifyPaymentReceived({
+            subscription,       // tiene company + plan + owner cargados
+            payment: result
+        }).catch(err => {
+            console.error('[subscriptions.registerPayment] Notify failed:', err.message);
+        });
+    }
 
     return {
         payment: result,

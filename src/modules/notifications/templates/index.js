@@ -22,7 +22,6 @@ module.exports = {
     invoiceRejectedByDgii: require('./invoice-rejected-by-dgii'),
     noActiveSequence: require('./no-active-sequence'),
     paymentPending: require('./payment-pending'),
-    paymentPendingAlert: require('./payment-pending-alert')
-    // invoiceAccepted: require('./invoice-accepted'),    // ← futuro
-    // invoiceRejected: require('./invoice-rejected'),    // ← futuro
+    paymentPendingAlert: require('./payment-pending-alert'),
+    paymentReceived: require('./payment-received'),
 };

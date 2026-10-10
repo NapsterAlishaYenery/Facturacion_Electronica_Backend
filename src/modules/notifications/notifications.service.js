@@ -363,6 +363,45 @@ async function sendPaymentPendingAlert({
 }
 
 // ------------------------------------------------------------
+// sendPaymentReceived — comprobante de pago al cliente
+// ------------------------------------------------------------
+async function sendPaymentReceived({
+    to,
+    bcc,
+    companyName,
+    rnc,
+    ownerName,
+    planName,
+    amount,
+    currency,
+    paymentMethod,
+    reference,
+    periodStart,
+    periodEnd,
+    paidAt
+}) {
+    const tpl = templates.paymentReceived;
+    const { html, text } = tpl.render({
+        companyName,
+        rnc,
+        ownerName,
+        planName,
+        amount,
+        currency,
+        paymentMethod,
+        reference,
+        periodStart,
+        periodEnd,
+        paidAt
+    });
+
+    const subject = tpl.buildSubject({ companyName, planName });
+
+    const adapter = getAdapter('email');
+    return adapter.send({ to, bcc, subject, html, text });
+}
+
+// ------------------------------------------------------------
 // Exports
 // ------------------------------------------------------------
 module.exports = {
@@ -380,6 +419,6 @@ module.exports = {
     sendInvoiceRejectedByDgii,
     sendNoActiveSequence,
     sendPaymentPending,
-    sendPaymentPendingAlert
-    
+    sendPaymentPendingAlert,
+    sendPaymentReceived
 };
