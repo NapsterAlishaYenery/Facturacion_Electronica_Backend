@@ -8,6 +8,7 @@ const http = require('http');
 const { generateTestP12 } = require('../helpers/generate-test-p12');
 const sequelize = require('../../src/config/database');
 const { User, Company, AuditLog, Subscription, Sequence } = require('../../src/models');
+const { request } = require('../helpers/http.helper');
 
 const BASE_URL = 'http://localhost:4001';
 const PORT = 4001;
@@ -394,6 +395,70 @@ function test(label, condition, extra = '') {
 
         // Cleanup del operator
         await User.destroy({ where: { email: 'cert-operator@expedinap.com' } });
+
+         // ============================================================
+        // TEST 10: GET info — sin certificado aún
+        // Necesitamos una empresa fresca sin certificado
+        // ============================================================
+        console.log('\n--- Test 10: GET info sin certificado ---');
+        // Subimos el certificado en Test 1, así que esta empresa ya tiene uno.
+        // Para probar "sin certificado", hacemos un chequeo directo del service.
+        // (O creamos otra empresa; más simple: probar con la misma y verificar
+        //  que AHORA sí tiene certificado.)
+        const infoRes = await request('/api/companies/me/certificate', {
+            headers: { Cookie: ownerCookie }
+        });
+        test('status 200', infoRes.status === 200, `got ${infoRes.status} → ${JSON.stringify(infoRes.body)}`);
+        test('success true', infoRes.body?.success === true);
+        test('hasCertificate true', infoRes.body?.data?.hasCertificate === true);
+        test('uploadedAt present', !!infoRes.body?.data?.uploadedAt);
+        test('expiresAt present', !!infoRes.body?.data?.expiresAt);
+        test('daysUntilExpiry > 0', infoRes.body?.data?.daysUntilExpiry > 0);
+        test('isExpired false', infoRes.body?.data?.isExpired === false);
+        test('expiresSoon false (cert dura 1 año)', infoRes.body?.data?.expiresSoon === false);
+        test('rnc matches', infoRes.body?.data?.rnc === testRnc);
+        test('does NOT expose certificatePath',
+            infoRes.body?.data?.certificatePath === undefined);
+        test('does NOT expose certificatePasswordEncrypted',
+            infoRes.body?.data?.certificatePasswordEncrypted === undefined);
+
+        // ============================================================
+        // TEST 11: GET info sin autenticación → 401
+        // ============================================================
+        console.log('\n--- Test 11: GET info sin auth ---');
+        const infoNoAuth = await request('/api/companies/me/certificate');
+        test('status 401', infoNoAuth.status === 401, `got ${infoNoAuth.status}`);
+
+        // ============================================================
+        // TEST 12: GET info como operator → 200 (sí puede leer)
+        // ============================================================
+        console.log('\n--- Test 12: GET info como operator ---');
+        await User.create({
+            email: 'cert-operator-read@expedinap.com',
+            password: 'OperatorPass123',
+            firstName: 'Operator',
+            lastName: 'Read',
+            role: 'operator',
+            companyId
+        });
+        const operatorReadCookie = await loginAndGetCookie('cert-operator-read@expedinap.com', 'OperatorPass123');
+        const infoOpRes = await request('/api/companies/me/certificate', {
+            headers: { Cookie: operatorReadCookie }
+        });
+        test('status 200', infoOpRes.status === 200, `got ${infoOpRes.status}`);
+        test('hasCertificate true', infoOpRes.body?.data?.hasCertificate === true);
+        await User.destroy({ where: { email: 'cert-operator-read@expedinap.com' } });
+
+        // ============================================================
+        // TEST 13: admin (sin empresa) → 400 NO_COMPANY_ASSIGNED
+        // ============================================================
+        console.log('\n--- Test 13: GET info como admin sin empresa ---');
+        const infoAdminRes = await request('/api/companies/me/certificate', {
+            headers: { Cookie: adminCookie }
+        });
+        test('status 400', infoAdminRes.status === 400, `got ${infoAdminRes.status}`);
+        test('code NO_COMPANY_ASSIGNED',
+            infoAdminRes.body?.error?.code === 'NO_COMPANY_ASSIGNED');
 
     } catch (err) {
         console.error('\n❌ Test error:', err.message);

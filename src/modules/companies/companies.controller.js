@@ -171,6 +171,19 @@ const uploadCertificate = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// GET /api/companies/me/certificate
+// Devuelve metadata del certificado (sin archivo ni password)
+// ------------------------------------------------------------
+const getMyCertificate = catchAsync(async (req, res) => {
+    const result = await companiesService.getMyCertificate(req.user.companyId);
+
+    res.json({
+        success: true,
+        data: result
+    });
+});
+
 module.exports = {
     getMyCompany,
     updateMyCompany,
@@ -179,5 +192,6 @@ module.exports = {
     updateCompanyById,
     toggleCompanyActive,
     deleteCompany,
-    uploadCertificate
+    uploadCertificate,
+    getMyCertificate 
 };

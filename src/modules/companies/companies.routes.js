@@ -60,7 +60,6 @@ router.patch('/me',
 
 // ============================================================
 // Rutas de certificado (mi empresa)
-// IMPORTANTE: /me/certificate va ANTES de cualquier /:id
 // ============================================================
 
 router.patch('/me/certificate',
@@ -70,6 +69,12 @@ router.patch('/me/certificate',
     multerUploadCertificate,
     validate(uploadCertificateSchema),
     companiesController.uploadCertificate
+);
+
+router.get('/me/certificate',
+    authMiddleware,
+    readLimiter,
+    companiesController.getMyCertificate
 );
 
 // ============================================================

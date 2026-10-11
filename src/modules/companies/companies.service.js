@@ -718,6 +718,54 @@ async function uploadCertificate(companyId, fileBuffer, password, reqUser, reqIn
     return safeCompany;
 }
 
+// ------------------------------------------------------------
+// Obtener metadata del certificado (nunca archivo ni password)
+// ------------------------------------------------------------
+async function getMyCertificate(companyId) {
+    if (!companyId) {
+        throw new AppError('You do not belong to any company', 400, 'NO_COMPANY_ASSIGNED');
+    }
+
+    const company = await Company.findByPk(companyId, {
+        attributes: ['id', 'rnc', 'certificatePath', 'certificateUploadedAt', 'certificateExpiresAt']
+    });
+
+    if (!company) {
+        throw new AppError('Company not found', 404, 'COMPANY_NOT_FOUND');
+    }
+
+    const hasCertificate = !!company.certificatePath && !!company.certificateExpiresAt;
+
+    if (!hasCertificate) {
+        return {
+            hasCertificate: false,
+            uploadedAt: null,
+            expiresAt: null,
+            daysUntilExpiry: null,
+            isExpired: false,
+            expiresSoon: false,
+            rnc: company.rnc
+        };
+    }
+
+    const now = new Date();
+    const expiresAt = new Date(company.certificateExpiresAt);
+    const msPerDay = 24 * 60 * 60 * 1000;
+    const daysUntilExpiry = Math.ceil((expiresAt.getTime() - now.getTime()) / msPerDay);
+    const isExpired = expiresAt < now;
+    const expiresSoon = !isExpired && daysUntilExpiry <= 30;
+
+    return {
+        hasCertificate: true,
+        uploadedAt: company.certificateUploadedAt,
+        expiresAt: company.certificateExpiresAt,
+        daysUntilExpiry,
+        isExpired,
+        expiresSoon,
+        rnc: company.rnc
+    };
+}
+
 module.exports = {
     getMyCompany,
     updateMyCompany,
@@ -726,5 +774,6 @@ module.exports = {
     updateCompanyById,
     toggleCompanyActive,
     deleteCompany,
-    uploadCertificate
+    uploadCertificate,
+    getMyCertificate
 };
