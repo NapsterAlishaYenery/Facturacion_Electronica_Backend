@@ -8,6 +8,8 @@ const router = express.Router();
 // Middlewares
 const authMiddleware = require('../../shared/middlewares/auth.middleware');
 const roleMiddleware = require('../../shared/middlewares/role.middleware');
+
+const { uploadCertificate: multerUploadCertificate } = require('./companies.multer');
 const validate = require('../../shared/middlewares/validate.middleware');
 const {
     writeLimiter,
@@ -19,7 +21,8 @@ const {
     updateMyCompanySchema,
     listCompaniesQuerySchema,
     updateCompanyByIdSchema,
-    toggleCompanyActiveSchema
+    toggleCompanyActiveSchema,
+    uploadCertificateSchema
 } = require('./companies.validation');
 
 // Controlador
@@ -53,6 +56,20 @@ router.patch('/me',
     writeLimiter,
     validate(updateMyCompanySchema),
     companiesController.updateMyCompany
+);
+
+// ============================================================
+// Rutas de certificado (mi empresa)
+// IMPORTANTE: /me/certificate va ANTES de cualquier /:id
+// ============================================================
+
+router.patch('/me/certificate',
+    authMiddleware,
+    roleMiddleware('company_admin'),
+    writeLimiter,
+    multerUploadCertificate,
+    validate(uploadCertificateSchema),
+    companiesController.uploadCertificate
 );
 
 // ============================================================

@@ -135,6 +135,42 @@ const deleteCompany = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// PATCH /api/companies/me/certificate
+// El archivo ya fue procesado por multer → req.file
+// El password ya fue validado por Joi → req.body.password
+// ------------------------------------------------------------
+const uploadCertificate = catchAsync(async (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({
+            success: false,
+            error: {
+                code: 'CERTIFICATE_FILE_REQUIRED',
+                message: 'No file uploaded. Send a .p12 or .pfx file in the "certificate" field.'
+            }
+        });
+    }
+
+    const reqInfo = {
+        ip: req.ip,
+        userAgent: req.get('user-agent')
+    };
+
+    const company = await companiesService.uploadCertificate(
+        req.user.companyId,
+        req.file.buffer,
+        req.body.password,
+        req.user,
+        reqInfo
+    );
+
+    res.json({
+        success: true,
+        message: 'Certificate uploaded successfully',
+        data: { company }
+    });
+});
+
 module.exports = {
     getMyCompany,
     updateMyCompany,
@@ -142,5 +178,6 @@ module.exports = {
     getCompanyById,
     updateCompanyById,
     toggleCompanyActive,
-    deleteCompany
+    deleteCompany,
+    uploadCertificate
 };
