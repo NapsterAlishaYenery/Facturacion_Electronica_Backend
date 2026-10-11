@@ -1,16 +1,17 @@
 // ============================================================
 // Tests de integración: certificado digital (.p12)
-// Cubre 8.2 (upload) — 8.3 y 8.4 se agregan en sus propios steps
+// Cubre 8.2 (upload) — 8.3 (info) — 8.4 (revoke)
 // ============================================================
 
 require('dotenv').config();
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 const { generateTestP12 } = require('../helpers/generate-test-p12');
 const sequelize = require('../../src/config/database');
 const { User, Company, AuditLog, Subscription, Sequence } = require('../../src/models');
 const { request } = require('../helpers/http.helper');
 
-const BASE_URL = 'http://localhost:4001';
 const PORT = 4001;
 
 // Credenciales de prueba
@@ -18,8 +19,13 @@ const testRnc = '130999901';
 const ownerEmail = 'cert-owner@expedinap.com';
 const ownerPassword = 'OwnerPass123';
 const adminEmail = 'cert-admin@expedinap.com';
+const operatorUploadEmail = 'cert-operator@expedinap.com';
+const operatorReadEmail = 'cert-operator-read@expedinap.com';
+const operatorRevokeEmail = 'cert-operator-revoke@expedinap.com';
+const operatorPassword = 'OperatorPass123';
 
 let ownerCookie = null;
+let adminCookie = null;
 let companyId = null;
 let adminId = null;
 
@@ -54,19 +60,16 @@ function loginAndGetCookie(email, password) {
     });
 }
 
-// Construye un body multipart/form-data manualmente
 function buildMultipart({ fileBuffer, filename, password, boundary }) {
     const CRLF = '\r\n';
     const parts = [];
 
-    // Campo password
     parts.push(Buffer.from(
         `--${boundary}${CRLF}` +
         `Content-Disposition: form-data; name="password"${CRLF}${CRLF}` +
         `${password}${CRLF}`
     ));
 
-    // Archivo
     parts.push(Buffer.from(
         `--${boundary}${CRLF}` +
         `Content-Disposition: form-data; name="certificate"; filename="${filename}"${CRLF}` +
@@ -139,6 +142,11 @@ function test(label, condition, extra = '') {
             await Company.destroy({ where: { id: oldCompany.id } });
         }
         await User.destroy({ where: { email: adminEmail } });
+        await User.destroy({
+            where: {
+                email: [operatorUploadEmail, operatorReadEmail, operatorRevokeEmail]
+            }
+        });
 
         // ------------------------------------------------------------
         // Setup: admin + empresa
@@ -152,7 +160,6 @@ function test(label, condition, extra = '') {
         });
         adminId = admin.id;
 
-        // Registrar empresa (vía endpoint para que se cree todo)
         const registerBody = JSON.stringify({
             company: { rnc: testRnc, name: 'Cert Test Company SRL', dgiiEnvironment: 'testecf' },
             owner: {
@@ -226,7 +233,6 @@ function test(label, condition, extra = '') {
         test('does NOT expose certificatePath',
             res1.body?.data?.company?.certificatePath === undefined);
 
-        // Verificar en BD que se guardó todo
         const companyDb = await Company.findByPk(companyId);
         test('BD: certificatePath guardado', !!companyDb.certificatePath);
         test('BD: certificatePath es {companyId}.p12.enc',
@@ -238,13 +244,10 @@ function test(label, condition, extra = '') {
         test('BD: password cifrado tiene formato iv:authTag:encrypted',
             companyDb.certificatePasswordEncrypted.split(':').length === 3);
 
-        // Verificar archivo en disco
-        const fs = require('fs');
-        const path = require('path');
-        const filePath = path.join(process.env.CERT_UPLOAD_DIR || './uploads/certs', companyDb.certificatePath);
+        const uploadDir = process.env.CERT_UPLOAD_DIR || './uploads/certs';
+        const filePath = path.join(uploadDir, companyDb.certificatePath);
         test('Archivo .p12.enc existe en disco', fs.existsSync(filePath));
 
-        // Verificar AuditLog
         const audit = await AuditLog.findOne({
             where: { companyId, action: 'company.certificate_uploaded' }
         });
@@ -265,11 +268,11 @@ function test(label, condition, extra = '') {
             res2.body?.error?.code === 'CERTIFICATE_INVALID_PASSWORD');
 
         // ============================================================
-        // TEST 3: RNC del certificado no coincide
+        // TEST 3: RNC mismatch
         // ============================================================
         console.log('\n--- Test 3: RNC mismatch ---');
         const { buffer: p12BufferWrongRnc, password: p12PassWrongRnc } = generateTestP12({
-            rnc: '130111222', // RNC distinto al de la empresa
+            rnc: '130111222',
             password: 'test-p12-pass'
         });
         const res3 = await uploadCertificateRequest(ownerCookie, {
@@ -295,7 +298,8 @@ function test(label, condition, extra = '') {
         });
         test('status 400', res4.status === 400, `got ${res4.status}`);
         test('code CERTIFICATE_EXPIRED',
-            res4.body?.error?.code === 'CERTIFICATE_EXPIRED');
+            res4.body?.error?.code === 'CERTIFICATE_EXPIRED',
+            `got code=${res4.body?.error?.code} message=${res4.body?.error?.message}`);
 
         // ============================================================
         // TEST 5: extensión inválida
@@ -355,11 +359,9 @@ function test(label, condition, extra = '') {
 
         // ============================================================
         // TEST 8: admin (sin empresa) → 400 NO_COMPANY_ASSIGNED
-        // El roleMiddleware permite a admin (jerarquía 3 > 2),
-        // pero el service rechaza porque no tiene companyId.
         // ============================================================
         console.log('\n--- Test 8: admin sin empresa ---');
-        const adminCookie = await loginAndGetCookie(adminEmail, 'AdminPass123');
+        adminCookie = await loginAndGetCookie(adminEmail, 'AdminPass123');
         const res8 = await uploadCertificateRequest(adminCookie, {
             fileBuffer: p12Buffer,
             password: p12Password
@@ -370,13 +372,10 @@ function test(label, condition, extra = '') {
 
         // ============================================================
         // TEST 9: operator → 403 INSUFFICIENT_ROLE
-        // Un operator (jerarquía 1) NO puede pasar roleMiddleware('company_admin')
         // ============================================================
         console.log('\n--- Test 9: operator bloqueado por roleMiddleware ---');
-        // Crear un operator en la empresa
-        const operatorPassword = 'OperatorPass123';
         await User.create({
-            email: 'cert-operator@expedinap.com',
+            email: operatorUploadEmail,
             password: operatorPassword,
             firstName: 'Operator',
             lastName: 'Cert',
@@ -384,7 +383,7 @@ function test(label, condition, extra = '') {
             companyId
         });
 
-        const operatorCookie = await loginAndGetCookie('cert-operator@expedinap.com', operatorPassword);
+        const operatorCookie = await loginAndGetCookie(operatorUploadEmail, operatorPassword);
         const res9 = await uploadCertificateRequest(operatorCookie, {
             fileBuffer: p12Buffer,
             password: p12Password
@@ -393,18 +392,12 @@ function test(label, condition, extra = '') {
         test('code INSUFFICIENT_ROLE',
             res9.body?.error?.code === 'INSUFFICIENT_ROLE');
 
-        // Cleanup del operator
-        await User.destroy({ where: { email: 'cert-operator@expedinap.com' } });
+        await User.destroy({ where: { email: operatorUploadEmail } });
 
-         // ============================================================
-        // TEST 10: GET info — sin certificado aún
-        // Necesitamos una empresa fresca sin certificado
         // ============================================================
-        console.log('\n--- Test 10: GET info sin certificado ---');
-        // Subimos el certificado en Test 1, así que esta empresa ya tiene uno.
-        // Para probar "sin certificado", hacemos un chequeo directo del service.
-        // (O creamos otra empresa; más simple: probar con la misma y verificar
-        //  que AHORA sí tiene certificado.)
+        // TEST 10: GET info con certificado subido
+        // ============================================================
+        console.log('\n--- Test 10: GET info con certificado ---');
         const infoRes = await request('/api/companies/me/certificate', {
             headers: { Cookie: ownerCookie }
         });
@@ -423,34 +416,34 @@ function test(label, condition, extra = '') {
             infoRes.body?.data?.certificatePasswordEncrypted === undefined);
 
         // ============================================================
-        // TEST 11: GET info sin autenticación → 401
+        // TEST 11: GET info sin auth → 401
         // ============================================================
         console.log('\n--- Test 11: GET info sin auth ---');
         const infoNoAuth = await request('/api/companies/me/certificate');
         test('status 401', infoNoAuth.status === 401, `got ${infoNoAuth.status}`);
 
         // ============================================================
-        // TEST 12: GET info como operator → 200 (sí puede leer)
+        // TEST 12: GET info como operator → 200
         // ============================================================
         console.log('\n--- Test 12: GET info como operator ---');
         await User.create({
-            email: 'cert-operator-read@expedinap.com',
-            password: 'OperatorPass123',
+            email: operatorReadEmail,
+            password: operatorPassword,
             firstName: 'Operator',
             lastName: 'Read',
             role: 'operator',
             companyId
         });
-        const operatorReadCookie = await loginAndGetCookie('cert-operator-read@expedinap.com', 'OperatorPass123');
+        const operatorReadCookie = await loginAndGetCookie(operatorReadEmail, operatorPassword);
         const infoOpRes = await request('/api/companies/me/certificate', {
             headers: { Cookie: operatorReadCookie }
         });
         test('status 200', infoOpRes.status === 200, `got ${infoOpRes.status}`);
         test('hasCertificate true', infoOpRes.body?.data?.hasCertificate === true);
-        await User.destroy({ where: { email: 'cert-operator-read@expedinap.com' } });
+        await User.destroy({ where: { email: operatorReadEmail } });
 
         // ============================================================
-        // TEST 13: admin (sin empresa) → 400 NO_COMPANY_ASSIGNED
+        // TEST 13: GET info como admin sin empresa → 400
         // ============================================================
         console.log('\n--- Test 13: GET info como admin sin empresa ---');
         const infoAdminRes = await request('/api/companies/me/certificate', {
@@ -460,12 +453,102 @@ function test(label, condition, extra = '') {
         test('code NO_COMPANY_ASSIGNED',
             infoAdminRes.body?.error?.code === 'NO_COMPANY_ASSIGNED');
 
+        // ============================================================
+        // TEST 14: revoke exitoso
+        // ============================================================
+        console.log('\n--- Test 14: revoke exitoso ---');
+        const encPath = path.join(uploadDir, `${companyId}.p12.enc`);
+
+        test('archivo existe antes de revoke', fs.existsSync(encPath));
+
+        const revokeRes = await request('/api/companies/me/certificate', {
+            method: 'DELETE',
+            headers: { Cookie: ownerCookie }
+        });
+        test('status 200', revokeRes.status === 200, `got ${revokeRes.status} → ${JSON.stringify(revokeRes.body)}`);
+        test('success true', revokeRes.body?.success === true);
+        test('revoked true', revokeRes.body?.data?.revoked === true);
+
+        const companyAfterRevoke = await Company.findByPk(companyId);
+        test('BD: certificatePath null', companyAfterRevoke.certificatePath === null);
+        test('BD: certificateIv null', companyAfterRevoke.certificateIv === null);
+        test('BD: certificateAuthTag null', companyAfterRevoke.certificateAuthTag === null);
+        test('BD: certificatePasswordEncrypted null',
+            companyAfterRevoke.certificatePasswordEncrypted === null);
+        test('BD: certificateUploadedAt null',
+            companyAfterRevoke.certificateUploadedAt === null);
+        test('BD: certificateExpiresAt null',
+            companyAfterRevoke.certificateExpiresAt === null);
+
+        test('archivo .p12.enc borrado del disco', !fs.existsSync(encPath));
+
+        const revokeAudit = await AuditLog.findOne({
+            where: { companyId, action: 'company.certificate_revoked' }
+        });
+        test('AuditLog company.certificate_revoked creado', !!revokeAudit);
+        test('AuditLog tiene before con certificatePath',
+            !!revokeAudit?.before?.certificatePath);
+
+        // ============================================================
+        // TEST 15: GET info después de revoke → hasCertificate false
+        // ============================================================
+        console.log('\n--- Test 15: GET info después de revoke ---');
+        const infoAfterRevoke = await request('/api/companies/me/certificate', {
+            headers: { Cookie: ownerCookie }
+        });
+        test('status 200', infoAfterRevoke.status === 200);
+        test('hasCertificate false', infoAfterRevoke.body?.data?.hasCertificate === false);
+        test('uploadedAt null', infoAfterRevoke.body?.data?.uploadedAt === null);
+        test('expiresAt null', infoAfterRevoke.body?.data?.expiresAt === null);
+
+        // ============================================================
+        // TEST 16: revoke de nuevo → 400
+        // ============================================================
+        console.log('\n--- Test 16: revoke de nuevo ---');
+        const revokeAgain = await request('/api/companies/me/certificate', {
+            method: 'DELETE',
+            headers: { Cookie: ownerCookie }
+        });
+        test('status 400', revokeAgain.status === 400, `got ${revokeAgain.status}`);
+        test('code NO_CERTIFICATE_TO_REVOKE',
+            revokeAgain.body?.error?.code === 'NO_CERTIFICATE_TO_REVOKE');
+
+        // ============================================================
+        // TEST 17: operator NO puede revocar → 403
+        // ============================================================
+        console.log('\n--- Test 17: operator NO puede revocar ---');
+        await User.create({
+            email: operatorRevokeEmail,
+            password: operatorPassword,
+            firstName: 'Operator',
+            lastName: 'Revoke',
+            role: 'operator',
+            companyId
+        });
+        const opRevokeCookie = await loginAndGetCookie(operatorRevokeEmail, operatorPassword);
+        const revokeOpRes = await request('/api/companies/me/certificate', {
+            method: 'DELETE',
+            headers: { Cookie: opRevokeCookie }
+        });
+        test('status 403', revokeOpRes.status === 403, `got ${revokeOpRes.status}`);
+        test('code INSUFFICIENT_ROLE',
+            revokeOpRes.body?.error?.code === 'INSUFFICIENT_ROLE');
+        await User.destroy({ where: { email: operatorRevokeEmail } });
+
+        // ============================================================
+        // TEST 18: revoke sin auth → 401
+        // ============================================================
+        console.log('\n--- Test 18: revoke sin auth ---');
+        const revokeNoAuth = await request('/api/companies/me/certificate', {
+            method: 'DELETE'
+        });
+        test('status 401', revokeNoAuth.status === 401, `got ${revokeNoAuth.status}`);
+
     } catch (err) {
         console.error('\n❌ Test error:', err.message);
         console.error(err.stack);
         failed++;
     } finally {
-        // Cleanup
         try {
             if (companyId) {
                 await AuditLog.destroy({ where: { companyId } });
@@ -474,9 +557,6 @@ function test(label, condition, extra = '') {
                 await User.destroy({ where: { companyId } });
                 await Company.destroy({ where: { id: companyId } });
 
-                // Borrar archivo .enc si existe
-                const fs = require('fs');
-                const path = require('path');
                 const encPath = path.join(
                     process.env.CERT_UPLOAD_DIR || './uploads/certs',
                     `${companyId}.p12.enc`
@@ -487,6 +567,11 @@ function test(label, condition, extra = '') {
                 await AuditLog.destroy({ where: { userId: adminId } });
                 await User.destroy({ where: { id: adminId } });
             }
+            await User.destroy({
+                where: {
+                    email: [operatorUploadEmail, operatorReadEmail, operatorRevokeEmail]
+                }
+            });
             console.log('\n🧹 Cleaned up');
         } catch (e) {
             console.error('Cleanup error:', e.message);

@@ -184,6 +184,29 @@ const getMyCertificate = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// DELETE /api/companies/me/certificate
+// Revoca el certificado (borra archivo + limpia campos)
+// ------------------------------------------------------------
+const revokeCertificate = catchAsync(async (req, res) => {
+    const reqInfo = {
+        ip: req.ip,
+        userAgent: req.get('user-agent')
+    };
+
+    const result = await companiesService.revokeCertificate(
+        req.user.companyId,
+        req.user,
+        reqInfo
+    );
+
+    res.json({
+        success: true,
+        message: 'Certificate revoked successfully',
+        data: result
+    });
+});
+
 module.exports = {
     getMyCompany,
     updateMyCompany,
@@ -193,5 +216,6 @@ module.exports = {
     toggleCompanyActive,
     deleteCompany,
     uploadCertificate,
-    getMyCertificate 
+    getMyCertificate,
+    revokeCertificate
 };

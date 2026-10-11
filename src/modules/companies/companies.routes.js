@@ -77,6 +77,13 @@ router.get('/me/certificate',
     companiesController.getMyCertificate
 );
 
+router.delete('/me/certificate',
+    authMiddleware,
+    roleMiddleware('company_admin'),
+    writeLimiter,
+    companiesController.revokeCertificate
+);
+
 // ============================================================
 // Rutas de admin (TODAS las empresas)
 // ============================================================

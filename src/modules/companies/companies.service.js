@@ -766,6 +766,77 @@ async function getMyCertificate(companyId) {
     };
 }
 
+// ------------------------------------------------------------
+// Revocar certificado (borra archivo + limpia campos)
+// ------------------------------------------------------------
+async function revokeCertificate(companyId, reqUser, reqInfo = {}) {
+    if (!companyId) {
+        throw new AppError('You do not belong to any company', 400, 'NO_COMPANY_ASSIGNED');
+    }
+
+    const company = await Company.findByPk(companyId);
+    if (!company) {
+        throw new AppError('Company not found', 404, 'COMPANY_NOT_FOUND');
+    }
+
+    if (!company.certificatePath && !company.certificateExpiresAt) {
+        throw new AppError(
+            'Company has no certificate to revoke',
+            400,
+            'NO_CERTIFICATE_TO_REVOKE'
+        );
+    }
+
+    // Capturar metadata antes de limpiar (para el audit)
+    const before = {
+        certificatePath: company.certificatePath,
+        certificateUploadedAt: company.certificateUploadedAt,
+        certificateExpiresAt: company.certificateExpiresAt
+    };
+
+    // Borrar archivo del disco (tolerante a ENOENT)
+    if (company.certificatePath) {
+        const uploadDir = process.env.CERT_UPLOAD_DIR || './uploads/certs';
+        const filepath = path.join(uploadDir, company.certificatePath);
+        try {
+            if (fs.existsSync(filepath)) {
+                fs.unlinkSync(filepath);
+            }
+        } catch (err) {
+            // Ignorar errores de borrado de archivo (el registro en BD es la fuente de verdad)
+        }
+    }
+
+    // Limpiar campos
+    await company.update({
+        certificatePath: null,
+        certificateIv: null,
+        certificateAuthTag: null,
+        certificatePasswordEncrypted: null,
+        certificateUploadedAt: null,
+        certificateExpiresAt: null
+    });
+
+    // Audit log
+    try {
+        await AuditLog.create({
+            companyId: company.id,
+            userId: reqUser.id,
+            action: 'company.certificate_revoked',
+            entity: 'company',
+            entityId: company.id,
+            before,
+            after: { hasCertificate: false },
+            ip: reqInfo.ip || null,
+            userAgent: reqInfo.userAgent || null
+        });
+    } catch (err) {
+        // Ignorar errores de audit
+    }
+
+    return { revoked: true };
+}
+
 module.exports = {
     getMyCompany,
     updateMyCompany,
@@ -775,5 +846,6 @@ module.exports = {
     toggleCompanyActive,
     deleteCompany,
     uploadCertificate,
-    getMyCertificate
+    getMyCertificate,
+    revokeCertificate
 };
