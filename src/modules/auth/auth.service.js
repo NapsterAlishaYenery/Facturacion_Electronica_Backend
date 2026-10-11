@@ -57,21 +57,21 @@ async function registerCompany(data, reqInfo = {}) {
             role: 'company_admin'
         }, { transaction: t });
 
-        // 3. Buscar el plan básico para asignarlo en trial
-        const basicPlan = await Plan.findOne({
-            where: { code: 'basic', isActive: true },
+        // 3. Buscar el plan free para asignarlo en trial
+        const trialPlan = await Plan.findOne({
+            where: { code: 'free', isActive: true }, // ← cambia 'free' por 'basic' de nuevo en caso que desee dar un mejor plan en trial
             transaction: t
         });
 
-        // 4. Crear la suscripción en trial si hay plan básico
+        // 4. Crear la suscripción en trial si hay plan free
         let subscription = null;
-        if (basicPlan) {
+        if (trialPlan) {
             const trialEndsAt = new Date();
             trialEndsAt.setDate(trialEndsAt.getDate() + TRIAL_DAYS); // 25 días de prueba
 
             subscription = await Subscription.create({
                 companyId: company.id,
-                planId: basicPlan.id,
+                planId: trialPlan.id,
                 status: 'trial',
                 trialEndsAt,
                 startsAt: new Date(),
@@ -95,7 +95,7 @@ async function registerCompany(data, reqInfo = {}) {
             userAgent: reqInfo.userAgent || null
         }, { transaction: t });
 
-        return { company, user, subscription, plan: basicPlan };
+        return { company, user, subscription, plan: trialPlan };
     });
 
 

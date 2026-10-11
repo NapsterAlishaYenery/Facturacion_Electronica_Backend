@@ -340,6 +340,113 @@ async function renewExpiredPeriods(now) {
 }
 
 // ============================================================
+// FASE 3 — Convertir trials expirados a plan free
+//
+// Cuando un trial expira (trialEndsAt <= now y status = 'trial'),
+// se cambia automáticamente al plan 'free' con status 'active'.
+// El cliente sigue operando sin interrupciones.
+// ============================================================
+async function convertExpiredTrialsToFree(now) {
+    // 1. Buscar el plan free
+    const freePlan = await Plan.findOne({
+        where: { code: 'free', isActive: true }
+    });
+
+    if (!freePlan) {
+        logger.warn(`[JOB:${JOB_NAME}] plan 'free' no encontrado, saltando conversión`);
+        return { converted: 0, errors: 0 };
+    }
+
+    // 2. Buscar trials expirados
+    const expiredTrials = await Subscription.findAll({
+        where: {
+            status: 'trial',
+            trialEndsAt: { [Op.ne]: null, [Op.lte]: now }
+        },
+        include: [
+            { model: Plan, as: 'plan', required: false },
+            {
+                model: Company,
+                as: 'company',
+                required: true,
+                attributes: ['id', 'name', 'rnc', 'email'],
+                include: [{
+                    model: User,
+                    as: 'users',
+                    where: { role: 'company_admin', isActive: true },
+                    required: false,
+                    attributes: ['id', 'email', 'firstName']
+                }]
+            }
+        ]
+    });
+
+    const details = { converted: 0, errors: 0 };
+
+    for (const sub of expiredTrials) {
+        try {
+            await sub.update({
+                planId: freePlan.id,
+                status: 'active',
+                trialEndsAt: null,
+                startsAt: now,
+                currentPeriodStart: now,
+                currentPeriodEnd: null,  // plan free no expira
+                invoicesUsedThisMonth: 0
+            });
+
+            details.converted++;
+
+            // Audit log
+            await AuditLog.create({
+                companyId: sub.companyId,
+                userId: null,  // automático, sin usuario
+                action: 'subscription.trial_converted_to_free',
+                entity: 'subscription',
+                entityId: sub.id,
+                before: {
+                    planCode: sub.plan?.code || null,
+                    status: 'trial'
+                },
+                after: {
+                    planCode: 'free',
+                    status: 'active'
+                },
+                ip: null,
+                userAgent: null
+            });
+
+            // Notificar al cliente (fire-and-forget)
+            const company = sub.company;
+            const owner = company?.users?.[0];
+            const recipients = new Set();
+            if (owner?.email) recipients.add(owner.email);
+            if (company?.email) recipients.add(company.email);
+
+            // TODO: template 'trial-converted-to-free' (post-MVP)
+            // Por ahora, solo log
+            logger.info(
+                `[JOB:${JOB_NAME}] trial convertido a free`,
+                {
+                    subscriptionId: sub.id,
+                    companyId: sub.companyId,
+                    recipients: [...recipients]
+                }
+            );
+
+        } catch (err) {
+            logger.error(
+                `[JOB:${JOB_NAME}] conversión a free falló`,
+                { subscriptionId: sub.id, error: err.message }
+            );
+            details.errors++;
+        }
+    }
+
+    return details;
+}
+
+// ============================================================
 // Lógica principal
 // ============================================================
 async function runSubscriptionLifecycle() {
@@ -351,17 +458,22 @@ async function runSubscriptionLifecycle() {
     // FASE 2 — Renovar períodos vencidos (sin bloquear)
     const renewals = await renewExpiredPeriods(now);
 
+    // FASE 3 — Convertir trials expirados a plan free
+    const conversions = await convertExpiredTrialsToFree(now);
+
     const totalAffected =
         expiring.affected +
-        renewals.renewed;
+        renewals.renewed +
+        conversions.converted;
 
-    // FASE 3 — Audit
+    //  Audit
     if (totalAffected > 0) {
         await recordJobAudit(JOB_NAME, totalAffected, {
             entity: 'subscription',
             expiringNotified: expiring.affected,
             renewed: renewals.renewed,
             paymentsCreated: renewals.paymentsCreated,
+            trialsConverted: conversions.converted,
             errors: renewals.errors
         });
     }
@@ -372,6 +484,7 @@ async function runSubscriptionLifecycle() {
         notifiedEmails: expiring.notified.length,
         renewed: renewals.renewed,
         paymentsCreated: renewals.paymentsCreated,
+        trialsConverted: conversions.converted,
         errors: renewals.errors
     });
 
@@ -382,6 +495,7 @@ async function runSubscriptionLifecycle() {
         notifiedEmails: expiring.notified.length,
         renewed: renewals.renewed,
         paymentsCreated: renewals.paymentsCreated,
+        trialsConverted: conversions.converted,
         errors: renewals.errors
     };
 }
