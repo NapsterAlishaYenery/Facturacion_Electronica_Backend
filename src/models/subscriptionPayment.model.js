@@ -87,6 +87,17 @@ const SubscriptionPayment = sequelize.define('SubscriptionPayment', {
     notes: {
         type: DataTypes.TEXT,
         allowNull: true
+    },
+    invoiceGenerationAttempts: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+        field: 'invoice_generation_attempts'
+    },
+    lastInvoiceAttemptAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
+        field: 'last_invoice_attempt_at'
     }
 }, {
     tableName: 'subscription_payments',
@@ -97,7 +108,12 @@ const SubscriptionPayment = sequelize.define('SubscriptionPayment', {
         { fields: ['company_id'], name: 'idx_sub_payments_company_id' },
         { fields: ['status'], name: 'idx_sub_payments_status' },
         { fields: ['paid_at'], name: 'idx_sub_payments_paid_at' },
-        { fields: ['period_start', 'period_end'], name: 'idx_sub_payments_period' }
+        { fields: ['period_start', 'period_end'], name: 'idx_sub_payments_period' },
+        {
+            fields: ['status', 'invoice_id', 'invoice_generation_attempts'],
+            name: 'idx_sub_payments_invoice_pending',
+            where: { status: 'paid', invoice_id: null }
+        }
     ],
     validate: {
         // Cross-field: replica el CHECK de la BD

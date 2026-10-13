@@ -259,7 +259,7 @@ async function createMySequence(companyId, data, reqUser, reqInfo = {}) {
     try {
         await AuditLog.create({
             companyId,
-            userId: reqUser.id,
+            userId: reqUser?.id ?? null,
             action: 'sequence.created',
             entity: 'sequence',
             entityId: sequence.id,
@@ -394,7 +394,7 @@ async function updateMySequence(companyId, sequenceId, updates, reqUser, reqInfo
     try {
         await AuditLog.create({
             companyId,
-            userId: reqUser.id,
+            userId: reqUser?.id ?? null,
             action: 'sequence.updated',
             entity: 'sequence',
             entityId: sequence.id,
@@ -473,7 +473,7 @@ async function toggleMySequenceActive(companyId, sequenceId, isActive, reqUser, 
     try {
         await AuditLog.create({
             companyId,
-            userId: reqUser.id,
+            userId: reqUser?.id ?? null,
             action,
             entity: 'sequence',
             entityId: sequence.id,
@@ -556,7 +556,7 @@ async function deleteMySequence(companyId, sequenceId, reqUser, reqInfo = {}) {
     try {
         await AuditLog.create({
             companyId,
-            userId: reqUser.id,
+            userId: reqUser?.id ?? null,
             action: 'sequence.deleted',
             entity: 'sequence',
             entityId: sequenceId,

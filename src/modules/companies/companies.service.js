@@ -206,7 +206,7 @@ async function updateMyCompany(companyId, updates, reqUser, reqInfo = {}) {
     try {
         await AuditLog.create({
             companyId: company.id,
-            userId: reqUser.id,
+            userId: reqUser?.id ?? null,
             action: 'company.updated',
             entity: 'company',
             entityId: company.id,
@@ -426,7 +426,7 @@ async function updateCompanyById(companyId, updates, reqUser, reqInfo = {}) {
     try {
         await AuditLog.create({
             companyId: safeCompany.id,
-            userId: reqUser.id,
+            userId: reqUser?.id ?? null,
             action: 'company.updated_by_admin',
             entity: 'company',
             entityId: safeCompany.id,
@@ -479,7 +479,7 @@ async function toggleCompanyActive(companyId, isActive, reqUser, reqInfo = {}) {
     try {
         await AuditLog.create({
             companyId: company.id,
-            userId: reqUser.id,
+            userId: reqUser?.id ?? null,
             action,
             entity: 'company',
             entityId: company.id,
@@ -547,7 +547,7 @@ async function deleteCompany(companyId, reqUser, reqInfo = {}) {
         // Audit log ANTES del destroy
         await AuditLog.create({
             companyId: company.id,
-            userId: reqUser.id,
+            userId: reqUser?.id ?? null,
             action: 'company.deleted',
             entity: 'company',
             entityId: company.id,
@@ -686,7 +686,7 @@ async function uploadCertificate(companyId, fileBuffer, password, reqUser, reqIn
     try {
         await AuditLog.create({
             companyId: company.id,
-            userId: reqUser.id,
+            userId: reqUser?.id ?? null,
             action: 'company.certificate_uploaded',
             entity: 'company',
             entityId: company.id,
@@ -821,7 +821,7 @@ async function revokeCertificate(companyId, reqUser, reqInfo = {}) {
     try {
         await AuditLog.create({
             companyId: company.id,
-            userId: reqUser.id,
+            userId: reqUser?.id ?? null,
             action: 'company.certificate_revoked',
             entity: 'company',
             entityId: company.id,

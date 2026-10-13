@@ -470,6 +470,24 @@ async function sendPlanChanged({
 }
 
 // ------------------------------------------------------------
+// sendMembershipInvoiceFailed — alerta interna a Expedinap
+// cuando un pago 'paid' no logró generar su factura de
+// membresía tras N intentos.
+// ------------------------------------------------------------
+async function sendMembershipInvoiceFailed({ to, payment, company, attempts, lastError }) {
+    // 1. Renderizar el template
+    const tpl = templates.membershipInvoiceFailed;
+    const { html, text } = tpl.render({ payment, company, attempts, lastError });
+
+    // 2. Subject dinámico
+    const subject = tpl.buildSubject({ payment, company, attempts });
+
+    // 3. Enviar
+    const adapter = getAdapter('email');
+    return adapter.send({ to, subject, html, text });
+}
+
+// ------------------------------------------------------------
 // Exports
 // ------------------------------------------------------------
 module.exports = {
@@ -490,5 +508,6 @@ module.exports = {
     sendPaymentPendingAlert,
     sendPaymentReceived,
     sendSubscriptionCancelled,
-    sendPlanChanged
+    sendPlanChanged,
+    sendMembershipInvoiceFailed
 };

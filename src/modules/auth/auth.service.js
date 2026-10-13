@@ -697,7 +697,7 @@ async function createUser(reqUser, userData, reqInfo = {}) {
     try {
         await AuditLog.create({
             companyId: user.companyId,
-            userId: reqUser.id,
+            userId: reqUser?.id ?? null,
             action: 'user.created',
             entity: 'user',
             entityId: user.id,
@@ -792,7 +792,7 @@ async function updateUser(reqUser, targetUserId, updates, reqInfo = {}) {
     try {
         await AuditLog.create({
             companyId: targetUser.companyId,
-            userId: reqUser.id,
+            userId: reqUser?.id ?? null,
             action: 'user.updated',
             entity: 'user',
             entityId: targetUser.id,
@@ -839,7 +839,7 @@ async function deleteUser(reqUser, targetUserId, reqInfo = {}) {
         try {
             await AuditLog.create({
                 companyId: targetUser.companyId,
-                userId: reqUser.id,
+                userId: reqUser?.id ?? null,
                 action: 'user.deactivated',
                 entity: 'user',
                 entityId: targetUser.id,
@@ -884,7 +884,7 @@ async function deleteUser(reqUser, targetUserId, reqInfo = {}) {
     try {
         await AuditLog.create({
             companyId: reqUser.companyId,
-            userId: reqUser.id,
+            userId: reqUser?.id ?? null,
             action: 'user.deleted',
             entity: 'user',
             entityId: targetUserId,

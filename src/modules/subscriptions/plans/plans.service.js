@@ -82,7 +82,7 @@ async function createPlan(data, reqUser, reqInfo = {}) {
     try {
         await AuditLog.create({
             companyId: null,
-            userId: reqUser.id,
+            userId: reqUser?.id ?? null,
             action: 'plan.created',
             entity: 'plan',
             entityId: plan.id,
@@ -161,7 +161,7 @@ async function updatePlanById(planId, updates, reqUser, reqInfo = {}) {
     try {
         await AuditLog.create({
             companyId: null,
-            userId: reqUser.id,
+            userId: reqUser?.id ?? null,
             action: 'plan.updated',
             entity: 'plan',
             entityId: plan.id,
@@ -215,7 +215,7 @@ async function deletePlan(planId, reqUser, reqInfo = {}) {
     try {
         await AuditLog.create({
             companyId: null,
-            userId: reqUser.id,
+            userId: reqUser?.id ?? null,
             action: 'plan.deleted',
             entity: 'plan',
             entityId: plan.id,

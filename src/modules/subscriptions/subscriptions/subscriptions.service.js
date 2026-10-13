@@ -423,7 +423,7 @@ async function changePlan(companyId, newPlanId, reqUser, reqInfo = {}) {
         try {
             await AuditLog.create({
                 companyId,
-                userId: reqUser.id,
+                userId: reqUser?.id ?? null,
                 action: 'subscription.plan_changed',
                 entity: 'subscription',
                 entityId: subscription.id,
@@ -539,7 +539,7 @@ async function cancelMySubscription(companyId, reqUser, reqInfo = {}) {
     try {
         await AuditLog.create({
             companyId,
-            userId: reqUser.id,
+            userId: reqUser?.id ?? null,
             action: 'subscription.cancelled',
             entity: 'subscription',
             entityId: subscription.id,
@@ -809,7 +809,7 @@ async function updateSubscriptionById(subscriptionId, updates, reqUser, reqInfo 
     try {
         await AuditLog.create({
             companyId: subscription.companyId,
-            userId: reqUser.id,
+            userId: reqUser?.id ?? null,
             action: 'subscription.updated_by_admin',
             entity: 'subscription',
             entityId: subscription.id,
@@ -903,7 +903,7 @@ async function registerPayment(subscriptionId, data, reqUser, reqInfo = {}) {
         try {
             await AuditLog.create({
                 companyId: subscription.companyId,
-                userId: reqUser.id,
+                userId: reqUser?.id ?? null,
                 action: 'subscription.payment_registered',
                 entity: 'subscription_payment',
                 entityId: payment.id,

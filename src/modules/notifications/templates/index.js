@@ -9,8 +9,8 @@
 
 module.exports = {
     passwordResetCode: require('./password-reset-code'),
+    passwordReset: require('./password-reset'),
     welcome: require('./welcome'),
-    newCompanyAlert: require('./new-company-alert'),
     newCompanyAlert: require('./new-company-alert'),
     newUser: require('./new-user'),
     userStatusChanged: require('./user-status-changed'),
@@ -26,4 +26,5 @@ module.exports = {
     paymentReceived: require('./payment-received'),
     subscriptionCancelled: require('./subscription-cancelled'),
     planChanged: require('./plan-changed'),
+    membershipInvoiceFailed: require('./membership-invoice-failed'),
 };

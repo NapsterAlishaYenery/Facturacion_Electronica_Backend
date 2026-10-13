@@ -11,6 +11,7 @@
 const {
     Company,
     Plan,
+    Invoice,
     SubscriptionPayment
 } = require('../../models');
 const { AppError } = require('../../shared/middlewares/error.middleware');
@@ -101,6 +102,23 @@ async function createMembershipInvoice({
     if (!amount || Number(amount) <= 0) {
         throw new AppError('amount must be greater than 0', 400, 'INVALID_AMOUNT');
     }
+
+    // 1.2. GUARD DE IDEMPOTENCIA
+    //    Si el pago ya tiene invoiceId, la factura ya fue generada.
+    //    Devolvemos la existente sin consumir otro e-NCF.
+    const existingPayment = await SubscriptionPayment.findByPk(paymentId, {
+        attributes: ['id', 'invoiceId']
+    });
+
+    if (!existingPayment) {
+        throw new AppError('Payment not found', 404, 'PAYMENT_NOT_FOUND');
+    }
+
+    if (existingPayment.invoiceId) {
+        const existingInvoice = await Invoice.findByPk(existingPayment.invoiceId);
+        return existingInvoice;
+    }
+
 
     // 2. Cargar Expedinap (emisor)
     const systemOwner = await getSystemOwnerCompany();

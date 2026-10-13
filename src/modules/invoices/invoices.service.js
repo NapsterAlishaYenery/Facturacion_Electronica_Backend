@@ -341,7 +341,7 @@ async function notifyNoActiveSequence(companyId, type, reqUser) {
         const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
         const recent = await AuditLog.findOne({
             where: {
-                userId: reqUser.id,
+                userId: reqUser?.id ?? null,
                 action: 'invoice.no_active_sequence_attempt',
                 createdAt: { [Op.gte]: twoHoursAgo }
             },
@@ -391,7 +391,7 @@ async function notifyNoActiveSequence(companyId, type, reqUser) {
         try {
             await AuditLog.create({
                 companyId,
-                userId: reqUser.id,
+                userId: reqUser?.id ?? null,
                 action: 'invoice.no_active_sequence_attempt',
                 entity: 'invoice',
                 entityId: null,
@@ -799,7 +799,7 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
         try {
             await AuditLog.create({
                 companyId,
-                userId: reqUser.id,
+                userId: reqUser?.id ?? null,
                 action: 'invoice.created',
                 entity: 'invoice',
                 entityId: invoice.id,
@@ -1027,7 +1027,7 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
         try {
             await AuditLog.create({
                 companyId,
-                userId: reqUser.id,
+                userId: reqUser?.id ?? null,
                 action: 'invoice.updated',
                 entity: 'invoice',
                 entityId: invoice.id,
@@ -1124,7 +1124,7 @@ async function deleteMyInvoice(companyId, invoiceId, reqUser, reqInfo = {}) {
         try {
             await AuditLog.create({
                 companyId,
-                userId: reqUser.id,
+                userId: reqUser?.id ?? null,
                 action: 'invoice.deleted',
                 entity: 'invoice',
                 entityId: invoice.id,

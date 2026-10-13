@@ -57,7 +57,7 @@ function buildJobDefinitions() {
             schedule: '5 0 * * *',       // diario, 00:05
             enabled: true,
             handler: require('./jobs/sequences-health-check.job')
-        },,
+        },
 
         // ---------------------------------------------------------
         // Step 5.4 — Alertar certificados por expirar
@@ -88,6 +88,16 @@ function buildJobDefinitions() {
             schedule: '*/15 * * * *',    // cada 15 min
             enabled: true,
             handler: require('./jobs/poll-pending-status.job')
+        },
+
+        // ---------------------------------------------------------
+        // Fase 8B — Reconciliación de facturas de membresía
+        // ---------------------------------------------------------
+        {
+            name: 'membership-invoice-reconciliation',
+            schedule: '*/30 * * * *',    // cada 30 min
+            enabled: true,
+            handler: require('./jobs/membership-invoice-reconciliation.job')
         },
     ];
 }
