@@ -102,7 +102,13 @@ const Company = sequelize.define('Company', {
         allowNull: false,
         defaultValue: true,
         field: 'is_active'
-    }
+    },
+    isSystemOwner: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+        field: 'is_system_owner'
+    },
 }, {
     tableName: 'companies',
     timestamps: true,

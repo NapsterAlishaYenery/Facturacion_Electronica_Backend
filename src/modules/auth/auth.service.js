@@ -626,6 +626,52 @@ async function createUser(reqUser, userData, reqInfo = {}) {
         throw new AppError('Insufficient permissions', 403, 'FORBIDDEN');
     }
 
+    // 🔥 NUEVO: validar límite de usuarios del plan (solo company_admin)
+    // El admin global puede crear cualquier usuario sin límite.
+    // El system owner (ExpediNap) también puede crear sin límite.
+    if (reqUser.role === 'company_admin' && data.companyId) {
+        const company = await Company.findByPk(data.companyId, {
+            attributes: ['id', 'isSystemOwner']
+        });
+
+        if (!company) {
+            throw new AppError('Company not found', 404, 'COMPANY_NOT_FOUND');
+        }
+
+        // Bypass para el dueño del sistema
+        if (!company.isSystemOwner) {
+            const subscription = await Subscription.findOne({
+                where: {
+                    companyId: data.companyId,
+                    status: ['trial', 'active', 'past_due']
+                },
+                include: [{ model: Plan, as: 'plan' }],
+                order: [['createdAt', 'DESC']]
+            });
+
+            if (!subscription) {
+                throw new AppError(
+                    'No active subscription found. Please contact support.',
+                    403,
+                    'NO_ACTIVE_SUBSCRIPTION'
+                );
+            }
+
+            const planLimit = subscription.plan?.maxUsers;
+            const usedUsers = await User.count({
+                where: { companyId: data.companyId, isActive: true }
+            });
+
+            if (planLimit !== -1 && usedUsers >= planLimit) {
+                throw new AppError(
+                    `User limit reached (${usedUsers}/${planLimit}). Upgrade your plan to continue.`,
+                    403,
+                    'USER_LIMIT_REACHED'
+                );
+            }
+        }
+    }
+
     // Verificar si el email ya existe
     const existing = await User.findOne({ where: { email: data.email.toLowerCase().trim() } });
     if (existing) {

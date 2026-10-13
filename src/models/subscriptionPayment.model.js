@@ -7,6 +7,11 @@ const SubscriptionPayment = sequelize.define('SubscriptionPayment', {
         defaultValue: DataTypes.UUIDV4,
         primaryKey: true
     },
+    invoiceId: {
+        type: DataTypes.UUID,
+        allowNull: true,
+        field: 'invoice_id'
+    },
     subscriptionId: {
         type: DataTypes.UUID,
         allowNull: false,

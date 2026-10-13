@@ -62,6 +62,23 @@ SubscriptionPayment.belongsTo(Subscription, {
 });
 
 // ============================================================
+// SubscriptionPayment (N) ─── (1) Invoice
+// FK: subscription_payments.invoice_id → invoices.id (SET NULL)
+// Representa la factura emitida por ExpediNap al cliente por
+// el pago de la membresía.
+// ============================================================
+Invoice.hasMany(SubscriptionPayment, {
+    foreignKey: 'invoiceId',
+    as: 'membershipPayments',
+    onDelete: 'SET NULL',
+    onUpdate: 'CASCADE'
+});
+SubscriptionPayment.belongsTo(Invoice, {
+    foreignKey: 'invoiceId',
+    as: 'membershipInvoice'
+});
+
+// ============================================================
 // Company (1) ─── (N) SubscriptionPayment
 // FK: subscription_payments.company_id → companies.id (CASCADE)
 // ============================================================

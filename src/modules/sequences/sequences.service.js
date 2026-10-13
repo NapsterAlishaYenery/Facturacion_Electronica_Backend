@@ -3,7 +3,7 @@
 // ============================================================
 
 const { Op } = require('sequelize');
-const { Sequence, Company, Invoice, AuditLog } = require('../../models');
+const { Sequence, Company, Invoice, Subscription, Plan, AuditLog } = require('../../models');
 const { AppError } = require('../../shared/middlewares/error.middleware');
 
 
@@ -173,6 +173,52 @@ async function createMySequence(companyId, data, reqUser, reqInfo = {}) {
     if (rangeSize > 1000000) {
         throw new AppError('Range cannot exceed 1,000,000 numbers', 400, 'RANGE_TOO_LARGE');
     }
+
+    // 🔥 NUEVO: validar límite de secuencias del plan
+    // Solo aplica a company_admin (los admin globales no crean secuencias)
+    // y se salta para el system owner (ExpediNap).
+    if (reqUser.role === 'company_admin') {
+        const company = await Company.findByPk(companyId, {
+            attributes: ['id', 'isSystemOwner']
+        });
+
+        if (!company) {
+            throw new AppError('Company not found', 404, 'COMPANY_NOT_FOUND');
+        }
+
+        if (!company.isSystemOwner) {
+            const subscription = await Subscription.findOne({
+                where: {
+                    companyId,
+                    status: ['trial', 'active', 'past_due']
+                },
+                include: [{ model: Plan, as: 'plan' }],
+                order: [['createdAt', 'DESC']]
+            });
+
+            if (!subscription) {
+                throw new AppError(
+                    'No active subscription found. Please contact support.',
+                    403,
+                    'NO_ACTIVE_SUBSCRIPTION'
+                );
+            }
+
+            const planLimit = subscription.plan?.maxSequences;
+            const usedSequences = await Sequence.count({
+                where: { companyId, isActive: true }
+            });
+
+            if (planLimit !== -1 && usedSequences >= planLimit) {
+                throw new AppError(
+                    `Sequence limit reached (${usedSequences}/${planLimit}). Upgrade your plan to continue.`,
+                    403,
+                    'SEQUENCE_LIMIT_REACHED'
+                );
+            }
+        }
+    }
+
 
     // 3. Verificar que no haya otra secuencia activa del mismo tipo
     const overlapping = await Sequence.findOne({

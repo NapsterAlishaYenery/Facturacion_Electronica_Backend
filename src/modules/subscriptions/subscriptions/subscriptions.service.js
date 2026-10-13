@@ -15,6 +15,7 @@ const sequelize = require('../../../config/database');
 const notifications = require('../../notifications');
 const notificationsConfig = require('../../../config/notifications');
 
+
 // ------- helpers -------
 // ------------------------------------------------------------
 // Notificar al cliente cuando se registra un pago 'paid'
@@ -943,6 +944,30 @@ async function registerPayment(subscriptionId, data, reqUser, reqInfo = {}) {
         }).catch(err => {
             console.error('[subscriptions.registerPayment] Notify failed:', err.message);
         });
+    }
+
+    // 🔥 NUEVO: 7. Generar factura de membresía (ExpediNap → cliente)
+    //    Se ejecuta fuera de la transacción principal para no romper
+    //    el registro del pago si la factura falla.
+    if (isPaid) {
+        try {
+            const internalBilling = require('../../internal-billing/internalBilling.service');
+
+            await internalBilling.createMembershipInvoice({
+                clientCompanyId: subscription.companyId,
+                planId: subscription.planId,
+                paymentId: result.id,
+                amount: result.amount,
+                periodStart: result.periodStart,
+                periodEnd: result.periodEnd,
+                reqUser,
+                reqInfo
+            });
+        } catch (err) {
+            // No romper el flujo — el pago ya se registró.
+            // El invoiceId quedará null y se podrá regenerar después.
+            console.error('[subscriptions.registerPayment] Membership invoice failed:', err.message);
+        }
     }
 
     return {

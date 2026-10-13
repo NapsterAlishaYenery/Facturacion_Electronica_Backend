@@ -1,8 +1,10 @@
 require('dotenv').config();
 const { request } = require('../helpers/http.helper');
+const { Op } = require('sequelize');
 const sequelize = require('../../src/config/database');
 const {
-    User, Company, Subscription, SubscriptionPayment, Plan, Sequence, AuditLog
+    User, Company, Subscription, SubscriptionPayment, Plan, Sequence,
+    Invoice, InvoiceLine, AuditLog
 } = require('../../src/models');
 
 async function test(label, condition, extra = '') {
@@ -32,11 +34,18 @@ async function loginAsAdmin() {
     let companyId = null;
     let subscriptionId = null;
 
+    // Snapshots para cleanup de la factura de membresía
+    let systemOwnerId = null;
+    let sequence31OriginalCurrent = null;
+    let sequence31Id = null;
+
     try {
         await sequelize.authenticate();
         console.log('✅ DB connected\n');
 
+        // ============================================================
         // Limpieza previa
+        // ============================================================
         const oldCompany = await Company.findOne({ where: { rnc: testRnc } });
         if (oldCompany) {
             await AuditLog.destroy({ where: { companyId: oldCompany.id } });
@@ -47,10 +56,32 @@ async function loginAsAdmin() {
             await Company.destroy({ where: { id: oldCompany.id } });
         }
 
+        // Snapshot de la secuencia 31 de Expedinap (system owner)
+        const systemOwner = await Company.findOne({
+            where: { isSystemOwner: true },
+            attributes: ['id', 'rnc', 'name']
+        });
+        if (!systemOwner) {
+            throw new Error('System owner not configured (is_system_owner = true)');
+        }
+        systemOwnerId = systemOwner.id;
+
+        const seq31 = await Sequence.findOne({
+            where: { companyId: systemOwnerId, type: '31', isActive: true }
+        });
+        if (!seq31) {
+            throw new Error('System owner has no active sequence type 31');
+        }
+        sequence31Id = seq31.id;
+        sequence31OriginalCurrent = Number(seq31.currentNumber);
+        console.log(`✅ System owner: ${systemOwner.name} (seq31 current: ${sequence31OriginalCurrent})\n`);
+
         adminCookie = await loginAsAdmin();
         console.log('✅ Admin login OK\n');
 
-        // Setup: registrar empresa
+        // ============================================================
+        // Setup: registrar empresa cliente
+        // ============================================================
         const registerRes = await request('/api/auth/register-company', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -79,9 +110,10 @@ async function loginAsAdmin() {
         const periodEnd = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
         // ============================================================
-        // Test 1: Registrar pago 'paid' y reactivar suscripción
+        // Test 1: Registrar pago 'paid' → reactiva suscripción
+        //         Y genera factura de membresía de Expedinap
         // ============================================================
-        console.log('--- Test 1: Pago paid → reactiva ---');
+        console.log('--- Test 1: Pago paid → reactiva + genera factura ---');
         const res1 = await request(`/api/subscriptions/${subscriptionId}/payments`, {
             method: 'POST',
             headers: {
@@ -119,10 +151,54 @@ async function loginAsAdmin() {
         await test('subscription invoicesUsedThisMonth reset',
             res1.body?.data?.subscription?.invoicesUsedThisMonth === 0);
 
+        const paidPaymentId = res1.body?.data?.payment?.id;
+
+        // ============================================================
+        // Test 1.5: verificar factura de membresía generada
+        // ============================================================
+        console.log('\n--- Test 1.5: factura de membresía generada ---');
+
+        const paidPayment = await SubscriptionPayment.findByPk(paidPaymentId);
+        await test('payment has invoiceId', !!paidPayment?.invoiceId);
+
+        let membershipInvoice = null;
+        if (paidPayment?.invoiceId) {
+            membershipInvoice = await Invoice.findByPk(paidPayment.invoiceId, {
+                include: [
+                    { model: Company, as: 'company', attributes: ['id', 'rnc', 'name', 'isSystemOwner'] },
+                    { model: InvoiceLine, as: 'lines', separate: true, order: [['lineNumber', 'ASC']] }
+                ]
+            });
+
+            await test('invoice exists', !!membershipInvoice);
+            await test('invoice type is 31', membershipInvoice?.type === '31');
+            await test('invoice status is draft', membershipInvoice?.status === 'draft');
+            await test('invoice issuer is system owner',
+                membershipInvoice?.company?.isSystemOwner === true);
+            await test('invoice issuer RNC is system owner',
+                membershipInvoice?.issuerRnc === systemOwner.rnc);
+            await test('invoice receiver RNC is test company',
+                membershipInvoice?.receiverRnc === testRnc);
+            await test('invoice NCF starts with E31',
+                membershipInvoice?.ncf?.startsWith('E31'));
+            await test('invoice has 1 line',
+                membershipInvoice?.lines?.length === 1);
+            await test('invoice total matches payment amount',
+                Number(membershipInvoice?.total) === 2500.00);
+            await test('invoice line description mentions Membresía',
+                membershipInvoice?.lines?.[0]?.description?.includes('Membresía'));
+        }
+
+        // Verificar que la secuencia 31 de Expedinap avanzó
+        const seq31After = await Sequence.findByPk(sequence31Id);
+        await test('sequence 31 advanced by 1',
+            Number(seq31After.currentNumber) === sequence31OriginalCurrent + 1);
+
         // ============================================================
         // Test 2: Pago 'pending' NO cambia la suscripción
+        //         Y NO genera factura
         // ============================================================
-        console.log('\n--- Test 2: Pago pending NO cambia ---');
+        console.log('\n--- Test 2: Pago pending NO cambia ni factura ---');
         const subBefore = await Subscription.findByPk(subscriptionId);
         const statusBefore = subBefore.status;
         const periodBefore = subBefore.currentPeriodEnd;
@@ -146,12 +222,19 @@ async function loginAsAdmin() {
             res2.body?.data?.payment?.status === 'pending');
         await test('paidAt is null',
             res2.body?.data?.payment?.paidAt === null);
+        await test('payment has no invoiceId',
+            !res2.body?.data?.payment?.invoiceId);
 
         const subAfter = await Subscription.findByPk(subscriptionId);
         await test('subscription status unchanged',
             subAfter.status === statusBefore);
         await test('subscription periodEnd unchanged',
             new Date(subAfter.currentPeriodEnd).getTime() === new Date(periodBefore).getTime());
+
+        // Verificar que la secuencia 31 NO avanzó
+        const seq31AfterPending = await Sequence.findByPk(sequence31Id);
+        await test('sequence 31 NOT advanced by pending payment',
+            Number(seq31AfterPending.currentNumber) === sequence31OriginalCurrent + 1);
 
         // ============================================================
         // Test 3: periodEnd <= periodStart → 400
@@ -166,7 +249,7 @@ async function loginAsAdmin() {
             body: JSON.stringify({
                 amount: 100,
                 periodStart,
-                periodEnd: periodStart   // igual, no mayor
+                periodEnd: periodStart
             })
         });
 
@@ -245,11 +328,62 @@ async function loginAsAdmin() {
         });
         await test('status 401', res7.status === 401);
 
+        console.log('\n✅ Tests completados');
+
     } catch (error) {
         console.error('❌ Test error:', error.message);
         console.error(error.stack);
     } finally {
+        // ============================================================
+        // CLEANUP
+        // ============================================================
         try {
+            // 1. Cleanup de la factura de membresía (Expedinap → cliente test)
+            if (systemOwnerId) {
+                // Buscar facturas de Expedinap dirigidas al cliente de test
+                const membershipInvoices = await Invoice.findAll({
+                    where: {
+                        companyId: systemOwnerId,
+                        receiverRnc: testRnc
+                    },
+                    attributes: ['id']
+                });
+
+                const invIds = membershipInvoices.map(i => i.id);
+
+                if (invIds.length > 0) {
+                    // Audit logs de esas facturas
+                    await AuditLog.destroy({
+                        where: {
+                            entity: 'invoice',
+                            entityId: { [Op.in]: invIds }
+                        }
+                    });
+
+                    // Líneas
+                    await InvoiceLine.destroy({
+                        where: { invoiceId: { [Op.in]: invIds } }
+                    });
+
+                    // Facturas
+                    await Invoice.destroy({
+                        where: { id: { [Op.in]: invIds } }
+                    });
+
+                    console.log(`   🧾 Deleted ${invIds.length} membership invoice(s)`);
+                }
+
+                // 2. Revertir la secuencia 31 de Expedinap a su valor original
+                if (sequence31Id && sequence31OriginalCurrent !== null) {
+                    await Sequence.update(
+                        { currentNumber: sequence31OriginalCurrent },
+                        { where: { id: sequence31Id } }
+                    );
+                    console.log(`   🔁 Sequence 31 restored to ${sequence31OriginalCurrent}`);
+                }
+            }
+
+            // 3. Cleanup del cliente de test
             if (companyId) {
                 await AuditLog.destroy({ where: { companyId } });
                 await SubscriptionPayment.destroy({ where: { companyId } });
@@ -258,9 +392,11 @@ async function loginAsAdmin() {
                 await User.destroy({ where: { companyId } });
                 await Company.destroy({ where: { id: companyId } });
             }
+
             console.log('\n🧹 Cleaned up');
         } catch (cleanupError) {
             console.error('Cleanup error:', cleanupError.message);
+            console.error(cleanupError.stack);
         }
         process.exit(0);
     }

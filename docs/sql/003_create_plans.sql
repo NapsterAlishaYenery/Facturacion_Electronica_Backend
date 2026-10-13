@@ -70,3 +70,59 @@ VALUES
 
 	 INSERT INTO plans (code, name, price_dop, invoices_per_month, max_users, max_sequences)
 VALUES ('test', 'Test', -100, 100, 1, 1);
+
+select * from plans
+
+-- Plan Básico (nuevo: 1500 DOP, 500 facturas, 3 usuarios)
+UPDATE plans SET
+    name = 'Plan Básico',
+    description = 'Para pequeñas empresas en crecimiento',
+    price_dop = 1500.00,
+    price_usd = 25.50,
+    invoices_per_month = 500,
+    max_users = 3,
+    max_sequences = 2,
+    features = '{"reports": false, "api_access": false, "support": "email", "ri_pdf": true}'::jsonb,
+    updated_at = now()
+WHERE code = 'basic';
+
+-- Plan Profesional (nuevo: 3500 DOP, 2000 facturas, 10 usuarios)
+UPDATE plans SET
+    name = 'Plan Profesional',
+    description = 'Para empresas con volumen medio de facturación',
+    price_dop = 3500.00,
+    price_usd = 59.50,
+    invoices_per_month = 2000,
+    max_users = 10,
+    max_sequences = 5,
+    features = '{"reports": true, "api_access": false, "support": "email_whatsapp", "ri_pdf": true}'::jsonb,
+    updated_at = now()
+WHERE code = 'pro';
+
+-- Plan Empresarial (nuevo: 7000 DOP)
+UPDATE plans SET
+    name = 'Plan Empresarial',
+    description = 'Para grandes empresas con necesidades avanzadas',
+    price_dop = 7000.00,
+    price_usd = 119.00,
+    invoices_per_month = -1,
+    max_users = -1,
+    max_sequences = -1,
+    features = '{"reports": true, "api_access": true, "support": "24_7", "custom_integrations": true, "ri_pdf": true, "sla": true}'::jsonb,
+    updated_at = now()
+WHERE code = 'enterprise';
+
+INSERT INTO plans (
+    code, name, description, price_dop, price_usd,
+    invoices_per_month, max_users, max_sequences, features
+) VALUES (
+    'free',
+    'Plan Gratuito',
+    'Para contribuyentes que inician con facturación electrónica (máx 100 facturas/mes)',
+    0.00,
+    0.00,
+    100,
+    1,
+    1,
+    '{"reports": false, "api_access": false, "support": "email", "ri_pdf": true}'::jsonb
+);

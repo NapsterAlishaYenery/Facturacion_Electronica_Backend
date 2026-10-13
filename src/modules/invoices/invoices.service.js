@@ -36,6 +36,70 @@ const ECF_TYPE_NAMES = {
     '47': 'Comprobante para Pagos al Exterior Electrónico'
 };
 
+// ------------------------------------------------------------
+// Helper: validar que el emisor puede crear una factura
+// - Empresa existe y está activa
+// - Si es system owner (ExpediNap) → saltar validación de sub y límite
+// - Si es cliente → validar sub activa + límite mensual
+//
+// Devuelve { company, subscription, skipLimitCheck }
+// - subscription es null para system owner
+// - skipLimitCheck = true → no incrementar invoicesUsedThisMonth
+// ------------------------------------------------------------
+async function validateIssuerCanCreateInvoice(companyId, transaction = null) {
+    // 1. Empresa existe y está activa
+    const company = await Company.findByPk(companyId, { transaction });
+
+    if (!company) {
+        throw new AppError('Company not found', 404, 'COMPANY_NOT_FOUND');
+    }
+    if (!company.isActive) {
+        throw new AppError(
+            'Company is inactive. Cannot issue invoices.',
+            403,
+            'COMPANY_INACTIVE'
+        );
+    }
+
+    // 2. Bypass para el dueño del sistema
+    if (company.isSystemOwner) {
+        return { company, subscription: null, skipLimitCheck: true };
+    }
+
+    // 3. Suscripción activa
+    const subscription = await Subscription.findOne({
+        where: {
+            companyId,
+            status: ['trial', 'active', 'past_due']
+        },
+        include: [{ model: Plan, as: 'plan' }],
+        order: [['createdAt', 'DESC']],
+        transaction
+    });
+
+    if (!subscription) {
+        throw new AppError(
+            'No active subscription found. Please contact support.',
+            403,
+            'NO_ACTIVE_SUBSCRIPTION'
+        );
+    }
+
+    // 4. Límite mensual
+    const planLimit = subscription.plan?.invoicesPerMonth;
+    const usedThisMonth = Number(subscription.invoicesUsedThisMonth) || 0;
+
+    if (planLimit !== -1 && usedThisMonth >= planLimit) {
+        throw new AppError(
+            `Monthly invoice limit reached (${usedThisMonth}/${planLimit}). Upgrade your plan to continue.`,
+            403,
+            'INVOICE_LIMIT_REACHED'
+        );
+    }
+
+    return { company, subscription, skipLimitCheck: false };
+}
+
 
 // ------------------------------------------------------------
 // Helper: mapear <Transporte> del payload a columnas planas
@@ -615,50 +679,11 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
 
     const isNota = type === '33' || type === '34';
 
-    // 1. Empresa activa
-    const company = await Company.findByPk(companyId);
-    if (!company) {
-        throw new AppError('Company not found', 404, 'COMPANY_NOT_FOUND');
-    }
-    if (!company.isActive) {
-        throw new AppError(
-            'Company is inactive. Cannot issue invoices.',
-            403,
-            'COMPANY_INACTIVE'
-        );
-    }
+    // 🔥 NUEVO: validar emisor (empresa activa + suscripción + límite)
+    // El helper salta la validación para el system owner (ExpediNap).
+    const { company, subscription, skipLimitCheck } = await validateIssuerCanCreateInvoice(companyId);
 
-    // 2. Suscripción activa
-    const subscription = await Subscription.findOne({
-        where: {
-            companyId,
-            status: ['trial', 'active', 'past_due']
-        },
-        include: [{ model: Plan, as: 'plan' }],
-        order: [['createdAt', 'DESC']]
-    });
-
-    if (!subscription) {
-        throw new AppError(
-            'No active subscription found. Please contact support.',
-            403,
-            'NO_ACTIVE_SUBSCRIPTION'
-        );
-    }
-
-    // 3. Límite mensual
-    const planLimit = subscription.plan?.invoicesPerMonth;
-    const usedThisMonth = Number(subscription.invoicesUsedThisMonth) || 0;
-
-    if (planLimit !== -1 && usedThisMonth >= planLimit) {
-        throw new AppError(
-            `Monthly invoice limit reached (${usedThisMonth}/${planLimit}). Upgrade your plan to continue.`,
-            403,
-            'INVOICE_LIMIT_REACHED'
-        );
-    }
-
-    // 4. Transacción
+    // Transacción
     const result = await sequelize.transaction(async (t) => {
         // 4.1. Notas (33/34): resolver factura original
         let originalInvoice = null;
@@ -761,11 +786,14 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
             { transaction: t, returning: true }
         );
 
-        // 4.9. Incrementar contador
-        await subscription.increment('invoicesUsedThisMonth', {
-            by: 1,
-            transaction: t
-        });
+        // 4.9. Incrementar contador — SOLO si aplica
+        //      (el system owner no consume límite de plan)
+        if (!skipLimitCheck && subscription) {
+            await subscription.increment('invoicesUsedThisMonth', {
+                by: 1,
+                transaction: t
+            });
+        }
 
         // 4.10. Audit log (con info nueva siempre)
         try {
@@ -1293,6 +1321,17 @@ module.exports = {
     updateMyInvoice,
     deleteMyInvoice,
     listAllInvoices,
-    getInvoiceById
+    getInvoiceById,
+     // 🔥 NUEVO: helpers reutilizables para internalBilling
+    _helpers: {
+        validateIssuerCanCreateInvoice,
+        assignNextNCF,
+        calculateLineTotals,
+        calculateInvoiceTotals,
+        buildInvoiceResponse,
+        mapTransporteFields,
+        mapInfoAdicionalFields,
+        resolveModifiedInvoice
+    }
 };
 
