@@ -10,12 +10,9 @@ const { assertSubscriptionCanUse } = require('../../shared/utils/subscription.he
 const sequelize = require('../../config/database');
 const {
     Company,
-    Plan,
-    Subscription,
     Sequence,
     Invoice,
     InvoiceLine,
-    User,
     AuditLog
 } = require('../../models');
 const { AppError } = require('../../shared/middlewares/error.middleware');
@@ -357,7 +354,8 @@ async function assignNextNCF(companyId, type, transaction, reqUser = null) {
             companyId,
             type,
             isActive: true,
-            expiresAt: { [Op.gt]: new Date() }
+            expiresAt: { [Op.gt]: new Date() },
+            currentNumber: { [Op.lt]: sequelize.literal('"Sequence"."end_number"') }
         },
         order: [['expiresAt', 'ASC'], ['createdAt', 'ASC']],
         lock: transaction.LOCK.UPDATE, // ← Lock pesimista
@@ -394,8 +392,13 @@ async function assignNextNCF(companyId, type, transaction, reqUser = null) {
     }
 
     // 5. Actualizar currentNumber
+    const willBeExhausted = nextNumber === endNumber;
+
     await sequence.update(
-        { currentNumber: nextNumber },
+        {
+            currentNumber: nextNumber,
+            ...(willBeExhausted && { isActive: false })
+        },
         { transaction }
     );
 
@@ -674,6 +677,15 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
         // 4.4. Totales factura
         const invoiceTotals = calculateInvoiceTotals(calculatedLines);
 
+        // 🔥 Defensa en profundidad (opcional) — el schema Joi ya lo valida
+        if (type === '32' && invoiceTotals.total >= 250000 && !receiverRnc) {
+            throw new AppError(
+                'Type 32 with total >= 250,000 requires receiverRnc (DGII rule)',
+                409,
+                'DGII_250K_RULE'
+            );
+        }
+
         // 4.5. issuedAt
         const finalIssuedAt = issuedAt ? new Date(issuedAt) : new Date();
 
@@ -749,6 +761,16 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
             })),
             { transaction: t, returning: true }
         );
+
+        // 4.8.5. 🔥 Generar y persistir XML
+        // No rompemos la factura si el XML falla: xml_content queda null
+        // y se puede regenerar con updateMyInvoice o un endpoint manual.
+        try {
+            const { generateAndSaveInvoiceXML } = require('../documents/xml/xml-integrator');
+            await generateAndSaveInvoiceXML(invoice.id, t);
+        } catch (xmlErr) {
+            console.error('[createMyInvoice] XML generation failed:', xmlErr.message);
+        }
 
         // 4.9. Incrementar contador — SOLO si aplica
         //      (el system owner no consume límite de plan)
@@ -857,8 +879,10 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
         );
     }
 
-    // 🔥 NUEVO: validar coherencia tipo vs retención por línea
-    // (Joi valida forma; aquí validamos contra el tipo real de la factura)
+    // 🔥 Validaciones de negocio que dependen del TIPO real (vive en BD, no en body)
+    //    Joi valida forma; aquí validamos contra el tipo real de la factura.
+
+    // A) Retención por línea: solo 41/47, y obligatoria en ellos
     if (updates.items !== undefined) {
         const allowsRetencion = invoice.type === '41' || invoice.type === '47';
 
@@ -883,6 +907,50 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
         }
     }
 
+    // B) e-CF 32: si el total final >= 250,000 requiere identificación (DGII)
+    //    Resolvemos el estado FINAL: items del body o los de BD si no vienen.
+    if (invoice.type === '32') {
+        // Items finales
+        const finalItems = updates.items !== undefined
+            ? updates.items
+            : await InvoiceLine.findAll({
+                where: { invoiceId: invoice.id },
+                order: [['lineNumber', 'ASC']]
+            });
+
+        // Total final (misma fórmula que el schema Joi)
+        const finalTotal = finalItems.reduce((sum, it) => {
+            const base = (Number(it.quantity) * Number(it.unitPrice)) - Number(it.discount || 0);
+            const itbis = base * (Number(it.itbisRate ?? 18) / 100);
+            return sum + base + itbis;
+        }, 0);
+
+        // RNC y nombre finales (merge body + BD)
+        const finalRnc = updates.receiverRnc !== undefined
+            ? updates.receiverRnc
+            : invoice.receiverRnc;
+
+        const finalName = updates.receiverName !== undefined
+            ? updates.receiverName
+            : invoice.receiverName;
+
+        if (finalTotal >= 250000) {
+            if (!finalRnc) {
+                throw new AppError(
+                    `Type 32 with total >= 250,000 requires receiverRnc (DGII rule). Current total: ${finalTotal}`,
+                    409,
+                    'DGII_250K_RNC_REQUIRED'
+                );
+            }
+            if (!finalName) {
+                throw new AppError(
+                    `Type 32 with total >= 250,000 requires receiverName (DGII rule). Current total: ${finalTotal}`,
+                    409,
+                    'DGII_250K_NAME_REQUIRED'
+                );
+            }
+        }
+    }
 
     // 3. Guardar estado anterior para audit
     const before = {
@@ -986,6 +1054,18 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
 
         // 4.3. Actualizar la factura
         await invoice.update(updateData, { transaction: t });
+
+        // 4.3.5. 🔥 Regenerar XML si la factura sigue siendo draft
+        // (una factura firmada/enviada NUNCA se regenera: rompe la firma)
+        if (invoice.status === 'draft') {
+            try {
+                const { generateAndSaveInvoiceXML } = require('../documents/xml/xml-integrator');
+                await generateAndSaveInvoiceXML(invoice.id, t);
+            } catch (xmlErr) {
+                console.error('[updateMyInvoice] XML regen failed:', xmlErr.message);
+            }
+        }
+
 
         // 4.4. Audit log
         try {

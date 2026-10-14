@@ -382,6 +382,31 @@ const createInvoiceSchema = Joi.object({
             }
         }
 
+        // 10. e-CF 32: si el total >= 250,000 requiere identificación del comprador (DGII)
+        //    Base legal: Descripción Técnica Servicios DGII - Recepción RFCE vs Recepción e-CF
+        //    Reglamento 587-24, Art. 17 Párrafo VII
+        if (value.type === '32') {
+            const total = value.items.reduce((sum, it) => {
+                const base = (it.quantity * it.unitPrice) - (it.discount || 0);
+                const itbis = base * ((it.itbisRate ?? 18) / 100);
+                return sum + base + itbis;
+            }, 0);
+
+            // DGII: monto >= 250,000 requiere envío completo y por ende identificación
+            if (total >= 250000) {
+                if (!value.receiverRnc) {
+                    return helpers.error('any.custom', {
+                        message: 'Type 32 with total >= 250,000 requires receiverRnc (DGII rule)'
+                    });
+                }
+                if (!value.receiverName) {
+                    return helpers.error('any.custom', {
+                        message: 'Type 32 with total >= 250,000 requires receiverName (DGII rule)'
+                    });
+                }
+            }
+        }
+
         return value;
     })
     .messages({
