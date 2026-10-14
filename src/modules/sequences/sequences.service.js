@@ -3,8 +3,10 @@
 // ============================================================
 
 const { Op } = require('sequelize');
-const { Sequence, Company, Invoice, Subscription, Plan, AuditLog } = require('../../models');
+const sequelize = require('../../config/database');
+const { Sequence, Company, Invoice, AuditLog } = require('../../models');
 const { AppError } = require('../../shared/middlewares/error.middleware');
+const { assertSubscriptionCanUse } = require('../../shared/utils/subscription.helpers');
 
 
 // ------------------------------------------------------------
@@ -160,11 +162,10 @@ async function createMySequence(companyId, data, reqUser, reqInfo = {}) {
 
     const { type, prefix = 'E', startNumber, endNumber, expiresAt } = data;
 
-    // 1. Convertir los strings de 10 dígitos a números
+    // 1. Convertir y validar rango (cálculo puro, fuera de la tx)
     const startInt = parseInt(startNumber, 10);
     const endInt = parseInt(endNumber, 10);
 
-    // 2. Validar rango
     if (endInt <= startInt) {
         throw new AppError('endNumber must be greater than startNumber', 400, 'INVALID_RANGE');
     }
@@ -174,110 +175,97 @@ async function createMySequence(companyId, data, reqUser, reqInfo = {}) {
         throw new AppError('Range cannot exceed 1,000,000 numbers', 400, 'RANGE_TOO_LARGE');
     }
 
-    // 🔥 NUEVO: validar límite de secuencias del plan
-    // Solo aplica a company_admin (los admin globales no crean secuencias)
-    // y se salta para el system owner (ExpediNap).
-    if (reqUser.role === 'company_admin') {
-        const company = await Company.findByPk(companyId, {
-            attributes: ['id', 'isSystemOwner']
-        });
-
-        if (!company) {
-            throw new AppError('Company not found', 404, 'COMPANY_NOT_FOUND');
-        }
-
-        if (!company.isSystemOwner) {
-            const subscription = await Subscription.findOne({
-                where: {
-                    companyId,
-                    status: ['trial', 'active', 'past_due']
-                },
-                include: [{ model: Plan, as: 'plan' }],
-                order: [['createdAt', 'DESC']]
-            });
-
-            if (!subscription) {
-                throw new AppError(
-                    'No active subscription found. Please contact support.',
-                    403,
-                    'NO_ACTIVE_SUBSCRIPTION'
-                );
-            }
-
-            const planLimit = subscription.plan?.maxSequences;
-            const usedSequences = await Sequence.count({
-                where: { companyId, isActive: true }
-            });
-
-            if (planLimit !== -1 && usedSequences >= planLimit) {
-                throw new AppError(
-                    `Sequence limit reached (${usedSequences}/${planLimit}). Upgrade your plan to continue.`,
-                    403,
-                    'SEQUENCE_LIMIT_REACHED'
-                );
-            }
-        }
-    }
-
-
-    // 3. Verificar que no haya otra secuencia activa del mismo tipo
-    const overlapping = await Sequence.findOne({
-        where: {
-            companyId,
-            type,
-            prefix,
-            isActive: true,
-            [Op.or]: [
-                { startNumber: { [Op.lte]: startInt }, endNumber: { [Op.gte]: startInt } },
-                { startNumber: { [Op.lte]: endInt }, endNumber: { [Op.gte]: endInt } },
-                { startNumber: { [Op.gte]: startInt }, endNumber: { [Op.lte]: endInt } }
-            ]
-        }
+    // 2. Cargar empresa (fuera de la tx)
+    const company = await Company.findByPk(companyId, {
+        attributes: ['id', 'isSystemOwner', 'isActive']
     });
 
-    if (overlapping) {
+    if (!company) {
+        throw new AppError('Company not found', 404, 'COMPANY_NOT_FOUND');
+    }
+    if (!company.isActive) {
         throw new AppError(
-            `This range overlaps with an existing active sequence for type ${type}. Deactivate it first or use a different range.`,
-            409,
-            'RANGE_OVERLAPS'
+            'Company is inactive. Cannot create sequences.',
+            403,
+            'COMPANY_INACTIVE'
         );
     }
 
-    // 4. Crear la secuencia
-    const sequence = await Sequence.create({
-        companyId,
-        type,
-        prefix,
-        startNumber: startInt,
-        endNumber: endInt,
-        currentNumber: startInt - 1,  // Aún no se ha usado nada
-        expiresAt,
-        isActive: true
+    // 3. Transacción
+    const sequence = await sequelize.transaction(async (t) => {
+
+        // 3.1. Validar suscripción + límite (bypass para system owner)
+        //      Con lock para evitar race conditions entre requests concurrentes.
+        if (!company.isSystemOwner) {
+            await assertSubscriptionCanUse(
+                companyId,
+                'sequences',
+                { transaction: t, lock: true }
+            );
+        }
+
+        // 3.2. Verificar que no haya otra secuencia activa del mismo tipo con rango solapado
+        const overlapping = await Sequence.findOne({
+            where: {
+                companyId,
+                type,
+                prefix,
+                isActive: true,
+                [Op.or]: [
+                    { startNumber: { [Op.lte]: startInt }, endNumber: { [Op.gte]: startInt } },
+                    { startNumber: { [Op.lte]: endInt }, endNumber: { [Op.gte]: endInt } },
+                    { startNumber: { [Op.gte]: startInt }, endNumber: { [Op.lte]: endInt } }
+                ]
+            },
+            transaction: t
+        });
+
+        if (overlapping) {
+            throw new AppError(
+                `This range overlaps with an existing active sequence for type ${type}. Deactivate it first or use a different range.`,
+                409,
+                'RANGE_OVERLAPS'
+            );
+        }
+
+        // 3.3. Crear la secuencia
+        const created = await Sequence.create({
+            companyId,
+            type,
+            prefix,
+            startNumber: startInt,
+            endNumber: endInt,
+            currentNumber: startInt - 1,
+            expiresAt,
+            isActive: true
+        }, { transaction: t });
+
+        // 3.4. Audit log
+        try {
+            await AuditLog.create({
+                companyId,
+                userId: reqUser?.id ?? null,
+                action: 'sequence.created',
+                entity: 'sequence',
+                entityId: created.id,
+                after: {
+                    type: created.type,
+                    prefix: created.prefix,
+                    startNumber: startInt,
+                    endNumber: endInt,
+                    expiresAt
+                },
+                ip: reqInfo.ip || null,
+                userAgent: reqInfo.userAgent || null
+            }, { transaction: t });
+        } catch (err) {
+            // Ignorar errores de audit
+        }
+
+        return created;
     });
 
-    // 5. Audit log
-    try {
-        await AuditLog.create({
-            companyId,
-            userId: reqUser?.id ?? null,
-            action: 'sequence.created',
-            entity: 'sequence',
-            entityId: sequence.id,
-            after: {
-                type: sequence.type,
-                prefix: sequence.prefix,
-                startNumber: startInt,
-                endNumber: endInt,
-                expiresAt
-            },
-            ip: reqInfo.ip || null,
-            userAgent: reqInfo.userAgent || null
-        });
-    } catch (err) {
-        // Ignorar errores de audit
-    }
-
-    // 6. Devolver con campos calculados
+    // 4. Devolver con campos calculados
     return buildSequenceResponse(sequence, { invoicesCount: 0 });
 }
 

@@ -1,7 +1,7 @@
 require('dotenv').config();
 const { request } = require('../helpers/http.helper');
 const sequelize = require('../../src/config/database');
-const { User, Company, Subscription, Sequence, Invoice, AuditLog } = require('../../src/models');
+const { User, Company, Subscription, Sequence, Invoice, Plan, AuditLog } = require('../../src/models');
 
 let companyAdminCookie = null;
 let adminCookie = null;
@@ -64,6 +64,17 @@ async function loginAndGetCookie(email, password) {
             })
         });
         testCompanyId = registerRes.body?.data?.company?.id;
+
+        // 🔥 Cambiar a plan basic para permitir 2+ secuencias
+        // (plan free limita a 1)
+        const basicPlan = await Plan.findOne({ where: { code: 'basic' } });
+        if (!basicPlan) {
+            throw new Error('Plan "basic" not found. Abortando test.');
+        }
+        await Subscription.update(
+            { planId: basicPlan.id },
+            { where: { companyId: testCompanyId } }
+        );
 
         // Login
         companyAdminCookie = await loginAndGetCookie(testEmail, 'OwnerPass123');
