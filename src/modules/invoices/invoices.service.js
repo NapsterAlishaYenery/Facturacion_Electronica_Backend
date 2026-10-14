@@ -6,6 +6,7 @@
 const { Op } = require('sequelize');
 const notifications = require('../notifications');
 const notificationsConfig = require('../../config/notifications');
+const { assertSubscriptionCanUse } = require('../../shared/utils/subscription.helpers');
 const sequelize = require('../../config/database');
 const {
     Company,
@@ -35,71 +36,6 @@ const ECF_TYPE_NAMES = {
     '46': 'Comprobante de Exportaciones Electrónico',
     '47': 'Comprobante para Pagos al Exterior Electrónico'
 };
-
-// ------------------------------------------------------------
-// Helper: validar que el emisor puede crear una factura
-// - Empresa existe y está activa
-// - Si es system owner (ExpediNap) → saltar validación de sub y límite
-// - Si es cliente → validar sub activa + límite mensual
-//
-// Devuelve { company, subscription, skipLimitCheck }
-// - subscription es null para system owner
-// - skipLimitCheck = true → no incrementar invoicesUsedThisMonth
-// ------------------------------------------------------------
-async function validateIssuerCanCreateInvoice(companyId, transaction = null) {
-    // 1. Empresa existe y está activa
-    const company = await Company.findByPk(companyId, { transaction });
-
-    if (!company) {
-        throw new AppError('Company not found', 404, 'COMPANY_NOT_FOUND');
-    }
-    if (!company.isActive) {
-        throw new AppError(
-            'Company is inactive. Cannot issue invoices.',
-            403,
-            'COMPANY_INACTIVE'
-        );
-    }
-
-    // 2. Bypass para el dueño del sistema
-    if (company.isSystemOwner) {
-        return { company, subscription: null, skipLimitCheck: true };
-    }
-
-    // 3. Suscripción activa
-    const subscription = await Subscription.findOne({
-        where: {
-            companyId,
-            status: ['trial', 'active', 'past_due']
-        },
-        include: [{ model: Plan, as: 'plan' }],
-        order: [['createdAt', 'DESC']],
-        transaction
-    });
-
-    if (!subscription) {
-        throw new AppError(
-            'No active subscription found. Please contact support.',
-            403,
-            'NO_ACTIVE_SUBSCRIPTION'
-        );
-    }
-
-    // 4. Límite mensual
-    const planLimit = subscription.plan?.invoicesPerMonth;
-    const usedThisMonth = Number(subscription.invoicesUsedThisMonth) || 0;
-
-    if (planLimit !== -1 && usedThisMonth >= planLimit) {
-        throw new AppError(
-            `Monthly invoice limit reached (${usedThisMonth}/${planLimit}). Upgrade your plan to continue.`,
-            403,
-            'INVOICE_LIMIT_REACHED'
-        );
-    }
-
-    return { company, subscription, skipLimitCheck: false };
-}
-
 
 // ------------------------------------------------------------
 // Helper: mapear <Transporte> del payload a columnas planas
@@ -681,7 +617,28 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
 
     // 🔥 NUEVO: validar emisor (empresa activa + suscripción + límite)
     // El helper salta la validación para el system owner (ExpediNap).
-    const { company, subscription, skipLimitCheck } = await validateIssuerCanCreateInvoice(companyId);
+
+    // 1. Empresa existe y está activa
+    const company = await Company.findByPk(companyId);
+    if (!company) {
+        throw new AppError('Company not found', 404, 'COMPANY_NOT_FOUND');
+    }
+    if (!company.isActive) {
+        throw new AppError(
+            'Company is inactive. Cannot issue invoices.',
+            403,
+            'COMPANY_INACTIVE'
+        );
+    }
+
+    // 2. Suscripción + límite (bypass para system owner)
+    //    El system owner no tiene suscripción ni consume límite.
+    let subscription = null;
+    if (!company.isSystemOwner) {
+        subscription = await assertSubscriptionCanUse(companyId, 'invoices');
+    }
+    const skipLimitCheck = !subscription;
+
 
     // Transacción
     const result = await sequelize.transaction(async (t) => {
@@ -1322,9 +1279,8 @@ module.exports = {
     deleteMyInvoice,
     listAllInvoices,
     getInvoiceById,
-     // 🔥 NUEVO: helpers reutilizables para internalBilling
+    // 🔥 NUEVO: helpers reutilizables para internalBilling
     _helpers: {
-        validateIssuerCanCreateInvoice,
         assignNextNCF,
         calculateLineTotals,
         calculateInvoiceTotals,
