@@ -19,9 +19,30 @@ const { AppError } = require('../middlewares/error.middleware');
 // ------------------------------------------------------------
 // Obtener la suscripción activa de una empresa
 // (trial, active o past_due)
+//
+// Opciones:
+//   - transaction: Sequelize transaction
+//   - lock: boolean. Si es true, bloquea la fila con FOR UPDATE.
+//           REQUIERE transaction (si no, lanza error).
+//
+// Uso con lock (para evitar race conditions):
+//   await assertSubscriptionCanUse(companyId, 'invoices', {
+//       transaction: t,
+//       lock: true
+//   });
 // ------------------------------------------------------------
 async function getActiveSubscription(companyId, options = {}) {
-    return Subscription.findOne({
+    // 1. Si se pide lock, debe haber transacción
+    if (options.lock && !options.transaction) {
+        throw new AppError(
+            'Cannot lock subscription row without a transaction',
+            500,
+            'LOCK_REQUIRES_TRANSACTION'
+        );
+    }
+
+    // 2. Construir el query
+    const query = {
         where: {
             companyId,
             status: ['trial', 'active', 'past_due']
@@ -29,7 +50,14 @@ async function getActiveSubscription(companyId, options = {}) {
         include: [{ model: Plan, as: 'plan' }],
         order: [['createdAt', 'DESC']],
         transaction: options.transaction
-    });
+    };
+
+    // 3. Agregar lock solo si se pide
+    if (options.lock) {
+        query.lock = options.transaction.LOCK.UPDATE;
+    }
+
+    return Subscription.findOne(query);
 }
 
 // ------------------------------------------------------------
@@ -57,8 +85,8 @@ function getPlanLimit(plan, resource) {
     if (!plan) return 0;
 
     switch (resource) {
-        case 'invoices':  return plan.invoicesPerMonth;
-        case 'users':     return plan.maxUsers;
+        case 'invoices': return plan.invoicesPerMonth;
+        case 'users': return plan.maxUsers;
         case 'sequences': return plan.maxSequences;
         default:
             throw new AppError(
