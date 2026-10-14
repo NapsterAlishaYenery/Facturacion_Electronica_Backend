@@ -836,6 +836,15 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
         ]
     });
 
+    // 6. 🔥 Guardar XML en disco (fire-and-forget)
+    //    No bloquea la respuesta. Si falla, la factura ya está en BD.
+    if (fullInvoice.xmlContent) {
+        const { saveXMLToDisk } = require('../documents/storage/xml-storage');
+        saveXMLToDisk(fullInvoice, fullInvoice.xmlContent).catch(err => {
+            console.error('[createMyInvoice] saveXMLToDisk failed:', err.message);
+        });
+    }
+
     return buildInvoiceResponse(fullInvoice, {
         lineCount: fullInvoice.lines.length,
         hideXml: false
@@ -1103,6 +1112,14 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
             }
         ]
     });
+
+    // 6. 🔥 Regenerar XML en disco si la factura es draft (fire-and-forget)
+    if (fullInvoice.status === 'draft' && fullInvoice.xmlContent) {
+        const { saveXMLToDisk } = require('../documents/storage/xml-storage');
+        saveXMLToDisk(fullInvoice, fullInvoice.xmlContent).catch(err => {
+            console.error('[updateMyInvoice] saveXMLToDisk failed:', err.message);
+        });
+    }
 
     return buildInvoiceResponse(fullInvoice, {
         lineCount: fullInvoice.lines.length,

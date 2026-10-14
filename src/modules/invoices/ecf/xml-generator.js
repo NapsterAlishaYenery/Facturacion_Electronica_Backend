@@ -10,6 +10,17 @@ const { getTypeProfile } = require('./type-profiles');
 // HELPERS INTERNOS DEL MÓDULO (no se exportan)
 // ============================================================
 
+// En xml-generator.js, dentro de buildEmisor:
+function formatPhone(phone) {
+    if (!phone) return null;
+    // Quitar todo lo que no sea dígito
+    const digits = String(phone).replace(/\D/g, '');
+    // Tomar los últimos 10 dígitos
+    const last10 = digits.slice(-10);
+    if (last10.length !== 10) return null; // inválido
+    return `${last10.slice(0,3)}-${last10.slice(3,6)}-${last10.slice(6)}`;
+}
+
 function fmtDate(date) {
     if (!date) return '';
     const d = new Date(date);
@@ -85,11 +96,26 @@ function removeEmptyTags(xml) {
 
     let previousXml;
     let currentXml = xml;
+
+    // 1. Eliminar tags vacíos iterativamente
     do {
         previousXml = currentXml;
         currentXml = currentXml.replace(emptyTagRegex, '');
         currentXml = currentXml.replace(selfClosingRegex, '');
     } while (currentXml !== previousXml);
+
+    // 2. Colapsar saltos de línea huérfanos:
+    //    - Elimina líneas en blanco (solo whitespace)
+    //    - Trim de cada línea (respeta indentación pero sin excesos)
+    //    - Deja máximo 1 salto entre bloques
+    currentXml = currentXml
+        .split('\n')
+        .map(line => line.trimEnd())
+        .filter(line => line.trim() !== '')
+        .join('\n');
+
+    // 3. Si quedaron dobles saltos, los colapsamos a uno
+    currentXml = currentXml.replace(/\n{2,}/g, '\n');
 
     return currentXml;
 }
@@ -293,7 +319,7 @@ function buildEmisor(invoiceData, profile) {
       ${issuerProvincia ? `<Provincia>${esc(issuerProvincia)}</Provincia>` : ''}
       ${issuerPhone ? `
       <TablaTelefonoEmisor>
-        <TelefonoEmisor>${esc(issuerPhone)}</TelefonoEmisor>
+        <TelefonoEmisor>${esc(formatPhone(issuerPhone))}</TelefonoEmisor>
       </TablaTelefonoEmisor>` : ''}
       ${issuerEmail ? `<CorreoEmisor>${esc(issuerEmail)}</CorreoEmisor>` : ''}
       ${issuerWebsite ? `<WebSite>${esc(issuerWebsite)}</WebSite>` : ''}
