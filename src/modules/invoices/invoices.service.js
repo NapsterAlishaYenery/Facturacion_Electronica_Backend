@@ -631,17 +631,24 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
         );
     }
 
-    // 2. Suscripción + límite (bypass para system owner)
-    //    El system owner no tiene suscripción ni consume límite.
-    let subscription = null;
-    if (!company.isSystemOwner) {
-        subscription = await assertSubscriptionCanUse(companyId, 'invoices');
-    }
-    const skipLimitCheck = !subscription;
 
 
     // Transacción
     const result = await sequelize.transaction(async (t) => {
+
+        // 2. Suscripción + límite (dentro de la tx con lock para
+        //    evitar race conditions entre requests concurrentes)
+        //    El system owner no tiene suscripción ni consume límite.
+        let subscription = null;
+        if (!company.isSystemOwner) {
+            subscription = await assertSubscriptionCanUse(
+                companyId,
+                'invoices',
+                { transaction: t, lock: true }
+            );
+        }
+        const skipLimitCheck = !subscription;
+
         // 4.1. Notas (33/34): resolver factura original
         let originalInvoice = null;
         if (isNota) {

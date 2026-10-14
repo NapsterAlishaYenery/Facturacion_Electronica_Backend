@@ -54,7 +54,10 @@ async function getActiveSubscription(companyId, options = {}) {
 
     // 3. Agregar lock solo si se pide
     if (options.lock) {
-        query.lock = options.transaction.LOCK.UPDATE;
+        query.lock = {
+            level: options.transaction.LOCK.UPDATE,
+            of: Subscription
+        };
     }
 
     return Subscription.findOne(query);
