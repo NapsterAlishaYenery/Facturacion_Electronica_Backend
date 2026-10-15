@@ -130,6 +130,28 @@ const getInvoiceById = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// GET /api/invoices/me/:id/pdf?format=a4|ticket|half
+// ------------------------------------------------------------
+const getMyInvoicePDF = catchAsync(async (req, res) => {
+    const format = req.query.format || 'a4';
+
+    const result = await invoicesService.getMyInvoicePDF(
+        req.user.companyId,
+        req.params.id,
+        format
+    );
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+        'Content-Disposition',
+        `inline; filename="${result.ncf}-${result.format}.pdf"`
+    );
+    res.setHeader('Content-Length', result.buffer.length);
+
+    res.send(result.buffer);
+});
+
 
 module.exports = {
     listMyInvoices,
@@ -138,17 +160,7 @@ module.exports = {
     updateMyInvoice,
     deleteMyInvoice,
     listAllInvoices,
-    getInvoiceById
+    getInvoiceById,
+    getMyInvoicePDF
 };
 
-// Controladores planeados:
-// - listMyInvoices
-// - getMyInvoiceById
-// - createMyInvoice
-// - updateMyInvoice
-// - deleteMyInvoice
-// - addLineToMyInvoice
-// - updateLineOfMyInvoice
-// - deleteLineOfMyInvoice
-// - listAllInvoices
-// - getInvoiceById

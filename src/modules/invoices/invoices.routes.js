@@ -20,7 +20,8 @@ const {
     listInvoicesQuerySchema,
     createInvoiceSchema,
     updateInvoiceSchema,
-    listAllInvoicesQuerySchema
+    listAllInvoicesQuerySchema,
+    downloadPDFQuerySchema
 } = require('./invoices.validation');
 
 // Controlador
@@ -59,6 +60,15 @@ router.post('/me',
     writeLimiter,
     validate(createInvoiceSchema),
     invoicesController.createMyInvoice
+);
+
+// GET /api/invoices/me/:id/pdf?format=a4|ticket|half — Descargar PDF
+router.get('/me/:id/pdf',
+    authMiddleware,
+    roleMiddleware('company_admin'),
+    readLimiter,
+    validate(downloadPDFQuerySchema, 'query'),
+    invoicesController.getMyInvoicePDF
 );
 
 // GET /api/invoices/me/:id — Ver una específica

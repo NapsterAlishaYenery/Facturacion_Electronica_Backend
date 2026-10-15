@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="es">
+    <head>
+        <meta charset="UTF-8">
+        <title>{{typeName}} — {{ncf}}</title>
+        <style>
+    * { box-sizing: border-box; }
+    body {
+        font-family: 'Helvetica', 'Arial', sans-serif;
+        font-size: 9.5px;
+        color: #1a1a1a;
+        margin: 0;
+        padding: 0;
+        line-height: 1.35;
+    }
+    .container { width: 100%; }
+
+    .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        border-bottom: 2px solid #1a3a5c;
+        padding-bottom: 6px;
+        margin-bottom: 8px;
+    }
+    .header-left { flex: 1; }
+    .header-right { text-align: right; flex: 0 0 auto; }
+    .company-name {
+        font-size: 14px;
+        font-weight: bold;
+        color: #1a3a5c;
+    }
+    .company-sub { font-size: 8px; color: #555; margin-top: 1px; }
+    .doc-type { font-size: 11px; font-weight: bold; color: #1a3a5c; }
+    .ncf {
+        font-family: 'Courier New', monospace;
+        font-size: 12px;
+        font-weight: bold;
+        margin-top: 2px;
+    }
+    .status-badge {
+        display: inline-block;
+        margin-top: 3px;
+        padding: 1px 6px;
+        background: #f0f4f8;
+        border-radius: 3px;
+        font-size: 7px;
+        text-transform: uppercase;
+        color: #1a3a5c;
+        letter-spacing: 0.5px;
+    }
+
+    .section-title {
+        font-size: 8px;
+        font-weight: bold;
+        color: #1a3a5c;
+        text-transform: uppercase;
+        letter-spacing: 0.7px;
+        border-bottom: 1px solid #d0d8e0;
+        padding-bottom: 1px;
+        margin-bottom: 4px;
+    }
+
+    .info-grid { display: flex; gap: 10px; margin-bottom: 8px; }
+    .info-block { flex: 1; }
+    .info-row { display: flex; margin-bottom: 1px; }
+    .info-label { flex: 0 0 60px; color: #666; font-size: 8px; }
+    .info-value { flex: 1; font-weight: 500; font-size: 8.5px; }
+
+    table.items {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 8px;
+    }
+    table.items thead th {
+        background: #1a3a5c;
+        color: white;
+        padding: 3px 5px;
+        text-align: left;
+        font-size: 8px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+    }
+    table.items thead th.num { text-align: right; }
+    table.items tbody td {
+        padding: 3px 5px;
+        border-bottom: 1px solid #e0e6ed;
+        font-size: 8.5px;
+    }
+    table.items tbody td.num {
+        text-align: right;
+        font-family: 'Courier New', monospace;
+    }
+    table.items tbody tr:nth-child(even) { background: #f8fafc; }
+    .item-code {
+        font-size: 7px;
+        color: #888;
+        font-family: 'Courier New', monospace;
+    }
+
+    .bottom-section {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 15px;
+        margin-top: 6px;
+    }
+
+    .totales {
+        flex: 0 0 auto;
+        margin-left: auto;
+    }
+    .totales-table { width: 220px; border-collapse: collapse; }
+    .totales-table tr td { padding: 2px 6px; font-size: 9px; }
+    .totales-table tr td:first-child { text-align: right; color: #666; }
+    .totales-table tr td:last-child {
+        text-align: right;
+        font-family: 'Courier New', monospace;
+        font-weight: 500;
+        width: 110px;
+        white-space: nowrap;
+    }
+    .totales-table tr.total-row td {
+        border-top: 2px solid #1a3a5c;
+        padding-top: 4px;
+        font-size: 11px;
+        font-weight: bold;
+        color: #1a3a5c;
+    }
+
+    .qr-section {
+        display: flex;
+        gap: 8px;
+        align-items: flex-start;
+        margin-top: 6px;
+        padding-top: 6px;
+        border-top: 1px solid #d0d8e0;
+    }
+    .qr-section .qr-block { flex: 0 0 70px; }
+    .qr-section .qr-block img { width: 70px; height: 70px; }
+    .qr-section .security-block {
+        flex: 1;
+        font-size: 7px;
+        color: #555;
+    }
+    .security-code {
+        font-family: 'Courier New', monospace;
+        font-size: 10px;
+        font-weight: bold;
+        color: #1a3a5c;
+    }
+    .legal-note {
+        font-size: 6.5px;
+        color: #888;
+        margin-top: 3px;
+        line-height: 1.3;
+    }
+</style>
+    </head>
+    <body>
+        <div class="container">
+
+            <div class="header">
+                <div class="header-left">
+                    <div class="company-name">{{issuerName}}</div>
+                    {{#if issuerTradeName}}
+                    <div class="company-sub">{{issuerTradeName}}</div>
+                    {{/if}}
+                    <div class="company-sub">
+                        RNC: {{issuerRnc}}
+                        {{#if issuerPhone}} · Tel: {{issuerPhone}}{{/if}}
+                    </div>
+                    {{#if issuerAddress}}
+                    <div class="company-sub">{{issuerAddress}}</div>
+                    {{/if}}
+                    {{#if issuerEmail}}
+                    <div class="company-sub">{{issuerEmail}}</div>
+                    {{/if}}
+                </div>
+                <div class="header-right">
+                    <div class="doc-type">{{typeName}}</div>
+                    <div class="ncf">{{ncf}}</div>
+                    <div class="status-badge">{{statusName}}</div>
+                </div>
+            </div>
+
+            <div class="info-grid">
+                <div class="info-block">
+                    <div class="section-title">Datos de la Factura</div>
+                    <div class="info-row">
+                        <div class="info-label">Fecha:</div>
+                        <div class="info-value">{{formatDate issuedAt}}</div>
+                    </div>
+                    <div class="info-row">
+                        <div class="info-label">NCF:</div>
+                        <div class="info-value">{{ncf}}</div>
+                    </div>
+                </div>
+
+                {{#if hasBuyer}}
+                <div class="info-block">
+                    <div class="section-title">Comprador</div>
+                    {{#if receiverRnc}}
+                    <div class="info-row">
+                        <div class="info-label">RNC:</div>
+                        <div class="info-value">{{receiverRnc}}</div>
+                    </div>
+                    {{/if}}
+                    {{#if receiverName}}
+                    <div class="info-row">
+                        <div class="info-label">Nombre:</div>
+                        <div class="info-value">{{receiverName}}</div>
+                    </div>
+                    {{/if}}
+                </div>
+                {{/if}}
+            </div>
+
+            {{#if isNota}}
+            <div style="margin-bottom: 8px;">
+                <div class="section-title">Referencia</div>
+                <div class="info-grid">
+                    <div class="info-block">
+                        <div class="info-row">
+                            <div class="info-label">NCF Mod.:</div>
+                            <div class="info-value">{{modifiedNcf}}</div>
+                        </div>
+                    </div>
+                    <div class="info-block">
+                        <div class="info-row">
+                            <div class="info-label">Motivo:</div>
+                            <div class="info-value">{{modificationReason}}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {{/if}}
+
+            <div class="section-title">Detalle de Ítems</div>
+            <table class="items">
+                <thead>
+                    <tr>
+                        <th style="width: 20px;">#</th>
+                        <th>Descripción</th>
+                        <th class="num" style="width: 50px;">Cant.</th>
+                        <th class="num" style="width: 70px;">P. Unit.</th>
+                        <th class="num" style="width: 50px;">Desc.</th>
+                        <th class="num" style="width: 40px;">ITBIS</th>
+                        <th class="num" style="width: 75px;">Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{#each lines}}
+                    <tr>
+                        <td>{{lineNumber}}</td>
+                        <td>
+                            {{description}}
+                            {{#if itemCode}}
+                            <div class="item-code">{{itemCode}}</div>
+                            {{/if}}
+                        </td>
+                        <td class="num">{{quantity}}</td>
+                        <td class="num">{{formatMoney unitPrice}}</td>
+                        <td class="num">{{#if hasDiscount}}{{formatMoney
+                            discount}}{{else}}—{{/if}}</td>
+                        <td class="num">{{itbisRate}}%</td>
+                        <td class="num">{{formatMoney total}}</td>
+                    </tr>
+                    {{/each}}
+                </tbody>
+            </table>
+
+            <div class="bottom-section">
+                <div class="totales">
+                    <table class="totales-table">
+                        <tr>
+                            <td>Subtotal:</td>
+                            <td>RD$ {{formatMoney subtotal}}</td>
+                        </tr>
+                        {{#if exemptAmount}}
+                        <tr>
+                            <td>Exento:</td>
+                            <td>RD$ {{formatMoney exemptAmount}}</td>
+                        </tr>
+                        {{/if}}
+                        {{#if itbis}}
+                        <tr>
+                            <td>ITBIS:</td>
+                            <td>RD$ {{formatMoney itbis}}</td>
+                        </tr>
+                        {{/if}}
+                        {{#if totalItbisRetenido}}
+                        <tr>
+                            <td>ITBIS Ret.:</td>
+                            <td>- RD$ {{formatMoney totalItbisRetenido}}</td>
+                        </tr>
+                        {{/if}}
+                        {{#if totalIsrRetencion}}
+                        <tr>
+                            <td>ISR Ret.:</td>
+                            <td>- RD$ {{formatMoney totalIsrRetencion}}</td>
+                        </tr>
+                        {{/if}}
+                        <tr class="total-row">
+                            <td>TOTAL:</td>
+                            <td>RD$ {{formatMoney total}}</td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+
+            <div class="qr-section">
+                <div class="qr-block">
+                    <img src="{{qrDataUrl}}" alt="QR Code">
+                </div>
+                <div class="security-block">
+                    <div><strong>Consulte la validez en:</strong>
+                        https://dgii.gov.do</div>
+                    {{#if securityCode}}
+                    <div style="margin-top: 3px;">
+                        <strong>Código de Seguridad:</strong>
+                        <span class="security-code">{{securityCode}}</span>
+                    </div>
+                    {{/if}}
+                    <div class="legal-note">
+                        Este documento es una <strong>representación
+                            gráfica</strong> de un Comprobante Fiscal
+                        Electrónico (e-CF) emitido conforme a la normativa de la
+                        DGII.
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </body>
+</html>

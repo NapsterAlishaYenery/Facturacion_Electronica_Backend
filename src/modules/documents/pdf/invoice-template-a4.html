@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="es">
+    <head>
+        <meta charset="UTF-8">
+        <title>{{typeName}} — {{ncf}}</title>
+        <style>
+    * { box-sizing: border-box; }
+    body {
+        font-family: 'Helvetica', 'Arial', sans-serif;
+        font-size: 10px;
+        color: #1a1a1a;
+        margin: 0;
+        padding: 0;
+        line-height: 1.4;
+    }
+    .container {
+        width: 100%;
+        max-width: 190mm;
+        margin: 0 auto;
+    }
+
+    /* ---------- Header ---------- */
+    .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        border-bottom: 2px solid #1a3a5c;
+        padding-bottom: 8px;
+        margin-bottom: 12px;
+    }
+    .header-left { flex: 1; }
+    .header-right { text-align: right; flex: 0 0 auto; }
+    .company-name {
+        font-size: 16px;
+        font-weight: bold;
+        color: #1a3a5c;
+    }
+    .company-sub { font-size: 9px; color: #555; margin-top: 2px; }
+    .doc-type { font-size: 12px; font-weight: bold; color: #1a3a5c; }
+    .ncf {
+        font-family: 'Courier New', monospace;
+        font-size: 13px;
+        font-weight: bold;
+        margin-top: 3px;
+    }
+    .status-badge {
+        display: inline-block;
+        margin-top: 4px;
+        padding: 2px 8px;
+        background: #f0f4f8;
+        border-radius: 3px;
+        font-size: 8px;
+        text-transform: uppercase;
+        color: #1a3a5c;
+        letter-spacing: 0.5px;
+    }
+
+    /* ---------- Section titles ---------- */
+    .section-title {
+        font-size: 9px;
+        font-weight: bold;
+        color: #1a3a5c;
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+        border-bottom: 1px solid #d0d8e0;
+        padding-bottom: 2px;
+        margin-bottom: 6px;
+    }
+
+    /* ---------- Info blocks ---------- */
+    .info-grid { display: flex; gap: 12px; margin-bottom: 12px; }
+    .info-block { flex: 1; }
+    .info-row { display: flex; margin-bottom: 2px; }
+    .info-label { flex: 0 0 70px; color: #666; font-size: 9px; }
+    .info-value { flex: 1; font-weight: 500; }
+
+    /* ---------- Items table ---------- */
+    table.items {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 12px;
+    }
+    table.items thead th {
+        background: #1a3a5c;
+        color: white;
+        padding: 5px 6px;
+        text-align: left;
+        font-size: 9px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+    }
+    table.items thead th.num { text-align: right; }
+    table.items tbody td {
+        padding: 5px 6px;
+        border-bottom: 1px solid #e0e6ed;
+        font-size: 9px;
+    }
+    table.items tbody td.num {
+        text-align: right;
+        font-family: 'Courier New', monospace;
+    }
+    table.items tbody tr:nth-child(even) { background: #f8fafc; }
+    .item-code {
+        font-size: 8px;
+        color: #888;
+        font-family: 'Courier New', monospace;
+    }
+
+    /* ---------- Totales ---------- */
+    .totales {
+        display: flex;
+        justify-content: flex-end;
+        margin-bottom: 12px;
+    }
+    .totales-table {
+        width: 300px;
+        border-collapse: collapse;
+    }
+    .totales-table tr td { padding: 4px 8px; font-size: 10px; }
+    .totales-table tr td:first-child { text-align: right; color: #666; }
+    .totales-table tr td:last-child {
+        text-align: right;
+        font-family: 'Courier New', monospace;
+        font-weight: 500;
+        width: 140px;
+        white-space: nowrap;
+    }
+    .totales-table tr.total-row td {
+        border-top: 2px solid #1a3a5c;
+        padding-top: 6px;
+        font-size: 12px;
+        font-weight: bold;
+        color: #1a3a5c;
+    }
+
+    /* ---------- QR + Seguridad ---------- */
+    .qr-section {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-top: 15px;
+        padding-top: 10px;
+        border-top: 1px solid #d0d8e0;
+    }
+    .qr-section .qr-block { flex: 0 0 100px; }
+    .qr-section .qr-block img { width: 100px; height: 100px; }
+    .qr-section .security-block {
+        flex: 1;
+        padding-left: 15px;
+        font-size: 8px;
+        color: #555;
+    }
+    .security-code {
+        font-family: 'Courier New', monospace;
+        font-size: 12px;
+        font-weight: bold;
+        color: #1a3a5c;
+    }
+    .legal-note {
+        font-size: 7.5px;
+        color: #888;
+        margin-top: 4px;
+        line-height: 1.4;
+    }
+</style>
+    </head>
+    <body>
+        <div class="container">
+
+            <!-- ==================== HEADER ==================== -->
+            <div class="header">
+                <div class="header-left">
+                    <div class="company-name">{{issuerName}}</div>
+                    {{#if issuerTradeName}}
+                    <div class="company-sub">{{issuerTradeName}}</div>
+                    {{/if}}
+                    <div class="company-sub">
+                        RNC: {{issuerRnc}}
+                        {{#if issuerPhone}} · Tel: {{issuerPhone}}{{/if}}
+                    </div>
+                    {{#if issuerAddress}}
+                    <div class="company-sub">{{issuerAddress}}</div>
+                    {{/if}}
+                    {{#if issuerEmail}}
+                    <div class="company-sub">{{issuerEmail}}</div>
+                    {{/if}}
+                </div>
+                <div class="header-right">
+                    <div class="doc-type">{{typeName}}</div>
+                    <div class="ncf">{{ncf}}</div>
+                    <div class="status-badge">{{statusName}}</div>
+                </div>
+            </div>
+
+            <!-- ==================== INFO FACTURA + COMPRADOR ==================== -->
+            <div class="info-grid">
+                <div class="info-block">
+                    <div class="section-title">Datos de la Factura</div>
+                    <div class="info-row">
+                        <div class="info-label">Fecha:</div>
+                        <div class="info-value">{{formatDate issuedAt}}</div>
+                    </div>
+                    <div class="info-row">
+                        <div class="info-label">NCF:</div>
+                        <div class="info-value">{{ncf}}</div>
+                    </div>
+                    <div class="info-row">
+                        <div class="info-label">Tipo:</div>
+                        <div class="info-value">{{type}} — {{typeName}}</div>
+                    </div>
+                </div>
+
+                {{#if hasBuyer}}
+                <div class="info-block">
+                    <div class="section-title">Comprador</div>
+                    {{#if receiverRnc}}
+                    <div class="info-row">
+                        <div class="info-label">RNC:</div>
+                        <div class="info-value">{{receiverRnc}}</div>
+                    </div>
+                    {{/if}}
+                    {{#if receiverName}}
+                    <div class="info-row">
+                        <div class="info-label">Nombre:</div>
+                        <div class="info-value">{{receiverName}}</div>
+                    </div>
+                    {{/if}}
+                    {{#if receiverIdentificadorExtranjero}}
+                    <div class="info-row">
+                        <div class="info-label">ID Extranjero:</div>
+                        <div
+                            class="info-value">{{receiverIdentificadorExtranjero}}</div>
+                    </div>
+                    {{/if}}
+                    {{#if receiverPais}}
+                    <div class="info-row">
+                        <div class="info-label">País:</div>
+                        <div class="info-value">{{receiverPais}}</div>
+                    </div>
+                    {{/if}}
+                </div>
+                {{/if}}
+            </div>
+
+            <!-- ==================== NOTA 33/34 ==================== -->
+            {{#if isNota}}
+            <div style="margin-bottom: 12px;">
+                <div class="section-title">Información de Referencia</div>
+                <div class="info-grid">
+                    <div class="info-block">
+                        <div class="info-row">
+                            <div class="info-label">NCF Modificado:</div>
+                            <div class="info-value">{{modifiedNcf}}</div>
+                        </div>
+                        <div class="info-row">
+                            <div class="info-label">Fecha NCF:</div>
+                            <div class="info-value">{{formatDate
+                                modifiedNcfDate}}</div>
+                        </div>
+                    </div>
+                    <div class="info-block">
+                        <div class="info-row">
+                            <div class="info-label">Código:</div>
+                            <div class="info-value">{{modificationCode}}</div>
+                        </div>
+                        {{#if modificationReason}}
+                        <div class="info-row">
+                            <div class="info-label">Motivo:</div>
+                            <div class="info-value">{{modificationReason}}</div>
+                        </div>
+                        {{/if}}
+                    </div>
+                </div>
+            </div>
+            {{/if}}
+
+            <!-- ==================== EXPORTACIÓN 46 ==================== -->
+            {{#if isExportacion}}
+            <div style="margin-bottom: 12px;">
+                <div class="section-title">Datos de Exportación</div>
+                <div class="info-grid">
+                    <div class="info-block">
+                        {{#if transporte.via}}
+                        <div class="info-row">
+                            <div class="info-label">Via:</div>
+                            <div class="info-value">{{transporte.via}}</div>
+                        </div>
+                        {{/if}}
+                        {{#if transporte.paisOrigen}}
+                        <div class="info-row">
+                            <div class="info-label">Origen:</div>
+                            <div
+                                class="info-value">{{transporte.paisOrigen}}</div>
+                        </div>
+                        {{/if}}
+                        {{#if transporte.paisDestino}}
+                        <div class="info-row">
+                            <div class="info-label">Destino:</div>
+                            <div
+                                class="info-value">{{transporte.paisDestino}}</div>
+                        </div>
+                        {{/if}}
+                    </div>
+                    <div class="info-block">
+                        {{#if infoAdicional.numeroEmbarque}}
+                        <div class="info-row">
+                            <div class="info-label">Embarque:</div>
+                            <div
+                                class="info-value">{{infoAdicional.numeroEmbarque}}</div>
+                        </div>
+                        {{/if}}
+                        {{#if infoAdicional.puertoEmbarque}}
+                        <div class="info-row">
+                            <div class="info-label">Puerto:</div>
+                            <div
+                                class="info-value">{{infoAdicional.puertoEmbarque}}</div>
+                        </div>
+                        {{/if}}
+                        {{#if infoAdicional.totalCif}}
+                        <div class="info-row">
+                            <div class="info-label">Total CIF:</div>
+                            <div class="info-value">RD$ {{formatMoney
+                                infoAdicional.totalCif}}</div>
+                        </div>
+                        {{/if}}
+                    </div>
+                </div>
+            </div>
+            {{/if}}
+
+            <!-- ==================== ITEMS ==================== -->
+            <div class="section-title">Detalle de Ítems</div>
+            <table class="items">
+                <thead>
+                    <tr>
+                        <th style="width: 25px;">#</th>
+                        <th>Descripción</th>
+                        <th class="num" style="width: 60px;">Cant.</th>
+                        <th class="num" style="width: 75px;">P. Unit.</th>
+                        <th class="num" style="width: 60px;">Desc.</th>
+                        <th class="num" style="width: 45px;">ITBIS</th>
+                        <th class="num" style="width: 80px;">Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{#each lines}}
+                    <tr>
+                        <td>{{lineNumber}}</td>
+                        <td>
+                            {{description}}
+                            {{#if itemCode}}
+                            <div class="item-code">{{itemCode}}</div>
+                            {{/if}}
+                        </td>
+                        <td class="num">{{quantity}}</td>
+                        <td class="num">{{formatMoney unitPrice}}</td>
+                        <td class="num">{{#if hasDiscount}}{{formatMoney
+                            discount}}{{else}}—{{/if}}</td>
+                        <td class="num">{{itbisRate}}%</td>
+                        <td class="num">{{formatMoney total}}</td>
+                    </tr>
+                    {{/each}}
+                </tbody>
+            </table>
+
+            <!-- ==================== TOTALES ==================== -->
+            <div class="totales">
+                <table class="totales-table">
+                    <tr>
+                        <td>Subtotal:</td>
+                        <td>RD$ {{formatMoney subtotal}}</td>
+                    </tr>
+                    {{#if exemptAmount}}
+                    <tr>
+                        <td>Exento:</td>
+                        <td>RD$ {{formatMoney exemptAmount}}</td>
+                    </tr>
+                    {{/if}}
+                    {{#if itbis}}
+                    <tr>
+                        <td>ITBIS:</td>
+                        <td>RD$ {{formatMoney itbis}}</td>
+                    </tr>
+                    {{/if}}
+                    {{#if totalItbisRetenido}}
+                    <tr>
+                        <td>ITBIS Retenido:</td>
+                        <td>- RD$ {{formatMoney totalItbisRetenido}}</td>
+                    </tr>
+                    {{/if}}
+                    {{#if totalIsrRetencion}}
+                    <tr>
+                        <td>ISR Retención:</td>
+                        <td>- RD$ {{formatMoney totalIsrRetencion}}</td>
+                    </tr>
+                    {{/if}}
+                    <tr class="total-row">
+                        <td>TOTAL:</td>
+                        <td>RD$ {{formatMoney total}}</td>
+                    </tr>
+                </table>
+            </div>
+
+            <!-- ==================== QR + SEGURIDAD ==================== -->
+            <div class="qr-section">
+                <div class="qr-block">
+                    <img src="{{qrDataUrl}}" alt="QR Code">
+                </div>
+                <div class="security-block">
+                    <div><strong>Consulte la validez de este documento
+                            en:</strong></div>
+                    <div class="legal-note">https://dgii.gov.do</div>
+                    {{#if securityCode}}
+                    <div style="margin-top: 6px;">
+                        <strong>Código de Seguridad:</strong>
+                        <span class="security-code">{{securityCode}}</span>
+                    </div>
+                    {{/if}}
+                    <div class="legal-note" style="margin-top: 8px;">
+                        Este documento es una <strong>representación
+                            gráfica</strong> de un Comprobante Fiscal
+                        Electrónico (e-CF) emitido conforme a la normativa de la
+                        DGII.
+                        La validez fiscal del documento está sujeta a la
+                        verificación en línea del código QR.
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </body>
+</html>
