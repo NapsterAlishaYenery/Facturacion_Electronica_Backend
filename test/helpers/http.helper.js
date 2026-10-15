@@ -22,10 +22,26 @@ function request(path, options = {}) {
             let data = '';
             res.on('data', chunk => data += chunk);
             res.on('end', () => {
+                const contentType = res.headers['content-type'] || '';
+                let parsedBody = null;
+
+                // 1. Parsear como JSON solo si el Content-Type lo indica
+                if (data && contentType.includes('application/json')) {
+                    try {
+                        parsedBody = JSON.parse(data);
+                    } catch (err) {
+                        // Si falla el parse, guardar como texto
+                        parsedBody = { _raw: data, _parseError: err.message };
+                    }
+                } else if (data) {
+                    // No es JSON → guardar como texto plano
+                    parsedBody = data;
+                }
+
                 resolve({
                     status: res.statusCode,
-                    headers: res.headers,   // ← Añadido: headers de respuesta
-                    body: data ? JSON.parse(data) : null
+                    headers: res.headers,
+                    body: parsedBody
                 });
             });
         });

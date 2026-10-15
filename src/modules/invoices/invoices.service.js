@@ -1439,6 +1439,76 @@ async function getMyInvoicePDF(companyId, invoiceId, format = 'a4') {
     return { buffer: pdfBuffer, ncf: invoice.ncf, format: normalizedFormat };
 }
 
+// ------------------------------------------------------------
+// Obtener el XML de una factura (company_admin)
+//
+// type = 'unsigned' → invoice.xmlContent (default)
+// type = 'signed'   → invoice.xmlSigned
+//
+// Devuelve { xml, ncf, type }
+// ------------------------------------------------------------
+async function getMyInvoiceXML(companyId, invoiceId, type = 'unsigned') {
+    if (!companyId) {
+        throw new AppError('You do not belong to any company', 400, 'NO_COMPANY_ASSIGNED');
+    }
+
+    // 1. Validar tipo
+    if (type !== 'unsigned' && type !== 'signed') {
+        throw new AppError(
+            `Invalid XML type: ${type}. Must be "unsigned" or "signed".`,
+            400,
+            'INVALID_XML_TYPE'
+        );
+    }
+
+    // 2. Buscar la factura (multi-tenant)
+    const invoice = await Invoice.findOne({
+        where: { id: invoiceId, companyId },
+        attributes: ['id', 'ncf', 'type', 'status', 'issuedAt', 'companyId', 'xmlContent', 'xmlSigned']
+    });
+
+    if (!invoice) {
+        throw new AppError('Invoice not found', 404, 'INVOICE_NOT_FOUND');
+    }
+
+    // 3. Determinar el contenido según el tipo
+    const isSigned = type === 'signed';
+    const xmlFromDb = isSigned ? invoice.xmlSigned : invoice.xmlContent;
+
+    if (!xmlFromDb) {
+        // No hay XML en BD
+        if (isSigned) {
+            throw new AppError(
+                'Invoice has not been signed yet. Cannot download signed XML.',
+                409,
+                'INVOICE_NOT_SIGNED'
+            );
+        } else {
+            throw new AppError(
+                'Invoice has no XML generated yet. Try editing the invoice to regenerate it.',
+                409,
+                'XML_NOT_GENERATED'
+            );
+        }
+    }
+
+    // 4. Intentar leer del disco (fallback a BD)
+    const { readXMLFromDisk } = require('../documents/storage/xml-storage');
+
+    let xml = await readXMLFromDisk(invoice, type);
+
+    // Si el disco no lo tiene, usar el de BD
+    if (!xml) {
+        xml = xmlFromDb;
+    }
+
+    return {
+        xml,
+        ncf: invoice.ncf,
+        type
+    };
+}
+
 module.exports = {
     listMyInvoices,
     getMyInvoiceById,
@@ -1448,6 +1518,7 @@ module.exports = {
     listAllInvoices,
     getInvoiceById,
     getMyInvoicePDF,
+    getMyInvoiceXML,
     // 🔥 NUEVO: helpers reutilizables para internalBilling
     _helpers: {
         assignNextNCF,

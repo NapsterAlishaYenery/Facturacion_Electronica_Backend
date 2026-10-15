@@ -21,7 +21,8 @@ const {
     createInvoiceSchema,
     updateInvoiceSchema,
     listAllInvoicesQuerySchema,
-    downloadPDFQuerySchema
+    downloadPDFQuerySchema,
+    downloadXMLQuerySchema
 } = require('./invoices.validation');
 
 // Controlador
@@ -69,6 +70,15 @@ router.get('/me/:id/pdf',
     readLimiter,
     validate(downloadPDFQuerySchema, 'query'),
     invoicesController.getMyInvoicePDF
+);
+
+// GET /api/invoices/me/:id/xml?type=unsigned|signed — Descargar XML
+router.get('/me/:id/xml',
+    authMiddleware,
+    roleMiddleware('company_admin'),
+    readLimiter,
+    validate(downloadXMLQuerySchema, 'query'),
+    invoicesController.getMyInvoiceXML
 );
 
 // GET /api/invoices/me/:id — Ver una específica

@@ -152,6 +152,28 @@ const getMyInvoicePDF = catchAsync(async (req, res) => {
     res.send(result.buffer);
 });
 
+// ------------------------------------------------------------
+// GET /api/invoices/me/:id/xml?type=unsigned|signed
+// ------------------------------------------------------------
+const getMyInvoiceXML = catchAsync(async (req, res) => {
+    const type = req.validated.query.type || 'unsigned';
+
+    const result = await invoicesService.getMyInvoiceXML(
+        req.user.companyId,
+        req.params.id,
+        type
+    );
+
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${result.ncf}${result.type === 'signed' ? '.signed' : ''}.xml"`
+    );
+    res.setHeader('Content-Length', Buffer.byteLength(result.xml, 'utf8'));
+
+    res.send(result.xml);
+});
+
 
 module.exports = {
     listMyInvoices,
@@ -161,6 +183,7 @@ module.exports = {
     deleteMyInvoice,
     listAllInvoices,
     getInvoiceById,
-    getMyInvoicePDF
+    getMyInvoicePDF,
+    getMyInvoiceXML
 };
 
