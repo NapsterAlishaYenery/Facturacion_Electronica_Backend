@@ -68,14 +68,16 @@ const itemSchema = Joi.object({
         .messages({
             'number.min': 'Item discount cannot be negative'
         }),
+    indicadorFacturacion: Joi.number().integer().valid(0, 1, 2, 3, 4).optional()
+        .messages({
+            'any.only': 'indicadorFacturacion must be 0 (No Facturable), 1 (18%), 2 (16%), 3 (ITBIS 0%), or 4 (Exento)'
+        }),
+
     itbisRate: Joi.number().min(0).max(100).default(18)
         .messages({
             'number.min': 'ITBIS rate cannot be negative',
             'number.max': 'ITBIS rate cannot exceed 100'
         }),
-
-    // 🔥 NUEVO: retención por línea (solo tipos 41 y 47).
-    // La regla de "solo 41/47" se valida en el .custom() del schema padre.
     retencion: Joi.object({
         indicador: Joi.number().integer().valid(1, 2).required()
             .messages({
@@ -290,9 +292,49 @@ const createInvoiceSchema = Joi.object({
             }
         }
 
-        // 2. Por línea: discount no puede superar quantity × unitPrice
+        // 2. Por línea: coherencia indicador ↔ itbisRate
+        //    + discount no puede superar quantity × unitPrice
         for (let i = 0; i < value.items.length; i++) {
             const item = value.items[i];
+
+            // 2.a. Coherencia indicador ↔ tasa
+            //      Si indicadorFacturacion viene, DEBE coincidir con itbisRate.
+            //      Si no viene, se infiere desde itbisRate.
+            const expectedRates = {
+                0: 0,    // No Facturable
+                1: 18,   // ITBIS 18%
+                2: 16,   // ITBIS 16%
+                3: 0,    // ITBIS 3 (0% gravado)
+                4: 0     // Exento
+            };
+
+            let indicador = item.indicadorFacturacion;
+
+            // Inferir desde tasa si no viene explícito
+            if (indicador === undefined) {
+                if (item.itbisRate === 18) indicador = 1;
+                else if (item.itbisRate === 16) indicador = 2;
+                else if (item.itbisRate === 0) indicador = 4; // default: exento
+                else indicador = 4; // fallback
+            }
+
+            // Validar coherencia
+            const expectedRate = expectedRates[indicador];
+            if (item.itbisRate !== undefined && Number(item.itbisRate) !== expectedRate) {
+                return helpers.error('any.custom', {
+                    message: `Item ${i + 1}: itbisRate (${item.itbisRate}) no coincide con indicadorFacturacion=${indicador} (esperado ${expectedRate}). Usa 1=18%, 2=16%, 3=0% gravado, 4=exento.`
+                });
+            }
+
+            // 2.b. Regla: indicadorFacturacion=3 (ITBIS3, 0% gravado) SOLO aplica a tipo 46.
+            //      Para el resto de tipos, el 0% se marca como exento (4).
+            if (indicador === 3 && value.type !== '46') {
+                return helpers.error('any.custom', {
+                    message: `Item ${i + 1}: indicadorFacturacion=3 (ITBIS 0% gravado) solo aplica a tipo 46 (exportaciones). Para 0% usa indicadorFacturacion=4 (exento).`
+                });
+            }
+
+            // 2.c. discount no puede superar quantity × unitPrice
             const lineBase = (item.quantity * item.unitPrice) - item.discount;
             if (lineBase < 0) {
                 return helpers.error('any.custom', {
@@ -488,11 +530,28 @@ const updateInvoiceSchema = Joi.object({
                 return helpers.error('any.custom', { message: 'issuedAt cannot be more than 30 days in the past' });
             }
         }
-
-        // 2. Validación por línea: discount no puede superar quantity × unitPrice
+        
         if (value.items) {
+            const expectedRates = { 0: 0, 1: 18, 2: 16, 3: 0, 4: 0 };
+
             for (let i = 0; i < value.items.length; i++) {
                 const item = value.items[i];
+
+                let indicador = item.indicadorFacturacion;
+                if (indicador === undefined) {
+                    if (item.itbisRate === 18) indicador = 1;
+                    else if (item.itbisRate === 16) indicador = 2;
+                    else if (item.itbisRate === 0) indicador = 4;
+                    else indicador = 4;
+                }
+
+                const expectedRate = expectedRates[indicador];
+                if (item.itbisRate !== undefined && Number(item.itbisRate) !== expectedRate) {
+                    return helpers.error('any.custom', {
+                        message: `Item ${i + 1}: itbisRate (${item.itbisRate}) no coincide con indicadorFacturacion=${indicador} (esperado ${expectedRate}). Usa 1=18%, 2=16%, 3=0% gravado, 4=exento.`
+                    });
+                }
+
                 const lineBase = (item.quantity * item.unitPrice) - item.discount;
                 if (lineBase < 0) {
                     return helpers.error('any.custom', {
@@ -502,9 +561,6 @@ const updateInvoiceSchema = Joi.object({
             }
         }
 
-        // 3. 🔥 NUEVO: retención por línea: validar forma si viene.
-        //    La coherencia con el tipo (41/47) se valida en el servicio,
-        //    porque el tipo real vive en la BD, no en el body.
         if (value.items) {
             for (let i = 0; i < value.items.length; i++) {
                 const ret = value.items[i].retencion;

@@ -123,6 +123,66 @@ const Invoice = sequelize.define('Invoice', {
             }
         }
     },
+    montoGravado: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: false,
+        defaultValue: 0,
+        field: 'monto_gravado',
+        validate: {
+            min: {
+                args: [0],
+                msg: 'Monto gravado cannot be negative'
+            }
+        }
+    },
+    itbis1Base: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: false,
+        defaultValue: 0,
+        field: 'itbis1_base',
+        validate: {
+            min: {
+                args: [0],
+                msg: 'ITBIS1 base cannot be negative'
+            }
+        }
+    },
+    itbis1Amount: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: false,
+        defaultValue: 0,
+        field: 'itbis1_amount',
+        validate: {
+            min: {
+                args: [0],
+                msg: 'ITBIS1 amount cannot be negative'
+            }
+        }
+    },
+    itbis2Base: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: false,
+        defaultValue: 0,
+        field: 'itbis2_base',
+        validate: {
+            min: {
+                args: [0],
+                msg: 'ITBIS2 base cannot be negative'
+            }
+        }
+    },
+    itbis2Amount: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: false,
+        defaultValue: 0,
+        field: 'itbis2_amount',
+        validate: {
+            min: {
+                args: [0],
+                msg: 'ITBIS2 amount cannot be negative'
+            }
+        }
+    },
     // 🔥 NUEVO: monto exento (43, 44, 47)
     exemptAmount: {
         type: DataTypes.DECIMAL(15, 2),

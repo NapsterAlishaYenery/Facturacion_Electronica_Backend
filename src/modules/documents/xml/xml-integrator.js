@@ -94,6 +94,11 @@ function buildInvoiceDataForXML(invoice, lines, company, sequence = null) {
         totalItbisRetenido: inv.totalItbisRetenido ? Number(inv.totalItbisRetenido) : 0,
         totalIsrRetencion: inv.totalIsrRetencion ? Number(inv.totalIsrRetencion) : 0,
         total: Number(inv.total),
+        montoGravado: inv.montoGravado ? Number(inv.montoGravado) : 0,
+        itbis1Base: inv.itbis1Base ? Number(inv.itbis1Base) : 0,
+        itbis1Amount: inv.itbis1Amount ? Number(inv.itbis1Amount) : 0,
+        itbis2Base: inv.itbis2Base ? Number(inv.itbis2Base) : 0,
+        itbis2Amount: inv.itbis2Amount ? Number(inv.itbis2Amount) : 0,
 
         // --- Líneas ---
         lines: lines.map(l => {
@@ -107,6 +112,7 @@ function buildInvoiceDataForXML(invoice, lines, company, sequence = null) {
                 discount: Number(line.discount || 0),
                 itbisRate: Number(line.itbisRate),
                 itbisAmount: Number(line.itbisAmount),
+                indicadorFacturacion: Number(line.indicadorFacturacion), 
                 total: Number(line.total),
                 retencion: line.retencionIndicador ? {
                     indicador: line.retencionIndicador,

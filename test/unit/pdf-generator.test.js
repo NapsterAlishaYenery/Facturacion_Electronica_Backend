@@ -50,6 +50,11 @@ const mockInvoice = {
     subtotal: 1000,
     itbis: 180,
     total: 1180,
+    montoGravado: 1000,        // 🔥 NUEVO
+    itbis1Base: 1000,          // 🔥 NUEVO
+    itbis1Amount: 180,         // 🔥 NUEVO
+    itbis2Base: 0,             // 🔥 NUEVO
+    itbis2Amount: 0,           // 🔥 NUEVO
     exemptAmount: null,
     itbis3Base: null,
     itbis3Amount: null,
@@ -180,6 +185,12 @@ function toBuffer(value) {
         test('ncf correcto', data.ncf === 'E310000000999');
         test('qrDataUrl no vacío', data.qrDataUrl && data.qrDataUrl.startsWith('data:image/png;base64,'));
         test('hasBuyer true para 31', data.hasBuyer === true);
+
+        // 🔥 NUEVO: el fix DT-27 mantiene compatibilidad con los templates
+        test('data.subtotal existe', data.subtotal !== undefined);
+        test('data.exemptAmount existe (null ok)', data.exemptAmount === null || typeof data.exemptAmount === 'string');
+        test('data.itbis existe', data.itbis !== undefined);
+        test('data.total existe', data.total !== undefined);
 
     } catch (err) {
         console.error('❌ Error:', err.message);

@@ -214,16 +214,29 @@ function calculateLineTotals(item) {
     const quantity = Number(item.quantity);
     const unitPrice = Number(item.unitPrice);
     const discount = Number(item.discount || 0);
-    const itbisRate = Number(item.itbisRate || 0);
 
-    // Base imponible = (cantidad × precio) - descuento
+    // Resolver indicadorFacturacion (si viene explícito, se respeta;
+    // si no, se infiere de itbisRate con backward-compat).
+    let indicador = item.indicadorFacturacion;
+    if (indicador === undefined || indicador === null) {
+        const rate = Number(item.itbisRate ?? 18);
+        if (rate === 18) indicador = 1;
+        else if (rate === 16) indicador = 2;
+        else if (rate === 0) indicador = 4; // default: exento
+        else indicador = 4;
+    }
+    indicador = Number(indicador);
+
+    // Tasa efectiva según indicador
+    const itbisRate = InvoiceLine.getRateFromIndicador(indicador);
+
+    // Base = (cantidad × precio) - descuento
     const lineBase = (quantity * unitPrice) - discount;
 
     // ITBIS = base × (tasa / 100)
     const itbisAmount = lineBase * (itbisRate / 100);
 
     // Total de la línea = base + ITBIS
-    // Redondeamos a 2 decimales
     const total = Math.round((lineBase + itbisAmount) * 100) / 100;
 
     return {
@@ -231,6 +244,7 @@ function calculateLineTotals(item) {
         unitPrice,
         discount,
         itbisRate,
+        indicadorFacturacion: indicador,
         lineBase: Math.round(lineBase * 100) / 100,
         itbisAmount: Math.round(itbisAmount * 100) / 100,
         total
@@ -241,20 +255,58 @@ function calculateLineTotals(item) {
 // Helper: calcular totales de la factura completa
 // ------------------------------------------------------------
 function calculateInvoiceTotals(lines) {
-    let subtotal = 0;
-    let itbis = 0;
+    let itbis1Base = 0, itbis1Amount = 0;
+    let itbis2Base = 0, itbis2Amount = 0;
+    let itbis3Base = 0, itbis3Amount = 0;
+    let exemptAmount = 0;
     let total = 0;
 
     for (const line of lines) {
-        subtotal += line.lineBase;
-        itbis += line.itbisAmount;
-        total += line.total;
+        const ind = Number(line.indicadorFacturacion);
+        const base = Number(line.lineBase);
+        const amount = Number(line.itbisAmount);
+
+        if (ind === 1) {
+            itbis1Base += base;
+            itbis1Amount += amount;
+        } else if (ind === 2) {
+            itbis2Base += base;
+            itbis2Amount += amount;
+        } else if (ind === 3) {
+            itbis3Base += base;
+            itbis3Amount += amount;
+        } else if (ind === 4) {
+            exemptAmount += base;
+        }
+        // ind === 0 (No Facturable) → no suma a ninguna base
+
+        total += Number(line.total);
     }
 
+    const round = (n) => Math.round(n * 100) / 100;
+
+    const montoGravado = round(itbis1Base + itbis2Base + itbis3Base);
+    const itbis = round(itbis1Amount + itbis2Amount + itbis3Amount);
+
+    // Backward-compat: 'subtotal' sigue existiendo y significa
+    // la suma de TODAS las bases (gravadas + exentas), como antes.
+    const subtotal = round(montoGravado + exemptAmount);
+
     return {
-        subtotal: Math.round(subtotal * 100) / 100,
-        itbis: Math.round(itbis * 100) / 100,
-        total: Math.round(total * 100) / 100
+        // Campos nuevos (correctos fiscalmente)
+        montoGravado,
+        itbis1Base: round(itbis1Base),
+        itbis1Amount: round(itbis1Amount),
+        itbis2Base: round(itbis2Base),
+        itbis2Amount: round(itbis2Amount),
+        itbis3Base: round(itbis3Base),
+        itbis3Amount: round(itbis3Amount),
+        exemptAmount: round(exemptAmount),
+
+        // Campos heredados (mantener por backward-compat)
+        subtotal,
+        itbis,
+        total: round(total)
     };
 }
 
@@ -716,16 +768,25 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
             receiverPais: receiverPais || null,
 
             // Totales base
+            // Totales base
             subtotal: invoiceTotals.subtotal,
             itbis: invoiceTotals.itbis,
             total: invoiceTotals.total,
 
-            // Exento (43, 44, 47)
-            exemptAmount: exemptAmount ?? null,
+            // 🔥 NUEVO: desglose fiscal (fix DT-27)
+            montoGravado: invoiceTotals.montoGravado,
+            itbis1Base: invoiceTotals.itbis1Base,
+            itbis1Amount: invoiceTotals.itbis1Amount,
+            itbis2Base: invoiceTotals.itbis2Base,
+            itbis2Amount: invoiceTotals.itbis2Amount,
 
-            // ITBIS3 (46)
-            itbis3Base: itbis3Base ?? null,
-            itbis3Amount: itbis3Amount ?? null,
+            // Exento: SIEMPRE derivado de las líneas (no del body)
+            exemptAmount: invoiceTotals.exemptAmount || null,
+
+            // ITBIS3: para tipo 46, se respeta el body; para el resto,
+            // se toma de las líneas (aunque solo 46 lo usa).
+            itbis3Base: type === '46' ? (itbis3Base ?? invoiceTotals.itbis3Base) : (invoiceTotals.itbis3Base || null),
+            itbis3Amount: type === '46' ? (itbis3Amount ?? invoiceTotals.itbis3Amount) : (invoiceTotals.itbis3Amount || null),
 
             // Retenciones encabezado (41, 47)
             totalItbisRetenido: totalItbisRetenido ?? null,
@@ -753,6 +814,7 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
                 discount: line.discount,
                 itbisRate: line.itbisRate,
                 itbisAmount: line.itbisAmount,
+                indicadorFacturacion: line.indicadorFacturacion,   // 🔥 NUEVO
                 total: line.total,
                 // 🔥 NUEVO: retención por línea (41, 47)
                 retencionIndicador: line.retencion?.indicador ?? null,
@@ -891,6 +953,23 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
     // 🔥 Validaciones de negocio que dependen del TIPO real (vive en BD, no en body)
     //    Joi valida forma; aquí validamos contra el tipo real de la factura.
 
+    // 🔥 NUEVO: indicador 3 (ITBIS3) solo aplica a tipo 46.
+    //    Si el usuario manda items con indicador 3 en un tipo distinto, rechazar.
+    //    (El schema Joi no puede validar esto porque el `type` no viene en el body.)
+    if (updates.items !== undefined && invoice.type !== '46') {
+        for (let i = 0; i < updates.items.length; i++) {
+            const ind = updates.items[i].indicadorFacturacion;
+            if (ind !== undefined && Number(ind) === 3) {
+                throw new AppError(
+                    `Item ${i + 1}: indicadorFacturacion=3 (ITBIS 0% gravado) solo aplica a tipo 46 (exportaciones). Para 0% usa indicadorFacturacion=4 (exento).`,
+                    409,
+                    'INDICADOR_3_ONLY_46'
+                );
+            }
+        }
+    }
+
+
     // A) Retención por línea: solo 41/47, y obligatoria en ellos
     if (updates.items !== undefined) {
         const allowsRetencion = invoice.type === '41' || invoice.type === '47';
@@ -1007,6 +1086,13 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
             updateData.itbis = invoiceTotals.itbis;
             updateData.total = invoiceTotals.total;
 
+            // 🔥 NUEVO: desglose fiscal (fix DT-27)
+            updateData.montoGravado = invoiceTotals.montoGravado;
+            updateData.itbis1Base = invoiceTotals.itbis1Base;
+            updateData.itbis1Amount = invoiceTotals.itbis1Amount;
+            updateData.itbis2Base = invoiceTotals.itbis2Base;
+            updateData.itbis2Amount = invoiceTotals.itbis2Amount;
+            updateData.exemptAmount = invoiceTotals.exemptAmount || null;
             await InvoiceLine.destroy({
                 where: { invoiceId: invoice.id },
                 transaction: t
@@ -1023,6 +1109,7 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
                     discount: line.discount,
                     itbisRate: line.itbisRate,
                     itbisAmount: line.itbisAmount,
+                    indicadorFacturacion: line.indicadorFacturacion,   // 🔥 NUEVO
                     total: line.total,
                     retencionIndicador: line.retencion?.indicador ?? null,
                     montoItbisRetenido: line.retencion?.montoItbisRetenido ?? null,

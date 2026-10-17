@@ -71,6 +71,7 @@ const InvoiceLine = sequelize.define('InvoiceLine', {
             }
         }
     },
+
     itbisRate: {
         type: DataTypes.DECIMAL(5, 2),
         allowNull: false,
@@ -96,6 +97,18 @@ const InvoiceLine = sequelize.define('InvoiceLine', {
             min: {
                 args: [0],
                 msg: 'ITBIS amount cannot be negative'
+            }
+        }
+    },
+    indicadorFacturacion: {
+        type: DataTypes.SMALLINT,
+        allowNull: false,
+        defaultValue: 1,
+        field: 'indicador_facturacion',
+        validate: {
+            isIn: {
+                args: [[0, 1, 2, 3, 4]],
+                msg: 'IndicadorFacturacion must be 0 (No Facturable), 1 (18%), 2 (16%), 3 (ITBIS 0%), or 4 (Exento)'
             }
         }
     },
@@ -146,5 +159,40 @@ const InvoiceLine = sequelize.define('InvoiceLine', {
         { fields: ['invoice_id', 'line_number'], unique: true, name: 'uq_invoice_lines_invoice_line' }
     ]
 });
+
+// ------------------------------------------------------------
+// Helpers estáticos: traducir indicador ↔ tasa
+// ------------------------------------------------------------
+
+/**
+ * Devuelve la tasa ITBIS (0, 16, 18) a partir del IndicadorFacturacion DGII.
+ *   0 → no facturable (regalo/bono) → tasa 0
+ *   1 → ITBIS 18%
+ *   2 → ITBIS 16%
+ *   3 → ITBIS 3 (0%) → tasa 0 (venta gravada a 0%, ej exportación)
+ *   4 → Exento       → tasa 0 (no sujeto a ITBIS)
+ */
+InvoiceLine.getRateFromIndicador = function (indicador) {
+    const n = Number(indicador);
+    if (n === 1) return 18;
+    if (n === 2) return 16;
+    return 0; // 0, 3 y 4 → tasa 0
+};
+
+/**
+ * Infiere el IndicadorFacturacion a partir de la tasa ITBIS.
+ * Se usa SOLO para backward-compat cuando el cliente no manda
+ * indicadorFacturacion explícito. Reglas:
+ *   18  → 1
+ *   16  → 2
+ *   0   → 4 (exento, el caso más común en RD cuando alguien manda 0)
+ *   otro → 4 (fallback seguro)
+ */
+InvoiceLine.getIndicadorFromRate = function (rate) {
+    const n = Number(rate);
+    if (n === 18) return 1;
+    if (n === 16) return 2;
+    return 4; // 0 y cualquier otra tasa desconocida → exento
+};
 
 module.exports = InvoiceLine;

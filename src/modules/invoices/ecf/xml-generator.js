@@ -18,7 +18,7 @@ function formatPhone(phone) {
     // Tomar los últimos 10 dígitos
     const last10 = digits.slice(-10);
     if (last10.length !== 10) return null; // inválido
-    return `${last10.slice(0,3)}-${last10.slice(3,6)}-${last10.slice(6)}`;
+    return `${last10.slice(0, 3)}-${last10.slice(3, 6)}-${last10.slice(6)}`;
 }
 
 function fmtDate(date) {
@@ -50,12 +50,18 @@ function fmtQuantity(num) {
     return Number(num || 0).toFixed(2);
 }
 
-function getIndicadorFacturacion(itbisRate) {
-    if (itbisRate === null || itbisRate === undefined) return 4;
-    const rate = Number(itbisRate);
+function getIndicadorFacturacion(line) {
+    // 1. Si viene el indicador explícito, respetarlo
+    if (line && line.indicadorFacturacion !== undefined && line.indicadorFacturacion !== null) {
+        return Number(line.indicadorFacturacion);
+    }
+
+    // 2. Fallback por tasa
+    const rate = Number(line && line.itbisRate);
+    if (Number.isNaN(rate)) return 4;
     if (rate === 18) return 1;
     if (rate === 16) return 2;
-    if (rate === 0) return 3;
+    if (rate === 0) return 4; // ← cambio clave: exento por defecto
     return 4;
 }
 
@@ -217,25 +223,34 @@ function validateForType(invoiceData, profile) {
 function computeTotals(invoiceData) {
     const {
         subtotal, itbis, total, lines = [],
+        montoGravado,
         itbis1Base, itbis1Amount,
         itbis2Base, itbis2Amount,
-        itbis3Base, exemptAmount,
+        itbis3Base, itbis3Amount,
+        exemptAmount,
     } = invoiceData;
 
-    const base18 = Number(itbis1Base || subtotal || 0);
-    const amount18 = Number(itbis1Amount || itbis || 0);
+    const base18 = Number(itbis1Base ?? subtotal ?? 0);
+    const amount18 = Number(itbis1Amount ?? itbis ?? 0);
     const base16 = Number(itbis2Base || 0);
     const amount16 = Number(itbis2Amount || 0);
     const base0 = Number(itbis3Base || 0);
+    const amount0 = Number(itbis3Amount || 0);
     const exempt = Number(exemptAmount || 0);
 
-    const montoGravadoTotal = base18 + base16 + base0;
-    const totalITBIS = amount18 + amount16;
+    // Monto gravado = suma de las 3 bases gravadas.
+    // Si el caller ya mandó 'montoGravado' calculado, respetarlo.
+    const montoGravadoTotal = montoGravado !== undefined
+        ? Number(montoGravado)
+        : (base18 + base16 + base0);
+
+    const totalITBIS = amount18 + amount16 + amount0;
 
     return {
         base18, amount18,
         base16, amount16,
-        base0, exempt,
+        base0, amount0,
+        exempt,
         montoGravadoTotal, totalITBIS,
         total: Number(total || 0),
         lines,
@@ -419,11 +434,11 @@ function buildTotales(computed, profile) {
     return `
     <Totales>
       <MontoGravadoTotal>${fmtMoney(montoGravadoTotal)}</MontoGravadoTotal>
-      <MontoGravadoI1>${fmtMoney(base18)}</MontoGravadoI1>
+      ${base18 > 0 ? `<MontoGravadoI1>${fmtMoney(base18)}</MontoGravadoI1>` : ''}
       ${base16 > 0 ? `<MontoGravadoI2>${fmtMoney(base16)}</MontoGravadoI2>` : ''}
       ${base0 > 0 ? `<MontoGravadoI3>${fmtMoney(base0)}</MontoGravadoI3>` : ''}
       ${exempt > 0 ? `<MontoExento>${fmtMoney(exempt)}</MontoExento>` : ''}
-      <ITBIS1>18</ITBIS1>
+      ${base18 > 0 ? `<ITBIS1>18</ITBIS1>` : ''}
       ${base16 > 0 ? `<ITBIS2>16</ITBIS2>` : ''}
       ${base0 > 0 ? `<ITBIS3>0</ITBIS3>` : ''}
       <TotalITBIS>${fmtMoney(totalITBIS)}</TotalITBIS>
@@ -445,7 +460,8 @@ function buildItems(computed, profile) {
         const discount = Number(line.discount || 0);
         const itbisRate = line.itbisRate;
         const montoItem = (quantity * unitPrice) - discount;
-        const indicadorFacturacion = getIndicadorFacturacion(itbisRate);
+        // 🔥 NUEVO (fix DT-27): pasar la línea completa al helper
+        const indicadorFacturacion = getIndicadorFacturacion(line);
 
         // Retención obligatoria (41 y 47)
         const retencionBlock = (profile.items.hasRetencion && profile.items.retencionRequired && line.retencion)

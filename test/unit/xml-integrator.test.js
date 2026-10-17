@@ -48,6 +48,7 @@ function mockLine(overrides = {}) {
         discount: 0,
         itbisRate: 18,
         itbisAmount: 180,
+        indicadorFacturacion: 1,   // 🔥 NUEVO
         total: 1180,
         retencionIndicador: null,
         montoItbisRetenido: null,
@@ -72,6 +73,11 @@ function mockInvoice(overrides = {}) {
         subtotal: 1000,
         itbis: 180,
         total: 1180,
+        montoGravado: 1000,        // 🔥 NUEVO
+        itbis1Base: 1000,          // 🔥 NUEVO
+        itbis1Amount: 180,         // 🔥 NUEVO
+        itbis2Base: 0,             // 🔥 NUEVO
+        itbis2Amount: 0,           // 🔥 NUEVO
         exemptAmount: null,
         itbis3Base: null,
         itbis3Amount: null,
@@ -119,11 +125,21 @@ test('total como número', data31.total === 1180);
 test('exemptAmount como 0 cuando null', data31.exemptAmount === 0);
 test('itbis3Base como 0 cuando null', data31.itbis3Base === 0);
 
+// 🔥 NUEVOS: verificar el fix DT-27
+test('montoGravado mapeado como número', data31.montoGravado === 1000);
+test('itbis1Base mapeado como número', data31.itbis1Base === 1000);
+test('itbis1Amount mapeado como número', data31.itbis1Amount === 180);
+test('itbis2Base mapeado como número', data31.itbis2Base === 0);
+test('itbis2Amount mapeado como número', data31.itbis2Amount === 0);
+
 test('lines array con 1 elemento', data31.lines.length === 1);
 test('line.description mapeada', data31.lines[0].description === 'Servicio de consultoría');
 test('line.quantity como número', data31.lines[0].quantity === 2);
 test('line.unitPrice como número', data31.lines[0].unitPrice === 500);
 test('line.retencion null cuando no hay', data31.lines[0].retencion === null);
+
+// 🔥 NUEVO: verificar indicadorFacturacion mapeado en líneas
+test('line.indicadorFacturacion mapeado', data31.lines[0].indicadorFacturacion === 1);
 
 test('transporte null cuando no hay datos', data31.transporte === null);
 test('informacionesAdicionales null cuando no hay datos', data31.informacionesAdicionales === null);
@@ -200,6 +216,44 @@ test('case5: retencion.indicador', data41.lines[0].retencion.indicador === 1);
 test('case5: retencion.montoItbisRetenido', data41.lines[0].retencion.montoItbisRetenido === 50);
 test('case5: retencion.montoIsrRetenido', data41.lines[0].retencion.montoIsrRetenido === 25);
 
+// --- Caso 6: 🔥 FIX DT-27 — líneas mixtas (18% + 16% + exento) ---
+const invoiceMixed = mockInvoice({
+    subtotal: 340000,       // backward-compat: montoGravado + exemptAmount
+    itbis: 55800,
+    total: 395800,
+    montoGravado: 315000,   // 🔥 solo gravado
+    itbis1Base: 270000,
+    itbis1Amount: 48600,
+    itbis2Base: 45000,
+    itbis2Amount: 7200,
+    exemptAmount: 25000
+});
+const linesMixed = [
+    mockLine({ lineNumber: 1, description: 'Servidor', quantity: 1, unitPrice: 285000, discount: 15000, itbisRate: 18, itbisAmount: 48600, indicadorFacturacion: 1, total: 318600 }),
+    mockLine({ lineNumber: 2, description: 'Licencia', quantity: 1, unitPrice: 45000, discount: 0, itbisRate: 16, itbisAmount: 7200, indicadorFacturacion: 2, total: 52200 }),
+    mockLine({ lineNumber: 3, description: 'Instalación exenta', quantity: 1, unitPrice: 25000, discount: 0, itbisRate: 0, itbisAmount: 0, indicadorFacturacion: 4, total: 25000 })
+];
+const dataMixed = buildInvoiceDataForXML(invoiceMixed, linesMixed, company, null);
+
+test('case6: montoGravado = 315000', dataMixed.montoGravado === 315000);
+test('case6: exemptAmount = 25000', dataMixed.exemptAmount === 25000);
+test('case6: itbis1Base = 270000', dataMixed.itbis1Base === 270000);
+test('case6: itbis2Base = 45000', dataMixed.itbis2Base === 45000);
+test('case6: 3 líneas mapeadas', dataMixed.lines.length === 3);
+test('case6: line[0] indicador = 1', dataMixed.lines[0].indicadorFacturacion === 1);
+test('case6: line[1] indicador = 2', dataMixed.lines[1].indicadorFacturacion === 2);
+test('case6: line[2] indicador = 4', dataMixed.lines[2].indicadorFacturacion === 4);
+
+// --- Caso 6-bis: generar XML y verificar Totales del fix DT-27 ---
+const xmlMixed = generateXMLForType(dataMixed, '31');
+test('case6: XML contiene MontoGravadoTotal 315000.00', xmlMixed.includes('<MontoGravadoTotal>315000.00</MontoGravadoTotal>'));
+test('case6: XML contiene MontoGravadoI1 270000.00', xmlMixed.includes('<MontoGravadoI1>270000.00</MontoGravadoI1>'));
+test('case6: XML contiene MontoGravadoI2 45000.00', xmlMixed.includes('<MontoGravadoI2>45000.00</MontoGravadoI2>'));
+test('case6: XML contiene MontoExento 25000.00', xmlMixed.includes('<MontoExento>25000.00</MontoExento>'));
+test('case6: XML contiene TotalITBIS 55800.00', xmlMixed.includes('<TotalITBIS>55800.00</TotalITBIS>'));
+test('case6: XML contiene TotalITBIS1 48600.00', xmlMixed.includes('<TotalITBIS1>48600.00</TotalITBIS1>'));
+test('case6: XML contiene TotalITBIS2 7200.00', xmlMixed.includes('<TotalITBIS2>7200.00</TotalITBIS2>'));
+test('case6: XML contiene IndicadorFacturacion 4 (exento)', xmlMixed.includes('<IndicadorFacturacion>4</IndicadorFacturacion>'));
 // ============================================================
 // TEST 2: generateXMLForType
 // ============================================================

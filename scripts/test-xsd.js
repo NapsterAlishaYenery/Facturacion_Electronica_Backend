@@ -11,7 +11,7 @@
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
-const { validateAgainstXSD } = require('./src/modules/invoices/ecf/xml-generator');
+const { validateAgainstXSD } = require('../src/modules/invoices/ecf/xml-generator');
 
 const DEFAULT_COMPANY_ID = 'fb187614-0412-4d82-ae96-283a0394ae84';
 
