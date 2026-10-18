@@ -207,6 +207,37 @@ const revokeCertificate = catchAsync(async (req, res) => {
     });
 });
 
+const uploadLogo = catchAsync(async (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({
+            success: false,
+            error: {
+                code: 'LOGO_FILE_REQUIRED',
+                message: 'No file uploaded. Send an image in the "logo" field.'
+            }
+        });
+    }
+
+    const reqInfo = {
+        ip: req.ip,
+        userAgent: req.get('user-agent')
+    };
+
+    const logo = await companiesService.uploadCompanyLogo(
+        req.user.companyId,
+        req.file.buffer,
+        req.body.purpose,
+        req.user,
+        reqInfo
+    );
+
+    res.json({
+        success: true,
+        message: 'Logo uploaded successfully',
+        data: { logo }
+    });
+});
+
 module.exports = {
     getMyCompany,
     updateMyCompany,
@@ -217,5 +248,6 @@ module.exports = {
     deleteCompany,
     uploadCertificate,
     getMyCertificate,
-    revokeCertificate
+    revokeCertificate,
+    uploadLogo
 };

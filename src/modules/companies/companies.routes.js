@@ -10,6 +10,7 @@ const authMiddleware = require('../../shared/middlewares/auth.middleware');
 const roleMiddleware = require('../../shared/middlewares/role.middleware');
 
 const { uploadCertificate: multerUploadCertificate } = require('./companies.multer');
+const { uploadLogo: multerUploadLogo } = require('./companies.logo.multer');
 const validate = require('../../shared/middlewares/validate.middleware');
 const {
     writeLimiter,
@@ -22,7 +23,8 @@ const {
     listCompaniesQuerySchema,
     updateCompanyByIdSchema,
     toggleCompanyActiveSchema,
-    uploadCertificateSchema
+    uploadCertificateSchema,
+    uploadLogoSchema
 } = require('./companies.validation');
 
 // Controlador
@@ -82,6 +84,20 @@ router.delete('/me/certificate',
     roleMiddleware('company_admin'),
     writeLimiter,
     companiesController.revokeCertificate
+);
+
+// ============================================================
+// Rutas de logo (mi empresa)
+// ============================================================
+
+// PATCH /api/companies/me/logo — Subir o reemplazar logo
+router.patch('/me/logo',
+    authMiddleware,
+    roleMiddleware('company_admin'),
+    writeLimiter,
+    multerUploadLogo,
+    validate(uploadLogoSchema),
+    companiesController.uploadLogo
 );
 
 // ============================================================

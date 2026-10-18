@@ -83,10 +83,26 @@ const uploadCertificateSchema = Joi.object({
         })
 });
 
+// ------------------------------------------------------------
+// Schema: subir/reemplazar logo de la empresa
+// El archivo va en multipart/form-data (campo "logo")
+// y multer lo valida antes de llegar aquí.
+// Este schema solo valida el purpose.
+// ------------------------------------------------------------
+const uploadLogoSchema = Joi.object({
+    purpose: Joi.string()
+        .valid('invoice', 'dashboard')
+        .default('invoice')
+        .messages({
+            'any.only': 'Purpose must be invoice or dashboard'
+        })
+});
+
 module.exports = {
     updateMyCompanySchema,
     listCompaniesQuerySchema,
     updateCompanyByIdSchema,
     toggleCompanyActiveSchema,
-    uploadCertificateSchema
+    uploadCertificateSchema,
+    uploadLogoSchema
 };

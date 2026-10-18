@@ -5,9 +5,9 @@
 
 const { Op } = require('sequelize');
 const sequelize = require('../../config/database');
-const { Company, User, Subscription, Plan, Sequence, Invoice, AuditLog } = require('../../models');
+const { Company, User, Subscription, Plan, Sequence, Invoice, CompanyLogo, AuditLog } = require('../../models');
 const { AppError } = require('../../shared/middlewares/error.middleware');
-
+const cloudinaryService = require('../../shared/services/cloudinary.service');
 const fs = require('fs');
 const path = require('path');
 const forge = require('node-forge');
@@ -71,6 +71,7 @@ function extractCertFromP12(p12Asn1) {
 
 
 
+//LISTA DE METODO DE ENDPOINDS
 
 // ------------------------------------------------------------
 // Obtener mi empresa (con suscripción, plan y conteos)
@@ -837,6 +838,108 @@ async function revokeCertificate(companyId, reqUser, reqInfo = {}) {
     return { revoked: true };
 }
 
+// ------------------------------------------------------------
+// Subir o reemplazar el logo de mi empresa
+// ------------------------------------------------------------
+async function uploadCompanyLogo(companyId, fileBuffer, purpose, reqUser, reqInfo = {}) {
+    // 1. Verificar empresa
+    if (!companyId) {
+        throw new AppError(
+            'You do not belong to any company',
+            400,
+            'NO_COMPANY_ASSIGNED'
+        );
+    }
+
+    const company = await Company.findByPk(companyId);
+    if (!company) {
+        throw new AppError('Company not found', 404, 'COMPANY_NOT_FOUND');
+    }
+
+    if (!company.isActive) {
+        throw new AppError('Company is inactive', 403, 'COMPANY_INACTIVE');
+    }
+
+    // 2. Subir a Cloudinary con public_id determinista + overwrite
+    //    Si ya existía un logo con el mismo purpose, Cloudinary lo
+    //    sobrescribe automáticamente. No hay huérfanos.
+    let uploadResult;
+    try {
+        uploadResult = await cloudinaryService.upload(fileBuffer, {
+            folder: `${process.env.CLOUDINARY_ROOT_FOLDER || 'ExpediFacts'}/logos/${companyId}`,
+            publicId: purpose,           // 'invoice' | 'dashboard'
+            transformation: [
+                { width: 600, height: 600, crop: 'limit' },
+                { quality: 'auto', fetch_format: 'auto' }
+            ]
+        });
+    } catch (err) {
+        throw new AppError(
+            `Failed to upload logo to Cloudinary: ${err.message}`,
+            502,
+            'CLOUDINARY_UPLOAD_FAILED'
+        );
+    }
+
+    // 3. Upsert en BD (UNIQUE company_id + purpose)
+    //    Si existía, actualiza; si no, crea.
+    const before = await CompanyLogo.findOne({
+        where: { companyId, purpose }
+    });
+
+    const logoData = {
+        companyId,
+        purpose,
+        publicId: uploadResult.publicId,
+        url: uploadResult.url,
+        secureUrl: uploadResult.secureUrl,
+        format: uploadResult.format,
+        width: uploadResult.width,
+        height: uploadResult.height,
+        bytes: uploadResult.bytes,
+        uploadedAt: new Date()
+    };
+
+    let logo;
+    let created;
+    if (before) {
+        await before.update(logoData);
+        logo = before;
+        created = false;
+    } else {
+        logo = await CompanyLogo.create(logoData);
+        created = true;
+    }
+
+    // 4. Audit log
+    try {
+        await AuditLog.create({
+            companyId: company.id,
+            userId: reqUser?.id ?? null,
+            action: created ? 'company.logo_uploaded' : 'company.logo_replaced',
+            entity: 'company_logo',
+            entityId: logo.id,
+            before: before ? { publicId: before.publicId, secureUrl: before.secureUrl } : null,
+            after: { purpose, publicId: logo.publicId, secureUrl: logo.secureUrl },
+            ip: reqInfo.ip || null,
+            userAgent: reqInfo.userAgent || null
+        });
+    } catch (err) {
+        // Ignorar errores de audit
+    }
+
+    // 5. Devolver el logo (sin exponer más de lo necesario)
+    return {
+        id: logo.id,
+        purpose: logo.purpose,
+        secureUrl: logo.secureUrl,
+        format: logo.format,
+        width: logo.width,
+        height: logo.height,
+        uploadedAt: logo.uploadedAt
+    };
+}
+
 module.exports = {
     getMyCompany,
     updateMyCompany,
@@ -847,5 +950,6 @@ module.exports = {
     deleteCompany,
     uploadCertificate,
     getMyCertificate,
-    revokeCertificate
+    revokeCertificate,
+    uploadCompanyLogo
 };
