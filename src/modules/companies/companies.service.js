@@ -940,6 +940,87 @@ async function uploadCompanyLogo(companyId, fileBuffer, purpose, reqUser, reqInf
     };
 }
 
+// ------------------------------------------------------------
+// Borrar el logo de mi empresa por propósito
+// ------------------------------------------------------------
+async function deleteCompanyLogo(companyId, purpose, reqUser, reqInfo = {}) {
+    // 1. Verificar empresa
+    if (!companyId) {
+        throw new AppError(
+            'You do not belong to any company',
+            400,
+            'NO_COMPANY_ASSIGNED'
+        );
+    }
+
+    const company = await Company.findByPk(companyId);
+    if (!company) {
+        throw new AppError('Company not found', 404, 'COMPANY_NOT_FOUND');
+    }
+
+    // 2. Buscar el logo en BD
+    const logo = await CompanyLogo.findOne({
+        where: { companyId, purpose }
+    });
+
+    if (!logo) {
+        throw new AppError(
+            `No logo found for purpose "${purpose}"`,
+            404,
+            'LOGO_NOT_FOUND'
+        );
+    }
+
+    // 3. Borrar de Cloudinary PRIMERO (idempotente: 'not found' es OK)
+    try {
+        await cloudinaryService.remove(logo.publicId, 'image');
+    } catch (err) {
+        throw new AppError(
+            `Failed to delete logo from Cloudinary: ${err.message}`,
+            502,
+            'CLOUDINARY_DELETE_FAILED'
+        );
+    }
+
+    // 4. Capturar metadata para audit ANTES de borrar
+    const before = {
+        purpose: logo.purpose,
+        publicId: logo.publicId,
+        secureUrl: logo.secureUrl,
+        format: logo.format,
+        width: logo.width,
+        height: logo.height,
+        bytes: logo.bytes
+    };
+
+    // 5. Borrar de BD
+    await logo.destroy();
+
+    // 6. Audit log
+    try {
+        await AuditLog.create({
+            companyId: company.id,
+            userId: reqUser?.id ?? null,
+            action: 'company.logo_deleted',
+            entity: 'company_logo',
+            entityId: logo.id,
+            before,
+            after: null,
+            ip: reqInfo.ip || null,
+            userAgent: reqInfo.userAgent || null
+        });
+    } catch (err) {
+        // Ignorar errores de audit
+    }
+
+    // 7. Devolver confirmación
+    return {
+        deleted: true,
+        purpose,
+        publicId: before.publicId
+    };
+}
+
 module.exports = {
     getMyCompany,
     updateMyCompany,
@@ -951,5 +1032,6 @@ module.exports = {
     uploadCertificate,
     getMyCertificate,
     revokeCertificate,
-    uploadCompanyLogo
+    uploadCompanyLogo,
+    deleteCompanyLogo
 };

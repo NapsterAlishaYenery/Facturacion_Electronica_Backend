@@ -24,7 +24,8 @@ const {
     updateCompanyByIdSchema,
     toggleCompanyActiveSchema,
     uploadCertificateSchema,
-    uploadLogoSchema
+    uploadLogoSchema,
+    deleteLogoParamsSchema
 } = require('./companies.validation');
 
 // Controlador
@@ -98,6 +99,15 @@ router.patch('/me/logo',
     multerUploadLogo,
     validate(uploadLogoSchema),
     companiesController.uploadLogo
+);
+
+// DELETE /api/companies/me/logo/:purpose — Borrar logo por propósito
+router.delete('/me/logo/:purpose',
+    authMiddleware,
+    roleMiddleware('company_admin'),
+    writeLimiter,
+    validate(deleteLogoParamsSchema, 'params'),
+    companiesController.deleteLogo
 );
 
 // ============================================================

@@ -207,6 +207,10 @@ const revokeCertificate = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// UPLOAD /api/companies/me/logo
+// carga un logo para la empresa 
+// ------------------------------------------------------------
 const uploadLogo = catchAsync(async (req, res) => {
     if (!req.file) {
         return res.status(400).json({
@@ -238,6 +242,31 @@ const uploadLogo = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// DELETE /api/companies/me/logo/:purpose
+// Borra el logo de un propósito específico (Cloudinary + BD)
+// El purpose ya fue validado por Joi → req.validated.params.purpose
+// ------------------------------------------------------------
+const deleteLogo = catchAsync(async (req, res) => {
+    const reqInfo = {
+        ip: req.ip,
+        userAgent: req.get('user-agent')
+    };
+
+    const result = await companiesService.deleteCompanyLogo(
+        req.user.companyId,
+        req.validated.params.purpose,
+        req.user,
+        reqInfo
+    );
+
+    res.json({
+        success: true,
+        message: 'Logo deleted successfully',
+        data: result
+    });
+});
+
 module.exports = {
     getMyCompany,
     updateMyCompany,
@@ -249,5 +278,6 @@ module.exports = {
     uploadCertificate,
     getMyCertificate,
     revokeCertificate,
-    uploadLogo
+    uploadLogo,
+    deleteLogo
 };

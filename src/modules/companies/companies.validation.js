@@ -98,11 +98,25 @@ const uploadLogoSchema = Joi.object({
         })
 });
 
+// ------------------------------------------------------------
+// Schema: borrar logo por propósito (path param)
+// ------------------------------------------------------------
+const deleteLogoParamsSchema = Joi.object({
+    purpose: Joi.string()
+        .valid('invoice', 'dashboard')
+        .required()
+        .messages({
+            'any.only': 'Purpose must be invoice or dashboard',
+            'any.required': 'Purpose is required'
+        })
+});
+
 module.exports = {
     updateMyCompanySchema,
     listCompaniesQuerySchema,
     updateCompanyByIdSchema,
     toggleCompanyActiveSchema,
     uploadCertificateSchema,
-    uploadLogoSchema
+    uploadLogoSchema,
+    deleteLogoParamsSchema
 };
