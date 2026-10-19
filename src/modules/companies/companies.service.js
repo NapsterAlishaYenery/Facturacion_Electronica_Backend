@@ -107,6 +107,12 @@ async function getMyCompany(companyId) {
                     as: 'plan',
                     attributes: ['id', 'code', 'name', 'priceDop', 'priceUsd', 'invoicesPerMonth', 'maxUsers', 'maxSequences', 'features']
                 }]
+            },
+            {
+                model: CompanyLogo,
+                as: 'logos',
+                attributes: ['id', 'purpose', 'secureUrl', 'format', 'width', 'height'],
+                required: false
             }
         ]
     });
@@ -324,19 +330,27 @@ async function getCompanyById(companyId) {
                 'certificateAuthTag'
             ]
         },
-        include: [{
-            model: Subscription,
-            as: 'subscriptions',
-            where: { status: ['trial', 'active', 'past_due'] },
-            required: false,
-            limit: 1,
-            order: [['createdAt', 'DESC']],
-            include: [{
-                model: Plan,
-                as: 'plan',
-                attributes: ['id', 'code', 'name', 'priceDop', 'priceUsd', 'invoicesPerMonth', 'maxUsers', 'maxSequences', 'features']
-            }]
-        }]
+        include: [
+            {
+                model: Subscription,
+                as: 'subscriptions',
+                where: { status: ['trial', 'active', 'past_due'] },
+                required: false,
+                limit: 1,
+                order: [['createdAt', 'DESC']],
+                include: [{
+                    model: Plan,
+                    as: 'plan',
+                    attributes: ['id', 'code', 'name', 'priceDop', 'priceUsd', 'invoicesPerMonth', 'maxUsers', 'maxSequences', 'features']
+                }]
+            },
+            {
+                model: CompanyLogo,
+                as: 'logos',
+                attributes: ['id', 'purpose', 'secureUrl', 'format', 'width', 'height'],
+                required: false
+            }
+        ]
     });
 
     if (!company) {
