@@ -44,6 +44,17 @@
         margin-top: 1mm;
     }
 
+    /* ---------- Logo (opcional) ---------- */
+    .company-logo {
+        max-width: 35mm;
+        max-height: 20mm;
+        width: auto;
+        height: auto;
+        object-fit: contain;
+        display: block;
+        margin: 0 auto 2mm auto;
+    }
+
     .doc-title {
         font-size: 10px;
         font-weight: bold;
@@ -185,6 +196,9 @@
 
         <!-- ==================== HEADER ==================== -->
         <div class="header">
+            {{#if logoUrl}}
+            <img src="{{logoUrl}}" alt="{{issuerName}}" class="company-logo">
+            {{/if}}
             <div class="company-name">{{issuerName}}</div>
             {{#if issuerTradeName}}
             <div class="company-info">{{issuerTradeName}}</div>

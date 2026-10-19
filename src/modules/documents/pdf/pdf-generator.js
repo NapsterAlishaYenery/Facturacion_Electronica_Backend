@@ -213,6 +213,14 @@ async function buildTemplateData(invoice, lines, company) {
         };
     });
 
+    // Extraer el logo invoice (si existe). El include en getMyInvoicePDF
+    // ya filtró por purpose: 'invoice' con required: false, así que:
+    // - company.logos es siempre un array (vacío o con 1 elemento).
+    // - Si no hay logo, invoiceLogo es null y el template no lo renderiza.
+    const invoiceLogo = Array.isArray(company.logos) && company.logos.length > 0
+        ? company.logos[0]
+        : null;
+
     return {
         type,
         typeName: typeNames[type] || `e-CF ${type}`,
@@ -227,6 +235,11 @@ async function buildTemplateData(invoice, lines, company) {
         issuerPhone: company.phone,
         issuerEmail: company.email,
         issuerEconomicActivity: company.economicActivity,
+
+        // Logo (opcional). Si no existe, el template no lo renderiza.
+        logoUrl: invoiceLogo?.secureUrl || null,
+        logoWidth: invoiceLogo?.width || null,
+        logoHeight: invoiceLogo?.height || null,
 
         hasBuyer,
         receiverRnc: invoice.receiverRnc,

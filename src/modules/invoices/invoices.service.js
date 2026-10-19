@@ -13,6 +13,7 @@ const {
     Sequence,
     Invoice,
     InvoiceLine,
+    CompanyLogo,
     AuditLog
 } = require('../../models');
 const { AppError } = require('../../shared/middlewares/error.middleware');
@@ -1492,7 +1493,14 @@ async function getMyInvoicePDF(companyId, invoiceId, format = 'a4') {
             {
                 model: Company,
                 as: 'company',
-                attributes: ['id', 'rnc', 'name', 'tradeName', 'email', 'phone', 'address', 'economicActivity']
+                attributes: ['id', 'rnc', 'name', 'tradeName', 'email', 'phone', 'address', 'economicActivity'],
+                include: [{
+                    model: CompanyLogo,
+                    as: 'logos',
+                    where: { purpose: 'invoice' },
+                    required: false,
+                    attributes: ['id', 'purpose', 'secureUrl', 'format', 'width', 'height']
+                }]
             }
         ]
     });
