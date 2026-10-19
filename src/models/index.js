@@ -232,7 +232,9 @@ CompanyLogo.belongsTo(Company, {
 });
 
 // ============================================================
-//
+// Company (1) ─── (N) Product
+// FK: products.company_id → companies.id (CASCADE)
+// Catálogo de productos/servicios para el POS interno (Fase 17).
 // ============================================================
 Company.hasMany(Product, {
     as: 'products',
