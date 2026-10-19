@@ -267,6 +267,37 @@ const deleteLogo = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// GET /api/companies/me/logo
+// Devuelve los 2 logos de la empresa (invoice y dashboard).
+// Cada uno puede ser null si no existe.
+// ------------------------------------------------------------
+const getMyLogos = catchAsync(async (req, res) => {
+    const logos = await companiesService.getCompanyLogos(req.user.companyId);
+
+    res.json({
+        success: true,
+        data: logos
+    });
+});
+
+// ------------------------------------------------------------
+// GET /api/companies/me/logo/:purpose
+// Devuelve el logo de un propósito específico.
+// El purpose ya fue validado por Joi → req.validated.params.purpose
+// ------------------------------------------------------------
+const getMyLogoByPurpose = catchAsync(async (req, res) => {
+    const logo = await companiesService.getCompanyLogoByPurpose(
+        req.user.companyId,
+        req.validated.params.purpose
+    );
+
+    res.json({
+        success: true,
+        data: { logo }
+    });
+});
+
 module.exports = {
     getMyCompany,
     updateMyCompany,
@@ -279,5 +310,7 @@ module.exports = {
     getMyCertificate,
     revokeCertificate,
     uploadLogo,
-    deleteLogo
+    deleteLogo,
+    getMyLogos,
+    getMyLogoByPurpose
 };

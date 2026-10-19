@@ -101,6 +101,21 @@ router.patch('/me/logo',
     companiesController.uploadLogo
 );
 
+// GET /api/companies/me/logo — Ver todos los logos
+router.get('/me/logo',
+    authMiddleware,
+    readLimiter,
+    companiesController.getMyLogos
+);
+
+// GET /api/companies/me/logo/:purpose — Ver un logo específico
+router.get('/me/logo/:purpose',
+    authMiddleware,
+    readLimiter,
+    validate(deleteLogoParamsSchema, 'params'),
+    companiesController.getMyLogoByPurpose
+);
+
 // DELETE /api/companies/me/logo/:purpose — Borrar logo por propósito
 router.delete('/me/logo/:purpose',
     authMiddleware,

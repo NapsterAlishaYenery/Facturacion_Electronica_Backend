@@ -1066,6 +1066,83 @@ async function deleteCompanyLogo(companyId, purpose, reqUser, reqInfo = {}) {
     };
 }
 
+// ------------------------------------------------------------
+// Obtener todos los logos de mi empresa
+// Devuelve un objeto con las 2 claves fijas (invoice, dashboard).
+// Cada valor es el logo o null si no existe.
+// ------------------------------------------------------------
+async function getCompanyLogos(companyId) {
+    if (!companyId) {
+        throw new AppError(
+            'You do not belong to any company',
+            400,
+            'NO_COMPANY_ASSIGNED'
+        );
+    }
+
+    const logos = await CompanyLogo.findAll({
+        where: { companyId },
+        attributes: ['id', 'purpose', 'secureUrl', 'format', 'width', 'height']
+    });
+
+    // Convertir array a objeto con las 2 claves fijas
+    const result = {
+        invoice: null,
+        dashboard: null
+    };
+
+    for (const logo of logos) {
+        if (result[logo.purpose] !== undefined) {
+            result[logo.purpose] = {
+                id: logo.id,
+                purpose: logo.purpose,
+                secureUrl: logo.secureUrl,
+                format: logo.format,
+                width: logo.width,
+                height: logo.height
+            };
+        }
+    }
+
+    return result;
+}
+
+// ------------------------------------------------------------
+// Obtener el logo de mi empresa por propósito
+// Devuelve el logo o 404 si no existe.
+// ------------------------------------------------------------
+async function getCompanyLogoByPurpose(companyId, purpose) {
+    if (!companyId) {
+        throw new AppError(
+            'You do not belong to any company',
+            400,
+            'NO_COMPANY_ASSIGNED'
+        );
+    }
+
+    const logo = await CompanyLogo.findOne({
+        where: { companyId, purpose },
+        attributes: ['id', 'purpose', 'secureUrl', 'format', 'width', 'height']
+    });
+
+    if (!logo) {
+        throw new AppError(
+            `No logo found for purpose "${purpose}"`,
+            404,
+            'LOGO_NOT_FOUND'
+        );
+    }
+
+    return {
+        id: logo.id,
+        purpose: logo.purpose,
+        secureUrl: logo.secureUrl,
+        format: logo.format,
+        width: logo.width,
+        height: logo.height
+    };
+}
+
 module.exports = {
     getMyCompany,
     updateMyCompany,
@@ -1078,5 +1155,7 @@ module.exports = {
     getMyCertificate,
     revokeCertificate,
     uploadCompanyLogo,
-    deleteCompanyLogo
+    deleteCompanyLogo,
+    getCompanyLogos,
+    getCompanyLogoByPurpose
 };
