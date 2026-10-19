@@ -553,7 +553,27 @@ async function deleteCompany(companyId, reqUser, reqInfo = {}) {
         dgiiEnvironment: company.dgiiEnvironment
     };
 
-    // 4. Borrar en transacción
+    // 4. Borrar los logos de Cloudinary ANTES de la transacción.
+    //    Cloudinary no participa en transacciones de Postgres, así que
+    //    lo hacemos fuera. Si un logo falla, log y continuar: preferimos
+    //    borrar la empresa aunque queden archivos huérfanos, a bloquear
+    //    el delete por un fallo de Cloudinary.
+    const logos = await CompanyLogo.findAll({
+        where: { companyId },
+        attributes: ['id', 'purpose', 'publicId']
+    });
+
+    const cloudinaryErrors = [];
+    for (const logo of logos) {
+        try {
+            await cloudinaryService.remove(logo.publicId, 'image');
+        } catch (err) {
+            cloudinaryErrors.push({ publicId: logo.publicId, error: err.message });
+            // continuar con el siguiente
+        }
+    }
+
+    // 5. Borrar en transacción
     await sequelize.transaction(async (t) => {
         const usersCount = await User.count({ where: { companyId }, transaction: t });
         const sequencesCount = await Sequence.count({ where: { companyId }, transaction: t });
@@ -572,14 +592,19 @@ async function deleteCompany(companyId, reqUser, reqInfo = {}) {
                 stats: {
                     usersCount,
                     sequencesCount,
-                    subscriptionsCount
+                    subscriptionsCount,
+                    logosCount: logos.length
+                },
+                cloudinaryCleanup: {
+                    attempted: logos.length,
+                    failed: cloudinaryErrors.length
                 }
             },
             ip: reqInfo.ip || null,
             userAgent: reqInfo.userAgent || null
         }, { transaction: t });
 
-        // Destroy con cascade
+        // Destroy con cascade (borra users, subscriptions, sequences, company_logos)
         await company.destroy({ transaction: t });
     });
 
@@ -589,7 +614,13 @@ async function deleteCompany(companyId, reqUser, reqInfo = {}) {
         cascadeDeleted: {
             users: true,
             subscriptions: true,
-            sequences: true
+            sequences: true,
+            logos: true
+        },
+        cloudinaryCleanup: {
+            attempted: logos.length,
+            failed: cloudinaryErrors.length,
+            errors: cloudinaryErrors.length > 0 ? cloudinaryErrors : undefined
         }
     };
 }
