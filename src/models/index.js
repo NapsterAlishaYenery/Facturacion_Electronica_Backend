@@ -15,7 +15,8 @@ const Invoice = require('./invoice.model');
 const InvoiceLine = require('./invoiceLine.model');
 const AuditLog = require('./auditLog.model');
 const PasswordReset = require('./passwordReset.model');
-const CompanyLogo = require('./companyLogo.model'); 
+const CompanyLogo = require('./companyLogo.model');
+const Product = require('./product.model');
 
 // ============================================================
 // Company (1) ─── (N) Subscription
@@ -231,6 +232,21 @@ CompanyLogo.belongsTo(Company, {
 });
 
 // ============================================================
+//
+// ============================================================
+Company.hasMany(Product, {
+    as: 'products',
+    foreignKey: 'companyId',
+    onDelete: 'CASCADE',
+    onUpdate: 'CASCADE'
+});
+Product.belongsTo(Company, {
+    as: 'company',
+    foreignKey: 'companyId'
+});
+
+
+// ============================================================
 // Exportar todos los modelos con sus asociaciones registradas
 // ============================================================
 module.exports = {
@@ -244,5 +260,6 @@ module.exports = {
     InvoiceLine,
     AuditLog,
     PasswordReset,
-    CompanyLogo
+    CompanyLogo,
+    Product
 };
