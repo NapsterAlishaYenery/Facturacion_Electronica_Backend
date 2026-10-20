@@ -18,7 +18,6 @@ const { Op } = require('sequelize');
 const sequelize = require('../../config/database');
 const {
     Company,
-    User,
     ApiKey,
     Subscription,
     Plan,
@@ -213,14 +212,20 @@ async function listApiKeys(companyId) {
     const keys = await ApiKey.findAll({
         where: { companyId },
         attributes: [
-            'id', 'name', 'keyPrefix', 'environment',
-            'lastUsedAt', 'expiresAt', 'isActive', 'revokedAt',
-            'createdBy', 'createdAt'
+            'id',
+            'name',
+            ['key_prefix', 'keyPrefix'],
+            'environment',
+            ['last_used_at', 'lastUsedAt'],
+            ['expires_at', 'expiresAt'],
+            ['is_active', 'isActive'],
+            ['revoked_at', 'revokedAt'],
+            ['created_by', 'createdBy'],
+            ['created_at', 'createdAt']
         ],
-        order: [['createdAt', 'DESC']]
+        order: [['created_at', 'DESC']]
     });
 
-    // Enriquecer con un campo "expired" calculado (útil para el frontend)
     return keys.map(k => {
         const json = k.toJSON();
         json.expired = json.expiresAt
