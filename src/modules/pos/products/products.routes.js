@@ -10,13 +10,13 @@
 const express = require('express');
 const router = express.Router();
 
-const authMiddleware = require('../../shared/middlewares/auth.middleware');
-const roleMiddleware = require('../../shared/middlewares/role.middleware');
-const validate = require('../../shared/middlewares/validate.middleware');
+const authMiddleware = require('../../../shared/middlewares/auth.middleware');
+const roleMiddleware = require('../../../shared/middlewares/role.middleware');
+const validate = require('../../../shared/middlewares/validate.middleware');
 const {
     writeLimiter,
     readLimiter
-} = require('../../shared/middlewares/rateLimit.middleware');
+} = require('../../../shared/middlewares/rateLimit.middleware');
 
 const {
     createProductSchema,

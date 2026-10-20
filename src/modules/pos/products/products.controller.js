@@ -3,7 +3,7 @@
 // ============================================================
 
 const productsService = require('./products.service');
-const catchAsync = require('../../shared/utils/catchAsync');
+const catchAsync = require('../../../shared/utils/catchAsync');
 
 // ------------------------------------------------------------
 // GET /api/products/me

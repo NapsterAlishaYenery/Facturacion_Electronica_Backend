@@ -21,7 +21,8 @@ const invoicesRoutes = require('./modules/invoices/invoices.routes');
 const dgiiRoutes = require('./modules/dgii/dgii.routes');
 const plansRoutes = require('./modules/subscriptions/plans/plans.routes');
 const subscriptionsRoutes = require('./modules/subscriptions/subscriptions/subscriptions.routes');
-const productsRoutes = require('./modules/products/products.routes');
+const productsRoutes = require('./modules/pos/products/products.routes');
+const posRoutes = require('./modules/pos/pos.routes');
 
 
 // Importar scheduler de jobs programados
@@ -76,6 +77,7 @@ app.use('/api/dgii', dgiiRoutes);
 app.use('/api/plans', plansRoutes);
 app.use('/api/subscriptions', subscriptionsRoutes);
 app.use('/api/products', productsRoutes);
+app.use('/api/pos', posRoutes);
 
 
 // Middleware global de errores

@@ -11,15 +11,15 @@
 // ============================================================
 
 const { Op } = require('sequelize');
-const sequelize = require('../../config/database');
+const sequelize = require('../../../config/database');
 const {
     Company,
     Product,
     Invoice,
     InvoiceLine,
     AuditLog
-} = require('../../models');
-const { AppError } = require('../../shared/middlewares/error.middleware');
+} = require('../../../models');
+const { AppError } = require('../../../shared/middlewares/error.middleware');
 
 // ------------------------------------------------------------
 // Helper: crear audit log (best-effort, no rompe el flujo)

@@ -752,6 +752,20 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
             indicadorNotaCredito: type === '34' ? indicadorNotaCredito : null
         } : {};
 
+        // 4.6.1 — Resolver el exento final según el tipo:
+        //   - Tipos 43, 44, 47: aceptan monto global exento (respetar body,
+        //     con fallback a las líneas si viene null).
+        //   - Resto de tipos: SIEMPRE derivado de las líneas (fuente de verdad).
+
+        let finalExemptAmount;
+
+        if (['43', '44', '47'].includes(type)) {
+            finalExemptAmount = exemptAmount ?? invoiceTotals.exemptAmount;
+        } else {
+            finalExemptAmount = invoiceTotals.exemptAmount;
+        }
+
+
         // 4.7. Crear factura
         const invoice = await Invoice.create({
             companyId,
