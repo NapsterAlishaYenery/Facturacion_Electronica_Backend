@@ -17,6 +17,7 @@ const AuditLog = require('./auditLog.model');
 const PasswordReset = require('./passwordReset.model');
 const CompanyLogo = require('./companyLogo.model');
 const Product = require('./product.model');
+const ApiKey = require('./apiKey.model');
 
 // ============================================================
 // Company (1) ─── (N) Subscription
@@ -247,6 +248,39 @@ Product.belongsTo(Company, {
     foreignKey: 'companyId'
 });
 
+// ============================================================
+// Company (1) ─── (N) ApiKey
+// FK: api_keys.company_id → companies.id (CASCADE)
+// API Keys para integraciones externas (Fase 18).
+// ============================================================
+Company.hasMany(ApiKey, {
+    as: 'apiKeys',
+    foreignKey: 'companyId',
+    onDelete: 'CASCADE',
+    onUpdate: 'CASCADE'
+});
+ApiKey.belongsTo(Company, {
+    as: 'company',
+    foreignKey: 'companyId'
+});
+
+
+// ============================================================
+// User (1) ─── (N) ApiKey
+// FK: api_keys.created_by → users.id (SET NULL)
+// Usuario que creó la key (puede quedar NULL si el user se borra).
+// ============================================================
+User.hasMany(ApiKey, {
+    as: 'createdApiKeys',
+    foreignKey: 'createdBy',
+    onDelete: 'SET NULL',
+    onUpdate: 'CASCADE'
+});
+ApiKey.belongsTo(User, {
+    as: 'creator',
+    foreignKey: 'createdBy'
+});
+
 
 // ============================================================
 // Exportar todos los modelos con sus asociaciones registradas
@@ -263,5 +297,6 @@ module.exports = {
     AuditLog,
     PasswordReset,
     CompanyLogo,
-    Product
+    Product,
+    ApiKey
 };
