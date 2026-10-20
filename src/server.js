@@ -23,6 +23,7 @@ const plansRoutes = require('./modules/subscriptions/plans/plans.routes');
 const subscriptionsRoutes = require('./modules/subscriptions/subscriptions/subscriptions.routes');
 const productsRoutes = require('./modules/pos/products/products.routes');
 const posRoutes = require('./modules/pos/pos.routes');
+const apiKeysRoutes = require('./modules/api-key/api-keys.routes');
 
 
 // Importar scheduler de jobs programados
@@ -78,6 +79,7 @@ app.use('/api/plans', plansRoutes);
 app.use('/api/subscriptions', subscriptionsRoutes);
 app.use('/api/products', productsRoutes);
 app.use('/api/pos', posRoutes);
+app.use('/api/api-keys', apiKeysRoutes);
 
 
 // Middleware global de errores

@@ -1,0 +1,64 @@
+// ============================================================
+// Controlador de API Keys (FASE 18.1)
+// ============================================================
+
+const catchAsync = require('../../shared/utils/catchAsync');
+const apiKeysService = require('./api-keys.service');
+
+// ------------------------------------------------------------
+// POST /api/api-keys
+// ------------------------------------------------------------
+const createApiKey = catchAsync(async (req, res) => {
+    const reqInfo = { ip: req.ip, userAgent: req.get('user-agent') };
+
+    const result = await apiKeysService.createApiKey(
+        req.user.companyId,
+        req.body,
+        req.user,
+        reqInfo
+    );
+
+    res.status(201).json({
+        success: true,
+        message: 'API key created. Copy the secret now — you will NOT see it again.',
+        data: result
+    });
+});
+
+// ------------------------------------------------------------
+// GET /api/api-keys
+// ------------------------------------------------------------
+const listApiKeys = catchAsync(async (req, res) => {
+    const result = await apiKeysService.listApiKeys(req.user.companyId);
+
+    res.json({
+        success: true,
+        data: { apiKeys: result }
+    });
+});
+
+// ------------------------------------------------------------
+// PATCH /api/api-keys/:id/revoke
+// ------------------------------------------------------------
+const revokeApiKey = catchAsync(async (req, res) => {
+    const reqInfo = { ip: req.ip, userAgent: req.get('user-agent') };
+
+    const result = await apiKeysService.revokeApiKey(
+        req.user.companyId,
+        req.params.id,
+        req.user,
+        reqInfo
+    );
+
+    res.json({
+        success: true,
+        message: 'API key revoked',
+        data: result
+    });
+});
+
+module.exports = {
+    createApiKey,
+    listApiKeys,
+    revokeApiKey
+};
