@@ -30,6 +30,9 @@ function extractToken(req) {
 // Middleware principal
 // ------------------------------------------------------------
 async function authMiddleware(req, res, next) {
+    
+    if (req.user) return next();
+    
     try {
         // 1. Extraer token
         const token = extractToken(req);

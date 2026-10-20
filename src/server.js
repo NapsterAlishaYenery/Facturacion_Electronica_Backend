@@ -25,6 +25,9 @@ const productsRoutes = require('./modules/pos/products/products.routes');
 const posRoutes = require('./modules/pos/pos.routes');
 const apiKeysRoutes = require('./modules/api-key/api-keys.routes');
 
+// Imports (middlewares)
+const apiKeyLimiter = require('./shared/middlewares/apiKeyRateLimit.middleware');
+const apiKeyMiddleware = require('./shared/middlewares/apiKey.middleware');
 
 // Importar scheduler de jobs programados
 const { startScheduler } = require('./modules/jobs/jobs.scheduler');
@@ -63,6 +66,8 @@ app.use(compression());
 app.use(express.json({ limit: '10mb' })); // e-CF XML puede ser grande
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+
+app.use('/api', apiKeyLimiter, apiKeyMiddleware);
 
 // Ruta de health check (para monitoreo)
 app.get('/health', (req, res) => {

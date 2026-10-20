@@ -19,6 +19,8 @@ module.exports = {
     PREFIX_VISIBLE_CHARS: 6,
 
     // Rate limit específico por API Key (requests por minuto)
-    // Configurable vía env; este es el default.
-    DEFAULT_RATE_LIMIT_PER_MIN: 1000,
+    get RATE_LIMIT_PER_MIN() {
+        const envVal = Number(process.env.API_KEY_RATE_LIMIT_PER_MIN);
+        return Number.isFinite(envVal) && envVal > 0 ? envVal : 1000;
+    }
 };

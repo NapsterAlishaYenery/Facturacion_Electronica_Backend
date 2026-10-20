@@ -75,7 +75,13 @@ const writeLimiter = rateLimit({
     },
     standardHeaders: true,
     legacyHeaders: false,
-    skip: () => process.env.NODE_ENV === 'development'
+    skip: (req) => {
+        // Dev: no limitar (para tests)
+        if (process.env.NODE_ENV === 'development') return true;
+        // API Key: el apiKeyLimiter ya aplicó su límite por key
+        if (req.user?.isApiKey === true) return true;
+        return false;
+    }
 });
 
 // ------------------------------------------------------------
@@ -93,7 +99,11 @@ const readLimiter = rateLimit({
     },
     standardHeaders: true,
     legacyHeaders: false,
-    skip: () => process.env.NODE_ENV === 'development'
+    skip: (req) => {
+        if (process.env.NODE_ENV === 'development') return true;
+        if (req.user?.isApiKey === true) return true;
+        return false;
+    }
 });
 
 module.exports = {
