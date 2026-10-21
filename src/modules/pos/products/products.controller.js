@@ -16,7 +16,11 @@ const listMyProducts = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
-        data: result
+        message: 'OK',
+        data: {
+            products: result.items,
+            pagination: result.pagination
+        }
     });
 });
 
@@ -31,7 +35,8 @@ const getMyProductById = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
-        data: result
+        message: 'OK',
+        data: { product: result.product }
     });
 });
 
@@ -54,7 +59,7 @@ const createMyProduct = catchAsync(async (req, res) => {
     res.status(201).json({
         success: true,
         message: 'Product created successfully',
-        data: result
+        data: { product: result.product }
     });
 });
 
@@ -78,7 +83,7 @@ const updateMyProduct = catchAsync(async (req, res) => {
     res.json({
         success: true,
         message: 'Product updated successfully',
-        data: result
+        data: { product: result.product }
     });
 });
 
@@ -104,7 +109,7 @@ const toggleMyProductActive = catchAsync(async (req, res) => {
         message: result.product.isActive
             ? 'Product activated successfully'
             : 'Product deactivated successfully',
-        data: result
+        data: { product: result.product }
     });
 });
 
@@ -126,8 +131,7 @@ const deleteMyProduct = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
-        message: 'Product deleted successfully',
-        data: result
+        message: 'Product deleted successfully'
     });
 });
 

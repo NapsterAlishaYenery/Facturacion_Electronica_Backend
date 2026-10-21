@@ -24,7 +24,7 @@ const quickInvoice = catchAsync(async (req, res) => {
     res.status(201).json({
         success: true,
         message: 'Quick invoice created successfully',
-        data: result
+        data: { invoice: result.invoice }
     });
 });
 

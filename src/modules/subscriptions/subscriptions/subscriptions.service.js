@@ -8,7 +8,8 @@ const {
     Plan,
     User,
     Sequence,
-    Company
+    Company,
+    AuditLog
 } = require('../../../models');
 const { AppError } = require('../../../shared/middlewares/error.middleware');
 const sequelize = require('../../../config/database');
@@ -582,6 +583,163 @@ async function cancelMySubscription(companyId, reqUser, reqInfo = {}) {
 }
 
 // ------------------------------------------------------------
+// Reactivar mi suscripción cancelada (company_admin)
+//
+// Regla: solo se puede reactivar una suscripción en estado
+// 'cancelled' o 'expired'. Reactivarla equivale a:
+//   - status: 'active'
+//   - nuevo período de 30 días
+//   - limpiar cancelledAt / endsAt
+//   - reset invoicesUsedThisMonth a 0
+//   - crear un SubscriptionPayment 'pending' por el plan actual
+// ------------------------------------------------------------
+async function reactivateMySubscription(companyId, reqUser, reqInfo = {}) {
+    if (!companyId) {
+        throw new AppError(
+            'You do not belong to any company',
+            400,
+            'NO_COMPANY_ASSIGNED'
+        );
+    }
+
+    // 1. Buscar la última suscripción (cualquier estado)
+    const subscription = await Subscription.findOne({
+        where: { companyId },
+        include: [
+            { model: Plan, as: 'plan' },
+            {
+                model: Company,
+                as: 'company',
+                required: false,
+                attributes: ['id', 'name', 'rnc', 'email'],
+                include: [{
+                    model: User,
+                    as: 'users',
+                    where: { role: 'company_admin', isActive: true },
+                    required: false,
+                    attributes: ['id', 'email', 'firstName']
+                }]
+            }
+        ],
+        order: [['createdAt', 'DESC']]
+    });
+
+    if (!subscription) {
+        throw new AppError(
+            'No subscription found for this company',
+            404,
+            'NO_SUBSCRIPTION_FOUND'
+        );
+    }
+
+    // 2. Solo se reactiva si está cancelled o expired
+    if (subscription.status !== 'cancelled' && subscription.status !== 'expired') {
+        throw new AppError(
+            `Cannot reactivate a subscription with status '${subscription.status}'. Only cancelled or expired subscriptions can be reactivated.`,
+            400,
+            'NOT_CANCELLED'
+        );
+    }
+
+    // 3. Plan actual debe seguir activo (si fue descontinuado, no se puede reactivar)
+    if (!subscription.plan || !subscription.plan.isActive) {
+        throw new AppError(
+            'The current plan is no longer available. Please choose a new plan.',
+            409,
+            'PLAN_INACTIVE'
+        );
+    }
+
+    const plan = subscription.plan;
+    const oldStatus = subscription.status;
+
+    // 4. Calcular nuevo período (30 días desde ahora)
+    const now = new Date();
+    const periodEnd = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    // 5. Transacción: actualizar sub + crear pago + audit
+    const result = await sequelize.transaction(async (t) => {
+        // 5.1. Reactivar suscripción
+        await subscription.update({
+            status: 'active',
+            cancelledAt: null,
+            endsAt: null,
+            currentPeriodStart: now,
+            currentPeriodEnd: periodEnd,
+            invoicesUsedThisMonth: 0
+        }, { transaction: t });
+
+        // 5.2. Crear pago pendiente por el plan actual
+        const payment = await SubscriptionPayment.create({
+            subscriptionId: subscription.id,
+            companyId,
+            amount: plan.priceDop,
+            currency: 'DOP',
+            paymentMethod: null,
+            reference: null,
+            periodStart: now,
+            periodEnd,
+            status: 'pending',
+            paidAt: null,
+            notes: `Reactivation: ${plan.code}`
+        }, { transaction: t });
+
+        // 5.3. Audit log
+        try {
+            await AuditLog.create({
+                companyId,
+                userId: reqUser?.id ?? null,
+                action: 'subscription.reactivated',
+                entity: 'subscription',
+                entityId: subscription.id,
+                before: {
+                    status: oldStatus,
+                    cancelledAt: subscription.cancelledAt,
+                    endsAt: subscription.endsAt
+                },
+                after: {
+                    status: 'active',
+                    planId: plan.id,
+                    planCode: plan.code,
+                    paymentId: payment.id,
+                    amount: payment.amount,
+                    periodStart: now,
+                    periodEnd
+                },
+                ip: reqInfo.ip || null,
+                userAgent: reqInfo.userAgent || null
+            }, { transaction: t });
+        } catch (err) {
+            // Ignorar errores de audit
+        }
+
+        return { payment };
+    });
+
+    // 6. Recargar subscription con plan
+    const updatedSubscription = await Subscription.findByPk(subscription.id, {
+        include: [{ model: Plan, as: 'plan' }]
+    });
+
+    // 7. Notificar (fire-and-forget, reusa notifyPlanChanged)
+    notifyPlanChanged({
+        subscription,
+        oldPlan: plan,          // mismo plan
+        newPlan: plan,          // mismo plan (para el mensaje es "renovación")
+        periodStart: now,
+        periodEnd
+    }).catch(err => {
+        console.error('[subscriptions.reactivateMySubscription] Notify failed:', err.message);
+    });
+
+    return {
+        subscription: updatedSubscription,
+        plan,
+        payment: result.payment
+    };
+}
+
+// ------------------------------------------------------------
 // Listar TODAS las suscripciones (admin)
 // ------------------------------------------------------------
 async function listSubscriptions(filters = {}) {
@@ -1113,6 +1271,7 @@ module.exports = {
     listMyPayments,
     changePlan,
     cancelMySubscription,
+    reactivateMySubscription,
     listSubscriptions,
     getSubscriptionById,
     updateSubscriptionById,

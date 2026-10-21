@@ -6,7 +6,7 @@ const { Op } = require('sequelize');
 const sequelize = require('../../config/database');
 const { Sequence, Company, Invoice, AuditLog } = require('../../models');
 const { AppError } = require('../../shared/middlewares/error.middleware');
-const { assertSubscriptionCanUse } = require('../../shared/utils/subscription.helpers');
+const { getActiveSubscription } = require('../../shared/utils/subscription.helpers');
 
 
 // ------------------------------------------------------------
@@ -194,14 +194,41 @@ async function createMySequence(companyId, data, reqUser, reqInfo = {}) {
     // 3. Transacción
     const sequence = await sequelize.transaction(async (t) => {
 
-        // 3.1. Validar suscripción + límite (bypass para system owner)
+        // 3.1. Validar suscripción + límite POR TIPO (bypass para system owner)
+        //      El plan.maxSequences ahora se interpreta como "máximo de
+        //      secuencias ACTIVAS POR TIPO", no globales.
         //      Con lock para evitar race conditions entre requests concurrentes.
         if (!company.isSystemOwner) {
-            await assertSubscriptionCanUse(
-                companyId,
-                'sequences',
-                { transaction: t, lock: true }
-            );
+            const subscription = await getActiveSubscription(companyId, {
+                transaction: t,
+                lock: true
+            });
+
+            if (!subscription) {
+                throw new AppError(
+                    'No active subscription found. Please contact support.',
+                    403,
+                    'NO_ACTIVE_SUBSCRIPTION'
+                );
+            }
+
+            const maxPerType = subscription.plan?.maxSequences;
+
+            if (maxPerType !== -1) {
+                const activeOfSameType = await Sequence.count({
+                    where: { companyId, type, isActive: true },
+                    transaction: t
+                });
+
+                if (activeOfSameType >= maxPerType) {
+                    throw new AppError(
+                        `Plan limit reached for sequences of type ${type} (${activeOfSameType}/${maxPerType}). Deactivate one or upgrade your plan.`,
+                        403,
+                        'RESOURCE_LIMIT_REACHED',
+                        { resource: 'sequences', type, used: activeOfSameType, limit: maxPerType }
+                    );
+                }
+            }
         }
 
         // 3.2. Verificar que no haya otra secuencia activa del mismo tipo con rango solapado

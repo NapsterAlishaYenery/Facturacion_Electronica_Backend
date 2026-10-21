@@ -72,6 +72,14 @@ router.post('/me/cancel',
     subscriptionsController.cancelMySubscription
 );
 
+// POST /api/subscriptions/me/reactivate — Reactivar suscripción cancelada
+router.post('/me/reactivate',
+    authMiddleware,
+    roleMiddleware('company_admin'),
+    writeLimiter,
+    subscriptionsController.reactivateMySubscription
+);
+
 // ============================================================
 // Rutas de admin (TODAS las suscripciones)
 // ============================================================

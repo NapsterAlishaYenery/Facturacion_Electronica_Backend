@@ -18,10 +18,17 @@ const createApiKey = catchAsync(async (req, res) => {
         reqInfo
     );
 
+    // El service devuelve el objeto plano con el secret mezclado.
+    // Separamos el secret para devolverlo aparte (solo se ve una vez).
+    const { secret, ...apiKeyData } = result;
+
     res.status(201).json({
         success: true,
         message: 'API key created. Copy the secret now — you will NOT see it again.',
-        data: result
+        data: {
+            apiKey: apiKeyData,
+            secret
+        }
     });
 });
 
@@ -33,6 +40,7 @@ const listApiKeys = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
+        message: 'OK',
         data: { apiKeys: result }
     });
 });
@@ -53,7 +61,7 @@ const revokeApiKey = catchAsync(async (req, res) => {
     res.json({
         success: true,
         message: 'API key revoked',
-        data: result
+        data: { apiKey: result }
     });
 });
 

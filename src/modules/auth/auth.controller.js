@@ -103,6 +103,7 @@ const me = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
+        message: 'OK',
         data: { user }
     });
 });
@@ -217,7 +218,11 @@ const listUsers = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
-        data: result
+        message: 'OK',
+        data: {
+            users: result.items,
+            pagination: result.pagination
+        }
     });
 });
 
@@ -260,8 +265,7 @@ const deleteUser = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
-        message: result.deleted ? 'User deleted' : 'User deactivated',
-        data: result
+        message: result.deleted ? 'User deleted' : 'User deactivated'
     });
 });
 
@@ -273,7 +277,11 @@ const listCompanyUsers = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
-        data: result
+        message: 'OK',
+        data: {
+            users: result.items,
+            pagination: result.pagination
+        }
     });
 });
 
@@ -314,8 +322,7 @@ const deleteCompanyUser = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
-        message: result.deleted ? 'User deleted' : 'User deactivated',
-        data: result
+        message: result.deleted ? 'User deleted' : 'User deactivated'
     });
 });
 

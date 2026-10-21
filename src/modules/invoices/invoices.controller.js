@@ -17,7 +17,11 @@ const listMyInvoices = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
-        data: result
+        message: 'OK',
+        data: {
+            invoices: result.items,
+            pagination: result.pagination
+        }
     });
 });
 
@@ -32,7 +36,8 @@ const getMyInvoiceById = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
-        data: result
+        message: 'OK',
+        data: { invoice: result.invoice }
     });
 });
 
@@ -55,7 +60,7 @@ const createMyInvoice = catchAsync(async (req, res) => {
     res.status(201).json({
         success: true,
         message: 'Invoice created successfully',
-        data: result
+        data: { invoice: result.invoice }
     });
 });
 
@@ -79,7 +84,7 @@ const updateMyInvoice = catchAsync(async (req, res) => {
     res.json({
         success: true,
         message: 'Invoice updated successfully',
-        data: result
+        data: { invoice: result.invoice }
     });
 });
 
@@ -102,7 +107,10 @@ const deleteMyInvoice = catchAsync(async (req, res) => {
     res.json({
         success: true,
         message: 'Invoice deleted successfully',
-        data: result
+        data: {
+            ncf: result.before.ncf,
+            note: result.note
+        }
     });
 });
 
@@ -114,7 +122,11 @@ const listAllInvoices = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
-        data: result
+        message: 'OK',
+        data: {
+            invoices: result.items,
+            pagination: result.pagination
+        }
     });
 });
 
@@ -126,7 +138,8 @@ const getInvoiceById = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
-        data: result
+        message: 'OK',
+        data: { invoice: result.invoice }
     });
 });
 

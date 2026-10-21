@@ -292,7 +292,13 @@ async function revokeApiKey(companyId, apiKeyId, reqUser, reqInfo = {}) {
         id: apiKey.id,
         name: apiKey.name,
         keyPrefix: apiKey.keyPrefix,
-        revokedAt
+        environment: apiKey.environment,
+        lastUsedAt: apiKey.lastUsedAt,
+        expiresAt: apiKey.expiresAt,
+        isActive: apiKey.isActive,
+        revokedAt,
+        createdBy: apiKey.createdBy,
+        createdAt: apiKey.createdAt
     };
 }
 

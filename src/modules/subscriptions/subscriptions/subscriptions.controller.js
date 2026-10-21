@@ -13,7 +13,15 @@ const getMySubscription = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
-        data: result
+        message: 'OK',
+        data: {
+            subscription: result.subscription,
+            plan: result.plan,
+            usage: result.usage,
+            isActive: result.isActive,
+            expiresAt: result.expiresAt,
+            daysLeft: result.daysLeft
+        }
     });
 });
 
@@ -28,7 +36,11 @@ const listMyPayments = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
-        data: result
+        message: 'OK',
+        data: {
+            payments: result.items,
+            pagination: result.pagination
+        }
     });
 });
 
@@ -51,7 +63,11 @@ const changePlan = catchAsync(async (req, res) => {
     res.json({
         success: true,
         message: 'Plan changed successfully. A payment is now pending.',
-        data: result
+        data: {
+            subscription: result.subscription,
+            plan: result.plan,
+            payment: result.payment
+        }
     });
 });
 
@@ -73,7 +89,38 @@ const cancelMySubscription = catchAsync(async (req, res) => {
     res.json({
         success: true,
         message: 'Subscription cancelled. You keep access until the end of the current period.',
-        data: result
+        data: {
+            subscription: result.subscription,
+            plan: result.plan,
+            accessUntil: result.accessUntil,
+            daysLeft: result.daysLeft
+        }
+    });
+});
+
+// ------------------------------------------------------------
+// POST /api/subscriptions/me/reactivate (company_admin)
+// ------------------------------------------------------------
+const reactivateMySubscription = catchAsync(async (req, res) => {
+    const reqInfo = {
+        ip: req.ip,
+        userAgent: req.get('user-agent')
+    };
+
+    const result = await subscriptionsService.reactivateMySubscription(
+        req.user.companyId,
+        req.user,
+        reqInfo
+    );
+
+    res.json({
+        success: true,
+        message: 'Subscription reactivated. A payment is now pending.',
+        data: {
+            subscription: result.subscription,
+            plan: result.plan,
+            payment: result.payment
+        }
     });
 });
 
@@ -85,7 +132,11 @@ const listSubscriptions = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
-        data: result
+        message: 'OK',
+        data: {
+            subscriptions: result.items,
+            pagination: result.pagination
+        }
     });
 });
 
@@ -97,7 +148,16 @@ const getSubscriptionById = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
-        data: result
+        message: 'OK',
+        data: {
+            subscription: result.subscription,
+            company: result.company,
+            plan: result.plan,
+            payments: result.payments,
+            usage: result.usage,
+            expiresAt: result.expiresAt,
+            daysLeft: result.daysLeft
+        }
     });
 });
 
@@ -145,7 +205,10 @@ const registerPayment = catchAsync(async (req, res) => {
         message: result.payment.status === 'paid'
             ? 'Payment registered and subscription reactivated'
             : 'Payment registered',
-        data: result
+        data: {
+            payment: result.payment,
+            subscription: result.subscription
+        }
     });
 });
 
@@ -160,7 +223,12 @@ const listSubscriptionPayments = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
-        data: result
+        message: 'OK',
+        data: {
+            subscription: result.subscription,
+            payments: result.items,
+            pagination: result.pagination
+        }
     });
 });
 
@@ -172,7 +240,11 @@ const listAllPayments = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
-        data: result
+        message: 'OK',
+        data: {
+            payments: result.items,
+            pagination: result.pagination
+        }
     });
 });
 
@@ -181,6 +253,7 @@ module.exports = {
     listMyPayments,
     changePlan,
     cancelMySubscription,
+    reactivateMySubscription,
     listSubscriptions,
     getSubscriptionById,
     updateSubscriptionById,

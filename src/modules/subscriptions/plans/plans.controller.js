@@ -13,7 +13,11 @@ const listPlans = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
-        data: result
+        message: 'OK',
+        data: {
+            plans: result.items,
+            pagination: result.pagination
+        }
     });
 });
 
@@ -23,8 +27,9 @@ const listPlans = catchAsync(async (req, res) => {
 const getPlanById = catchAsync(async (req, res) => {
     const plan = await plansService.getPlanById(req.params.id);
 
-    res.json({
+   res.json({
         success: true,
+        message: 'OK',
         data: { plan }
     });
 });

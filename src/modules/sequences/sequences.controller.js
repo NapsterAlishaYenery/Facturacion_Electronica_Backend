@@ -18,7 +18,11 @@ const listMySequences = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
-        data: result
+        message: 'OK',
+        data: {
+            sequences: result.items,
+            pagination: result.pagination
+        }
     });
 });
 
@@ -33,7 +37,8 @@ const getMySequenceById = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
-        data: result
+        message: 'OK',
+        data: { sequence: result.sequence }
     });
 });
 
@@ -56,7 +61,7 @@ const createMySequence = catchAsync(async (req, res) => {
     res.status(201).json({
         success: true,
         message: 'Sequence created successfully',
-        data: result
+        data: { sequence: result.sequence }
     });
 });
 
@@ -80,7 +85,7 @@ const updateMySequence = catchAsync(async (req, res) => {
     res.json({
         success: true,
         message: 'Sequence updated successfully',
-        data: result
+        data: { sequence: result.sequence }
     });
 });
 
@@ -106,7 +111,7 @@ const toggleMySequenceActive = catchAsync(async (req, res) => {
     res.json({
         success: true,
         message: `Sequence ${isActive ? 'activated' : 'deactivated'} successfully`,
-        data: result
+        data: { sequence: result.sequence }
     });
 });
 
@@ -128,8 +133,7 @@ const deleteMySequence = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
-        message: 'Sequence deleted successfully',
-        data: result
+        message: 'Sequence deleted successfully'
     });
 });
 
@@ -138,10 +142,14 @@ const deleteMySequence = catchAsync(async (req, res) => {
 // ------------------------------------------------------------
 const listAllSequences = catchAsync(async (req, res) => {
     const result = await sequencesService.listAllSequences(req.validated.query);
-
+    
     res.json({
         success: true,
-        data: result
+        message: 'OK',
+        data: {
+            sequences: result.items,
+            pagination: result.pagination
+        }
     });
 })
 

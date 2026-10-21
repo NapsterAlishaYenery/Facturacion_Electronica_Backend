@@ -14,7 +14,13 @@ const getMyCompany = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
-        data: result
+        message: 'OK',
+        data: {
+            company: result.company,
+            subscription: result.subscription,
+            plan: result.plan,
+            stats: result.stats
+        }
     });
 });
 
@@ -49,7 +55,11 @@ const listCompanies = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
-        data: result
+        message: 'OK',
+        data: {
+            companies: result.items,
+            pagination: result.pagination
+        }
     });
 });
 
@@ -61,7 +71,13 @@ const getCompanyById = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
-        data: result
+        message: 'OK',
+        data: {
+            company: result.company,
+            subscription: result.subscription,
+            plan: result.plan,
+            stats: result.stats
+        }
     });
 });
 
@@ -122,7 +138,7 @@ const deleteCompany = catchAsync(async (req, res) => {
         userAgent: req.get('user-agent')
     };
 
-    const result = await companiesService.deleteCompany(
+    await companiesService.deleteCompany(
         req.params.id,
         req.user,
         reqInfo
@@ -130,8 +146,7 @@ const deleteCompany = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
-        message: 'Company deleted successfully',
-        data: result
+        message: 'Company deleted successfully'
     });
 });
 
@@ -180,7 +195,16 @@ const getMyCertificate = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
-        data: result
+        message: 'OK',
+        data: {
+            hasCertificate: result.hasCertificate,
+            uploadedAt: result.uploadedAt,
+            expiresAt: result.expiresAt,
+            daysUntilExpiry: result.daysUntilExpiry,
+            isExpired: result.isExpired,
+            expiresSoon: result.expiresSoon,
+            rnc: result.rnc
+        }
     });
 });
 
@@ -194,7 +218,7 @@ const revokeCertificate = catchAsync(async (req, res) => {
         userAgent: req.get('user-agent')
     };
 
-    const result = await companiesService.revokeCertificate(
+    await companiesService.revokeCertificate(
         req.user.companyId,
         req.user,
         reqInfo
@@ -202,8 +226,7 @@ const revokeCertificate = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
-        message: 'Certificate revoked successfully',
-        data: result
+        message: 'Certificate revoked successfully'
     });
 });
 
@@ -253,7 +276,7 @@ const deleteLogo = catchAsync(async (req, res) => {
         userAgent: req.get('user-agent')
     };
 
-    const result = await companiesService.deleteCompanyLogo(
+    await companiesService.deleteCompanyLogo(
         req.user.companyId,
         req.validated.params.purpose,
         req.user,
@@ -262,8 +285,7 @@ const deleteLogo = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
-        message: 'Logo deleted successfully',
-        data: result
+        message: 'Logo deleted successfully'
     });
 });
 
@@ -277,6 +299,7 @@ const getMyLogos = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
+        message: 'OK',
         data: logos
     });
 });
@@ -294,6 +317,7 @@ const getMyLogoByPurpose = catchAsync(async (req, res) => {
 
     res.json({
         success: true,
+        message: 'OK',
         data: { logo }
     });
 });
