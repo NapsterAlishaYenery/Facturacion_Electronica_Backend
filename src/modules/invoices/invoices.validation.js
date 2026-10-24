@@ -523,9 +523,12 @@ const createInvoiceSchema = Joi.object({
         }
 
         // 10. e-CF 32: si el total >= 250,000 requiere identificación del comprador (DGII)
+        //     El total incluye recargo (Step 6): base = qty*price - discount + recargo
         if (value.type === '32') {
             const total = value.items.reduce((sum, it) => {
-                const base = (it.quantity * it.unitPrice) - (it.discount || 0);
+                const base = (it.quantity * it.unitPrice)
+                    - (it.discount || 0)
+                    + (it.recargo || 0);
                 const itbis = base * ((it.itbisRate ?? 18) / 100);
                 return sum + base + itbis;
             }, 0);

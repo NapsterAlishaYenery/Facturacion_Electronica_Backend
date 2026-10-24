@@ -1043,6 +1043,7 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
 
     // B) e-CF 32: si el total final >= 250,000 requiere identificación (DGII)
     //    Resolvemos el estado FINAL: items del body o los de BD si no vienen.
+    //    El total incluye recargo (Step 6): base = qty*price - discount + recargo
     if (invoice.type === '32') {
         // Items finales
         const finalItems = updates.items !== undefined
@@ -1054,7 +1055,9 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
 
         // Total final (misma fórmula que el schema Joi)
         const finalTotal = finalItems.reduce((sum, it) => {
-            const base = (Number(it.quantity) * Number(it.unitPrice)) - Number(it.discount || 0);
+            const base = (Number(it.quantity) * Number(it.unitPrice))
+                - Number(it.discount || 0)
+                + Number(it.recargo || 0);
             const itbis = base * (Number(it.itbisRate ?? 18) / 100);
             return sum + base + itbis;
         }, 0);
