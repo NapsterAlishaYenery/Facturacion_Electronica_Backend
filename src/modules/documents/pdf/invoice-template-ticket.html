@@ -44,7 +44,6 @@
         margin-top: 1mm;
     }
 
-    /* ---------- Logo (opcional) ---------- */
     .company-logo {
         max-width: 35mm;
         max-height: 20mm;
@@ -129,11 +128,27 @@
     .item-desc {
         display: block;
         font-size: 8px;
+        font-weight: 500;
+    }
+    .item-description {
+        display: block;
+        font-size: 7px;
+        color: #666;
+        font-style: italic;
+        margin-top: 0.3mm;
+        line-height: 1.25;
     }
     .item-code {
         display: block;
         font-size: 6px;
         color: #666;
+    }
+    .item-recargo {
+        display: block;
+        font-size: 7px;
+        color: #b45309;
+        margin-top: 0.3mm;
+        font-family: 'Courier New', monospace;
     }
 
     .totales {
@@ -158,6 +173,9 @@
         flex: 1;
         text-align: right;
         font-family: 'Courier New', monospace;
+    }
+    .totales-row .value.recargos {
+        color: #b45309;
     }
 
     .qr-section {
@@ -309,7 +327,7 @@
         <table class="items">
             <thead>
                 <tr>
-                    <th style="width: 8mm;">Cant</th>
+                    <th style="width: 12mm;">Cant</th>
                     <th>Descripción</th>
                     <th class="num" style="width: 18mm;">Total</th>
                 </tr>
@@ -317,12 +335,20 @@
             <tbody>
                 {{#each lines}}
                 <tr class="item-separator">
-                    <td class="num">{{quantity}}</td>
+                    <td class="num">{{quantity}}{{#if unidadMedidaLabel}}
+                        {{unidadMedidaLabel}}{{/if}}</td>
                     <td>
-                        <span class="item-desc">{{description}}</span>
+                        <span class="item-desc">{{itemName}}</span>
+                        {{#if hasDescription}}
+                        <span class="item-description">{{description}}</span>
+                        {{/if}}
                         <span class="item-code">x RD$ {{formatMoney
                             unitPrice}}{{#if hasDiscount}} (Desc: RD$
                             {{formatMoney discount}}){{/if}}</span>
+                        {{#if hasRecargo}}
+                        <span class="item-recargo">+ Recargo: RD$ {{formatMoney
+                            recargo}}</span>
+                        {{/if}}
                     </td>
                     <td class="num">{{formatMoney total}}</td>
                 </tr>
@@ -362,6 +388,13 @@
                 <span class="label">ISR Ret:</span>
                 <span class="value">- RD$ {{formatMoney
                     totalIsrRetencion}}</span>
+            </div>
+            {{/if}}
+            {{#if hasTotalRecargos}}
+            <div class="totales-row">
+                <span class="label">Recargos:</span>
+                <span class="value recargos">+ RD$ {{formatMoney
+                    totalRecargos}}</span>
             </div>
             {{/if}}
             <div class="totales-row total-final">
