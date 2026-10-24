@@ -47,13 +47,40 @@ const listAllInvoicesQuerySchema = Joi.object({
 // ============================================================
 
 // Item de línea — se usa en create y en update
+// Item de línea — se usa en create y en update
 const itemSchema = Joi.object({
+    // ---------- Identificación ----------
     itemCode: Joi.string().max(50).optional().allow(null, ''),
-    description: Joi.string().min(1).max(500).required()
+
+    // NombreItem (obligatorio DGII, máx 80 chars)
+    itemName: Joi.string().min(1).max(80).required()
         .messages({
-            'any.required': 'Item description is required',
-            'string.max': 'Item description cannot exceed 500 characters'
+            'any.required': 'Item name (itemName) is required',
+            'string.min': 'Item name cannot be empty',
+            'string.max': 'Item name cannot exceed 80 characters'
         }),
+
+    // DescripcionItem (opcional DGII, máx 1000 chars)
+    description: Joi.string().max(1000).optional().allow(null, '')
+        .messages({
+            'string.max': 'Item description cannot exceed 1000 characters'
+        }),
+
+    // ---------- Naturaleza del ítem ----------
+    // 1 = Bien, 2 = Servicio
+    indicadorBienoServicio: Joi.number().integer().valid(1, 2).default(1)
+        .messages({
+            'any.only': 'indicadorBienoServicio must be 1 (Bien) or 2 (Servicio)'
+        }),
+
+    // Código 1-62 de la tabla DGII. Null/vacío = no se envía (servicios)
+    unidadMedida: Joi.number().integer().min(1).max(62).optional().allow(null)
+        .messages({
+            'number.min': 'unidadMedida must be between 1 and 62',
+            'number.max': 'unidadMedida must be between 1 and 62'
+        }),
+
+    // ---------- Cantidades y precios ----------
     quantity: Joi.number().positive().max(9999999.9999).required()
         .messages({
             'number.positive': 'Item quantity must be greater than 0',
@@ -68,16 +95,45 @@ const itemSchema = Joi.object({
         .messages({
             'number.min': 'Item discount cannot be negative'
         }),
+    recargo: Joi.number().min(0).default(0)
+        .messages({
+            'number.min': 'Item recargo cannot be negative'
+        }),
+
+    // ---------- Referencias opcionales ----------
+    cantidadReferencia: Joi.number().min(0).optional().allow(null)
+        .messages({
+            'number.min': 'cantidadReferencia cannot be negative'
+        }),
+    unidadReferencia: Joi.number().integer().min(1).max(62).optional().allow(null)
+        .messages({
+            'number.min': 'unidadReferencia must be between 1 and 62',
+            'number.max': 'unidadReferencia must be between 1 and 62'
+        }),
+    gradosAlcohol: Joi.number().min(0).max(100).optional().allow(null)
+        .messages({
+            'number.min': 'gradosAlcohol cannot be negative',
+            'number.max': 'gradosAlcohol cannot exceed 100'
+        }),
+    precioUnitarioReferencia: Joi.number().min(0).optional().allow(null)
+        .messages({
+            'number.min': 'precioUnitarioReferencia cannot be negative'
+        }),
+    fechaElaboracion: Joi.date().iso().optional().allow(null),
+    fechaVencimientoItem: Joi.date().iso().optional().allow(null),
+
+    // ---------- ITBIS ----------
     indicadorFacturacion: Joi.number().integer().valid(0, 1, 2, 3, 4).optional()
         .messages({
             'any.only': 'indicadorFacturacion must be 0 (No Facturable), 1 (18%), 2 (16%), 3 (ITBIS 0%), or 4 (Exento)'
         }),
-
     itbisRate: Joi.number().min(0).max(100).default(18)
         .messages({
             'number.min': 'ITBIS rate cannot be negative',
             'number.max': 'ITBIS rate cannot exceed 100'
         }),
+
+    // ---------- Retenciones (41, 47) ----------
     retencion: Joi.object({
         indicador: Joi.number().integer().valid(1, 2).required()
             .messages({
@@ -530,7 +586,7 @@ const updateInvoiceSchema = Joi.object({
                 return helpers.error('any.custom', { message: 'issuedAt cannot be more than 30 days in the past' });
             }
         }
-        
+
         if (value.items) {
             const expectedRates = { 0: 0, 1: 18, 2: 16, 3: 0, 4: 0 };
 

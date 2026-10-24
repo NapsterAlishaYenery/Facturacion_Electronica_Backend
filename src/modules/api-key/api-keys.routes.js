@@ -17,7 +17,7 @@ const {
     readLimiter
 } = require('../../shared/middlewares/rateLimit.middleware');
 
-const { createApiKeySchema } = require('./api-keys.validation');
+const { createApiKeySchema, listAllApiKeysQuerySchema } = require('./api-keys.validation');
 const apiKeysController = require('./api-keys.controller');
 
 // ============================================================
@@ -59,6 +59,25 @@ router.patch('/:id/revoke',
     roleMiddleware('company_admin'),
     writeLimiter,
     apiKeysController.revokeApiKey
+);
+
+// DELETE /api/api-keys/:id — Eliminar una key revocada
+router.delete('/:id',
+    authMiddleware,
+    roleMiddleware('company_admin'),
+    writeLimiter,
+    apiKeysController.deleteApiKey
+);
+
+//RUTAS ADMIN
+
+// GET /api/api-keys — Listar TODAS (admin)
+router.get('/all',
+    authMiddleware,
+    roleMiddleware('admin'),
+    readLimiter,
+    validate(listAllApiKeysQuerySchema, 'query'),
+    apiKeysController.listAllApiKeys
 );
 
 module.exports = router;

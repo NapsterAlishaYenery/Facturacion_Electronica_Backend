@@ -188,6 +188,50 @@ function buildUsageBlock(used, limit) {
 }
 
 // ------------------------------------------------------------
+// Construye el bloque de uso de secuencias DESGLOSADO POR TIPO
+// El plan.maxSequences se interpreta como "máximo por tipo"
+// (activas + inactivas cuentan; ver lógica en sequences.service.js)
+// ------------------------------------------------------------
+async function buildSequencesUsageByType(companyId, limit, transaction = null) {
+    // 1. Traer TODAS las secuencias de la empresa (activas + inactivas)
+    const { Sequence } = require('../../../models');
+    const sequences = await Sequence.findAll({
+        where: { companyId, isActive: true },
+        attributes: ['type', 'isActive'],
+        transaction
+    });
+
+    // 2. Contar por tipo
+    const counts = {};
+    for (const seq of sequences) {
+        if (!counts[seq.type]) counts[seq.type] = 0;
+        counts[seq.type]++;
+    }
+
+    // 3. Si es ilimitado, devolver con unlimited
+    if (limit === -1) {
+        const byType = {};
+        for (const type of Object.keys(counts)) {
+            byType[type] = { used: counts[type], remaining: null, percentUsed: null };
+        }
+        return { limit, unlimited: true, byType };
+    }
+
+    // 4. Construir el desglose
+    const byType = {};
+    // Recorremos TODOS los tipos válidos (para que el frontend sepa qué tipos existen aunque el cliente no tenga ninguno)
+    const ALL_TYPES = ['31', '32', '33', '34', '41', '43', '44', '45', '46', '47'];
+    for (const type of ALL_TYPES) {
+        const used = counts[type] || 0;
+        const remaining = Math.max(0, limit - used);
+        const percentUsed = limit > 0 ? Math.round((used / limit) * 100) : 0;
+        byType[type] = { used, remaining, percentUsed };
+    }
+
+    return { limit, unlimited: false, byType };
+}
+
+// ------------------------------------------------------------
 // Obtener mi suscripción actual (company_admin)
 // ------------------------------------------------------------
 async function getMySubscription(companyId) {
@@ -235,9 +279,6 @@ async function getMySubscription(companyId) {
     const usersCount = await User.count({
         where: { companyId, isActive: true }
     });
-    const sequencesCount = await Sequence.count({
-        where: { companyId, isActive: true }
-    });
 
     // 4. Calcular vencimiento y días restantes
     const expiresAt = getEffectiveExpiry(subscription);
@@ -277,7 +318,7 @@ async function getMySubscription(companyId) {
         usage: {
             invoices: buildUsageBlock(usedInvoices, plan?.invoicesPerMonth ?? 0),
             users: buildUsageBlock(usersCount, plan?.maxUsers ?? 0),
-            sequences: buildUsageBlock(sequencesCount, plan?.maxSequences ?? 0)
+            sequences: await buildSequencesUsageByType(companyId, plan?.maxSequences ?? 0)
         },
         isActive,
         expiresAt,
@@ -476,29 +517,18 @@ async function changePlan(companyId, newPlanId, reqUser, reqInfo = {}) {
 // ------------------------------------------------------------
 async function cancelMySubscription(companyId, reqUser, reqInfo = {}) {
     if (!companyId) {
-        throw new AppError(
-            'You do not belong to any company',
-            400,
-            'NO_COMPANY_ASSIGNED'
-        );
+        throw new AppError('You do not belong to any company', 400, 'NO_COMPANY_ASSIGNED');
     }
 
-    // 1. Buscar suscripción activa (con relaciones para notificar)
     const subscription = await Subscription.findOne({
-        where: {
-            companyId,
-            status: ['trial', 'active', 'past_due']
-        },
+        where: { companyId, status: ['trial', 'active', 'past_due'] },
         include: [
             { model: Plan, as: 'plan' },
             {
-                model: Company,
-                as: 'company',
-                required: false,
+                model: Company, as: 'company', required: false,
                 attributes: ['id', 'name', 'rnc', 'email'],
                 include: [{
-                    model: User,
-                    as: 'users',
+                    model: User, as: 'users',
                     where: { role: 'company_admin', isActive: true },
                     required: false,
                     attributes: ['id', 'email', 'firstName']
@@ -509,77 +539,50 @@ async function cancelMySubscription(companyId, reqUser, reqInfo = {}) {
     });
 
     if (!subscription) {
-        throw new AppError(
-            'No active subscription found to cancel',
-            404,
-            'NO_ACTIVE_SUBSCRIPTION'
-        );
+        throw new AppError('No active subscription found to cancel', 404, 'NO_ACTIVE_SUBSCRIPTION');
     }
 
-    // 2. Guardar estado anterior
+    // No se puede cancelar el plan Free (ya es el mínimo)
+    if (subscription.plan?.code === 'free') {
+        throw new AppError('Cannot cancel the free plan', 400, 'CANNOT_CANCEL_FREE');
+    }
+
     const before = {
         status: subscription.status,
         cancelledAt: subscription.cancelledAt,
         endsAt: subscription.endsAt
     };
 
-    // 3. Calcular endsAt (fin de período actual)
     const now = new Date();
-    const accessUntil = subscription.currentPeriodEnd ||
-        subscription.trialEndsAt ||
-        now;
+    const accessUntil = subscription.currentPeriodEnd || subscription.trialEndsAt || now;
 
-    // 4. Actualizar
     await subscription.update({
         status: 'cancelled',
         cancelledAt: now,
         endsAt: accessUntil
     });
 
-    // 5. Audit log
     try {
         await AuditLog.create({
-            companyId,
-            userId: reqUser?.id ?? null,
+            companyId, userId: reqUser?.id ?? null,
             action: 'subscription.cancelled',
-            entity: 'subscription',
-            entityId: subscription.id,
+            entity: 'subscription', entityId: subscription.id,
             before,
-            after: {
-                status: 'cancelled',
-                cancelledAt: now,
-                endsAt: accessUntil
-            },
-            ip: reqInfo.ip || null,
-            userAgent: reqInfo.userAgent || null
+            after: { status: 'cancelled', cancelledAt: now, endsAt: accessUntil },
+            ip: reqInfo.ip || null, userAgent: reqInfo.userAgent || null
         });
-    } catch (err) {
-        // Ignorar errores de audit
-    }
+    } catch (err) { /* ignorar */ }
 
-
-    // 6. Calcular días restantes
     const daysLeft = accessUntil
         ? Math.max(0, Math.floor((new Date(accessUntil).getTime() - now.getTime()) / (24 * 60 * 60 * 1000)))
         : 0;
 
-    // 7. Notificar a todos los admins (fire-and-forget)
     notifySubscriptionCancelled({
-        subscription,
-        plan: subscription.plan,
-        cancelledAt: now,
-        accessUntil,
-        daysLeft
-    }).catch(err => {
-        console.error('[subscriptions.cancelMySubscription] Notify failed:', err.message);
-    });
+        subscription, plan: subscription.plan,
+        cancelledAt: now, accessUntil, daysLeft
+    }).catch(err => console.error('[cancel] notify failed:', err.message));
 
-    return {
-        subscription,
-        plan: subscription.plan,
-        accessUntil,
-        daysLeft
-    };
+    return { subscription, plan: subscription.plan, accessUntil, daysLeft };
 }
 
 // ------------------------------------------------------------
@@ -595,26 +598,18 @@ async function cancelMySubscription(companyId, reqUser, reqInfo = {}) {
 // ------------------------------------------------------------
 async function reactivateMySubscription(companyId, reqUser, reqInfo = {}) {
     if (!companyId) {
-        throw new AppError(
-            'You do not belong to any company',
-            400,
-            'NO_COMPANY_ASSIGNED'
-        );
+        throw new AppError('You do not belong to any company', 400, 'NO_COMPANY_ASSIGNED');
     }
 
-    // 1. Buscar la última suscripción (cualquier estado)
     const subscription = await Subscription.findOne({
         where: { companyId },
         include: [
             { model: Plan, as: 'plan' },
             {
-                model: Company,
-                as: 'company',
-                required: false,
+                model: Company, as: 'company', required: false,
                 attributes: ['id', 'name', 'rnc', 'email'],
                 include: [{
-                    model: User,
-                    as: 'users',
+                    model: User, as: 'users',
                     where: { role: 'company_admin', isActive: true },
                     required: false,
                     attributes: ['id', 'email', 'firstName']
@@ -625,117 +620,70 @@ async function reactivateMySubscription(companyId, reqUser, reqInfo = {}) {
     });
 
     if (!subscription) {
+        throw new AppError('No subscription found', 404, 'NO_SUBSCRIPTION_FOUND');
+    }
+
+    if (subscription.status !== 'cancelled') {
         throw new AppError(
-            'No subscription found for this company',
-            404,
-            'NO_SUBSCRIPTION_FOUND'
+            `Cannot reactivate a subscription with status '${subscription.status}'.`,
+            400, 'NOT_CANCELLED'
         );
     }
 
-    // 2. Solo se reactiva si está cancelled o expired
-    if (subscription.status !== 'cancelled' && subscription.status !== 'expired') {
-        throw new AppError(
-            `Cannot reactivate a subscription with status '${subscription.status}'. Only cancelled or expired subscriptions can be reactivated.`,
-            400,
-            'NOT_CANCELLED'
-        );
-    }
-
-    // 3. Plan actual debe seguir activo (si fue descontinuado, no se puede reactivar)
     if (!subscription.plan || !subscription.plan.isActive) {
         throw new AppError(
             'The current plan is no longer available. Please choose a new plan.',
-            409,
-            'PLAN_INACTIVE'
+            409, 'PLAN_INACTIVE'
         );
     }
 
-    const plan = subscription.plan;
+    // 🔥 Validar que el período no terminó
+    const now = new Date();
+    const currentPeriodEnd = subscription.currentPeriodEnd || subscription.endsAt;
+    if (currentPeriodEnd && new Date(currentPeriodEnd) < now) {
+        throw new AppError(
+            'The current period has already ended. Please choose a new plan.',
+            400, 'PERIOD_ENDED'
+        );
+    }
+
+    // 🔥 Validar que no hay pagos pendientes
+    const pendingCount = await SubscriptionPayment.count({
+        where: { subscriptionId: subscription.id, status: 'pending' }
+    });
+
+    if (pendingCount > 0) {
+        throw new AppError(
+            `You have ${pendingCount} pending payment(s). Please contact the administrator to complete the payment before reactivating.`,
+            402, 'PENDING_PAYMENTS'
+        );
+    }
+
+    // Reactivar SIN nuevo pago, SIN tocar el período, SIN resetear facturas
     const oldStatus = subscription.status;
 
-    // 4. Calcular nuevo período (30 días desde ahora)
-    const now = new Date();
-    const periodEnd = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-
-    // 5. Transacción: actualizar sub + crear pago + audit
-    const result = await sequelize.transaction(async (t) => {
-        // 5.1. Reactivar suscripción
-        await subscription.update({
-            status: 'active',
-            cancelledAt: null,
-            endsAt: null,
-            currentPeriodStart: now,
-            currentPeriodEnd: periodEnd,
-            invoicesUsedThisMonth: 0
-        }, { transaction: t });
-
-        // 5.2. Crear pago pendiente por el plan actual
-        const payment = await SubscriptionPayment.create({
-            subscriptionId: subscription.id,
-            companyId,
-            amount: plan.priceDop,
-            currency: 'DOP',
-            paymentMethod: null,
-            reference: null,
-            periodStart: now,
-            periodEnd,
-            status: 'pending',
-            paidAt: null,
-            notes: `Reactivation: ${plan.code}`
-        }, { transaction: t });
-
-        // 5.3. Audit log
-        try {
-            await AuditLog.create({
-                companyId,
-                userId: reqUser?.id ?? null,
-                action: 'subscription.reactivated',
-                entity: 'subscription',
-                entityId: subscription.id,
-                before: {
-                    status: oldStatus,
-                    cancelledAt: subscription.cancelledAt,
-                    endsAt: subscription.endsAt
-                },
-                after: {
-                    status: 'active',
-                    planId: plan.id,
-                    planCode: plan.code,
-                    paymentId: payment.id,
-                    amount: payment.amount,
-                    periodStart: now,
-                    periodEnd
-                },
-                ip: reqInfo.ip || null,
-                userAgent: reqInfo.userAgent || null
-            }, { transaction: t });
-        } catch (err) {
-            // Ignorar errores de audit
-        }
-
-        return { payment };
+    await subscription.update({
+        status: 'active',
+        cancelledAt: null,
+        endsAt: null
     });
 
-    // 6. Recargar subscription con plan
-    const updatedSubscription = await Subscription.findByPk(subscription.id, {
-        include: [{ model: Plan, as: 'plan' }]
-    });
-
-    // 7. Notificar (fire-and-forget, reusa notifyPlanChanged)
-    notifyPlanChanged({
-        subscription,
-        oldPlan: plan,          // mismo plan
-        newPlan: plan,          // mismo plan (para el mensaje es "renovación")
-        periodStart: now,
-        periodEnd
-    }).catch(err => {
-        console.error('[subscriptions.reactivateMySubscription] Notify failed:', err.message);
-    });
+    try {
+        await AuditLog.create({
+            companyId, userId: reqUser?.id ?? null,
+            action: 'subscription.reactivated',
+            entity: 'subscription', entityId: subscription.id,
+            before: { status: oldStatus, cancelledAt: subscription.cancelledAt, endsAt: subscription.endsAt },
+            after: { status: 'active' },
+            ip: reqInfo.ip || null, userAgent: reqInfo.userAgent || null
+        });
+    } catch (err) { /* ignorar */ }
 
     return {
-        subscription: updatedSubscription,
-        plan,
-        payment: result.payment
+        subscription: await Subscription.findByPk(subscription.id, {
+            include: [{ model: Plan, as: 'plan' }]
+        }),
+        plan: subscription.plan
     };
 }
 
@@ -851,9 +799,6 @@ async function getSubscriptionById(subscriptionId) {
     const usersCount = await User.count({
         where: { companyId: subscription.companyId, isActive: true }
     });
-    const sequencesCount = await Sequence.count({
-        where: { companyId: subscription.companyId, isActive: true }
-    });
 
     // 3. Construir bloque de uso
     const plan = subscription.plan;
@@ -862,7 +807,7 @@ async function getSubscriptionById(subscriptionId) {
     const usage = {
         invoices: buildUsageBlock(usedInvoices, plan?.invoicesPerMonth ?? 0),
         users: buildUsageBlock(usersCount, plan?.maxUsers ?? 0),
-        sequences: buildUsageBlock(sequencesCount, plan?.maxSequences ?? 0)
+        sequences: await buildSequencesUsageByType(subscription.companyId, plan?.maxSequences ?? 0)
     };
 
     // 4. Vencimiento y días restantes

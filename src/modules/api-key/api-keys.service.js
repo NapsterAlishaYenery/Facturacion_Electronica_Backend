@@ -131,11 +131,10 @@ async function createApiKey(companyId, data, reqUser, reqInfo = {}) {
     const environment = company.dgiiEnvironment || 'testecf';
     const { secret, keyHash, keyPrefix } = generateSecret(environment);
 
-    // 3. Calcular expiresAt si viene expiresInDays
-    let expiresAt = null;
-    if (data.expiresInDays) {
-        expiresAt = new Date(Date.now() + data.expiresInDays * 24 * 60 * 60 * 1000);
-    }
+    // 3. Calcular expiresAt: 5 años desde ahora (fijo)
+    //    Si en el futuro se quiere configurar por empresa, se cambia aquí.
+    const FIVE_YEARS_MS = 5 * 365 * 24 * 60 * 60 * 1000;
+    const expiresAt = new Date(Date.now() + FIVE_YEARS_MS);
 
     // 4. Crear en transacción (con check de límite dentro de la tx
     //    para evitar race conditions con requests concurrentes)
@@ -302,10 +301,130 @@ async function revokeApiKey(companyId, apiKeyId, reqUser, reqInfo = {}) {
     };
 }
 
+async function deleteApiKey(companyId, apiKeyId, reqUser, reqInfo = {}) {
+    if (!companyId) {
+        throw new AppError('You do not belong to any company', 400, 'NO_COMPANY_ASSIGNED');
+    }
+
+    const apiKey = await ApiKey.findOne({
+        where: { id: apiKeyId, companyId }
+    });
+
+    if (!apiKey) {
+        throw new AppError('API key not found', 404, 'API_KEY_NOT_FOUND');
+    }
+
+    if (apiKey.isActive) {
+        throw new AppError(
+            'Cannot delete an active API key. Revoke it first.',
+            409,
+            'API_KEY_MUST_BE_REVOKED_FIRST'
+        );
+    }
+
+    // Capturar metadata para audit ANTES de borrar
+    const before = {
+        id: apiKey.id,
+        name: apiKey.name,
+        keyPrefix: apiKey.keyPrefix,
+        environment: apiKey.environment,
+        expiresAt: apiKey.expiresAt,
+        revokedAt: apiKey.revokedAt,
+        createdBy: apiKey.createdBy,
+        createdAt: apiKey.createdAt
+    };
+
+    await sequelize.transaction(async (t) => {
+        await apiKey.destroy({ transaction: t });
+
+        try {
+            await AuditLog.create({
+                companyId,
+                userId: reqUser?.id ?? null,
+                action: 'api_key.deleted',
+                entity: 'api_key',
+                entityId: apiKeyId,
+                before,
+                ip: reqInfo.ip || null,
+                userAgent: reqInfo.userAgent || null
+            }, { transaction: t });
+        } catch (err) {
+            console.error('[api-keys.service] audit log (delete) failed:', err.message);
+        }
+    });
+
+    return { deleted: true, before };
+}
+
+async function listAllApiKeys(filters = {}) {
+    const where = {};
+
+    if (filters.companyId) where.companyId = filters.companyId;
+    if (filters.isActive !== undefined) where.isActive = filters.isActive;
+    if (filters.environment) where.environment = filters.environment;
+
+    // Búsqueda por nombre de key o nombre/rnc de empresa
+    let companyWhere;
+    if (filters.search) {
+        companyWhere = {
+            [Op.or]: [
+                { rnc: { [Op.iLike]: `%${filters.search}%` } },
+                { name: { [Op.iLike]: `%${filters.search}%` } },
+                { tradeName: { [Op.iLike]: `%${filters.search}%` } }
+            ]
+        };
+    }
+
+    const page = Number(filters.page) || 1;
+    const limit = Number(filters.limit) || 50;
+    const offset = (page - 1) * limit;
+
+    const { count, rows } = await ApiKey.findAndCountAll({
+        where,
+        include: [
+            {
+                model: Company,
+                as: 'company',
+                required: !!filters.search,
+                where: companyWhere,
+                attributes: ['id', 'rnc', 'name', 'tradeName', 'isActive']
+            }
+        ],
+        order: [['created_at', 'DESC']],
+        limit,
+        offset,
+        distinct: true
+    });
+
+    const totalPages = Math.ceil(count / limit);
+
+    const items = rows.map((k) => {
+        const json = k.toJSON();
+        json.expired = json.expiresAt
+            ? new Date(json.expiresAt) <= new Date()
+            : false;
+        return json;
+    });
+
+    return {
+        items,
+        pagination: {
+            page,
+            limit,
+            totalItems: count,
+            totalPages,
+            hasNextPage: page < totalPages,
+            hasPrevPage: page > 1
+        }
+    };
+}
+
 module.exports = {
     createApiKey,
     listApiKeys,
     revokeApiKey,
+    deleteApiKey,
+    listAllApiKeys,
     _helpers: {
         generateSecret,
         assertApiAccessAllowed,

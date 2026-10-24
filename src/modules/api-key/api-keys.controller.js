@@ -65,8 +65,45 @@ const revokeApiKey = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// DELETE /api/api-keys/:id
+// ------------------------------------------------------------
+const deleteApiKey = catchAsync(async (req, res) => {
+    const reqInfo = { ip: req.ip, userAgent: req.get('user-agent') };
+
+    await apiKeysService.deleteApiKey(
+        req.user.companyId,
+        req.params.id,
+        req.user,
+        reqInfo
+    );
+
+    res.json({
+        success: true,
+        message: 'API key deleted'
+    });
+});
+
+// ------------------------------------------------------------
+// GET /api/api-keys/all (admin)
+// ------------------------------------------------------------
+const listAllApiKeys = catchAsync(async (req, res) => {
+    const result = await apiKeysService.listAllApiKeys(req.validated.query);
+
+    res.json({
+        success: true,
+        message: 'OK',
+        data: {
+            apiKeys: result.items,
+            pagination: result.pagination
+        }
+    });
+});
+
 module.exports = {
     createApiKey,
     listApiKeys,
-    revokeApiKey
+    revokeApiKey,
+    deleteApiKey,
+    listAllApiKeys
 };

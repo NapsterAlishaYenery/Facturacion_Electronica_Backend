@@ -447,34 +447,121 @@ async function convertExpiredTrialsToFree(now) {
 }
 
 // ============================================================
+// FASE 4 — Convertir cancelled expirados al plan free
+// Si un cliente canceló y el período terminó (currentPeriodEnd <= now),
+// se baja automáticamente al plan free con status active.
+// ============================================================
+async function convertExpiredCancelledToFree(now) {
+    const freePlan = await Plan.findOne({
+        where: { code: 'free', isActive: true }
+    });
+
+    if (!freePlan) {
+        logger.warn(`[JOB:${JOB_NAME}] plan 'free' no encontrado, saltando conversión`);
+        return { converted: 0, errors: 0 };
+    }
+
+    const expiredCancelled = await Subscription.findAll({
+        where: {
+            status: 'cancelled',
+            currentPeriodEnd: { [Op.ne]: null, [Op.lte]: now }
+        },
+        include: [
+            { model: Plan, as: 'plan', required: false },
+            {
+                model: Company,
+                as: 'company',
+                required: true,
+                attributes: ['id', 'name', 'rnc', 'email'],
+                include: [{
+                    model: User,
+                    as: 'users',
+                    where: { role: 'company_admin', isActive: true },
+                    required: false,
+                    attributes: ['id', 'email', 'firstName']
+                }]
+            }
+        ]
+    });
+
+    const details = { converted: 0, errors: 0 };
+
+    for (const sub of expiredCancelled) {
+        try {
+            await sub.update({
+                planId: freePlan.id,
+                status: 'active',
+                cancelledAt: null,
+                endsAt: null,
+                currentPeriodStart: now,
+                currentPeriodEnd: null,
+                invoicesUsedThisMonth: 0
+            });
+
+            details.converted++;
+
+            await AuditLog.create({
+                companyId: sub.companyId,
+                userId: null,
+                action: 'subscription.cancelled_converted_to_free',
+                entity: 'subscription',
+                entityId: sub.id,
+                before: {
+                    planCode: sub.plan?.code || null,
+                    status: 'cancelled'
+                },
+                after: {
+                    planCode: 'free',
+                    status: 'active'
+                },
+                ip: null,
+                userAgent: null
+            });
+
+            logger.info(
+                `[JOB:${JOB_NAME}] cancelled convertido a free`,
+                { subscriptionId: sub.id, companyId: sub.companyId }
+            );
+
+        } catch (err) {
+            logger.error(
+                `[JOB:${JOB_NAME}] conversión cancelled→free falló`,
+                { subscriptionId: sub.id, error: err.message }
+            );
+            details.errors++;
+        }
+    }
+
+    return details;
+}
+
+// ============================================================
 // Lógica principal
 // ============================================================
 async function runSubscriptionLifecycle() {
     const now = new Date();
 
-    // FASE 1 — Notificar antes de vencer
     const expiring = await notifyExpiringSoon(now);
-
-    // FASE 2 — Renovar períodos vencidos (sin bloquear)
     const renewals = await renewExpiredPeriods(now);
-
-    // FASE 3 — Convertir trials expirados a plan free
-    const conversions = await convertExpiredTrialsToFree(now);
+    const trialConversions = await convertExpiredTrialsToFree(now);
+    const cancelledConversions = await convertExpiredCancelledToFree(now);
 
     const totalAffected =
         expiring.affected +
         renewals.renewed +
-        conversions.converted;
+        trialConversions.converted +
+        cancelledConversions.converted;
 
-    //  Audit
+    // Audit
     if (totalAffected > 0) {
         await recordJobAudit(JOB_NAME, totalAffected, {
             entity: 'subscription',
             expiringNotified: expiring.affected,
             renewed: renewals.renewed,
             paymentsCreated: renewals.paymentsCreated,
-            trialsConverted: conversions.converted,
-            errors: renewals.errors
+            trialsConverted: trialConversions.converted,
+            cancelledConverted: cancelledConversions.converted,
+            errors: renewals.errors + trialConversions.errors + cancelledConversions.errors
         });
     }
 
@@ -484,8 +571,9 @@ async function runSubscriptionLifecycle() {
         notifiedEmails: expiring.notified.length,
         renewed: renewals.renewed,
         paymentsCreated: renewals.paymentsCreated,
-        trialsConverted: conversions.converted,
-        errors: renewals.errors
+        trialsConverted: trialConversions.converted,
+        cancelledConverted: cancelledConversions.converted,
+        errors: renewals.errors + trialConversions.errors + cancelledConversions.errors
     });
 
     return {
@@ -495,8 +583,9 @@ async function runSubscriptionLifecycle() {
         notifiedEmails: expiring.notified.length,
         renewed: renewals.renewed,
         paymentsCreated: renewals.paymentsCreated,
-        trialsConverted: conversions.converted,
-        errors: renewals.errors
+        trialsConverted: trialConversions.converted,
+        cancelledConverted: cancelledConversions.converted,
+        errors: renewals.errors + trialConversions.errors + cancelledConversions.errors
     };
 }
 

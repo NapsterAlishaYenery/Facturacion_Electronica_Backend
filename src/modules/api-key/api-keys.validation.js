@@ -15,15 +15,22 @@ const createApiKeySchema = Joi.object({
             'string.min': 'Name must be at least 2 characters',
             'string.max': 'Name cannot exceed 100 characters',
             'any.required': 'Name is required'
-        }),
-
-    // Opcional: días de validez. Si viene, expiresAt = now + days.
-    // Si no viene, no expira.
-    expiresInDays: Joi.number().integer().min(1).max(3650).optional()
-        .messages({
-            'number.min': 'expiresInDays must be at least 1',
-            'number.max': 'expiresInDays cannot exceed 3650 (10 years)'
         })
 });
 
-module.exports = { createApiKeySchema };
+// ------------------------------------------------------------
+// Schema: listar TODAS las keys (admin)
+// ------------------------------------------------------------
+const listAllApiKeysQuerySchema = Joi.object({
+    companyId: Joi.string().uuid().optional(),
+    isActive: Joi.boolean()
+        .truthy('true').falsy('false')
+        .optional(),
+    environment: Joi.string().valid('testecf', 'production').optional(),
+    search: Joi.string().max(100).optional().allow(''),
+    page: Joi.number().integer().min(1).default(1),
+    limit: Joi.number().integer().min(1).max(100).default(50)
+});
+
+
+module.exports = { createApiKeySchema, listAllApiKeysQuerySchema  };

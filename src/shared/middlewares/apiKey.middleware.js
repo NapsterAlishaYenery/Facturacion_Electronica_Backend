@@ -8,10 +8,12 @@
 //      a. Hash SHA-256 de la key recibida
 //      b. Buscar en api_keys (isActive: true)
 //      c. Verificar expiresAt (si existe y ya pasó → 401 KEY_EXPIRED)
-//      d. Buscar company_admin activo de la empresa dueña
-//      e. Actualizar lastUsedAt (fire-and-forget)
-//      f. Adjuntar req.user (con isApiKey: true) + req.apiKey
-//      g. next()
+//      d. 🔥 Verificar que la empresa siga activa y con api_access en su plan
+//         (si la key se creó en Enterprise pero bajó de plan → 403)
+//      e. Buscar company_admin activo de la empresa dueña
+//      f. Actualizar lastUsedAt (fire-and-forget)
+//      g. Adjuntar req.user (con isApiKey: true) + req.apiKey
+//      h. next()
 //
 // Seguridad:
 //   - El secret nunca se loguea completo. Solo el prefix.
@@ -19,7 +21,14 @@
 // ============================================================
 
 const crypto = require('crypto');
-const { ApiKey, User } = require('../../models');
+const { Op } = require('sequelize');
+const {
+    ApiKey,
+    User,
+    Company,
+    Subscription,
+    Plan
+} = require('../../models');
 
 async function apiKeyMiddleware(req, res, next) {
     try {
@@ -55,7 +64,57 @@ async function apiKeyMiddleware(req, res, next) {
             });
         }
 
-        // 4. Buscar el company_admin activo de la empresa dueña
+        // 4. 🔥 Verificar que la empresa siga activa y con api_access en su plan
+        //    (si la key se creó en Enterprise pero luego bajó de plan, debe rechazarse)
+        const company = await Company.findByPk(apiKey.companyId, {
+            attributes: ['id', 'isActive', 'isSystemOwner']
+        });
+
+        if (!company) {
+            return res.status(401).json({
+                success: false,
+                error: {
+                    code: 'API_KEY_COMPANY_NOT_FOUND',
+                    message: 'The company of this API key no longer exists'
+                }
+            });
+        }
+
+        if (!company.isActive) {
+            return res.status(403).json({
+                success: false,
+                error: {
+                    code: 'API_KEY_COMPANY_INACTIVE',
+                    message: 'The company of this API key is inactive'
+                }
+            });
+        }
+
+        // System owner tiene bypass (mismo criterio que assertApiAccessAllowed)
+        if (!company.isSystemOwner) {
+            const subscription = await Subscription.findOne({
+                where: {
+                    companyId: apiKey.companyId,
+                    status: { [Op.in]: ['trial', 'active', 'past_due'] }
+                },
+                include: [{ model: Plan, as: 'plan', required: true }],
+                order: [['createdAt', 'DESC']]
+            });
+
+            const apiAccessEnabled = subscription?.plan?.features?.api_access === true;
+
+            if (!apiAccessEnabled) {
+                return res.status(403).json({
+                    success: false,
+                    error: {
+                        code: 'API_ACCESS_NOT_IN_PLAN',
+                        message: 'The current plan does not include API access. Please upgrade to enterprise.'
+                    }
+                });
+            }
+        }
+
+        // 5. Buscar el company_admin activo de la empresa dueña
         const user = await User.findOne({
             where: {
                 companyId: apiKey.companyId,
@@ -75,10 +134,10 @@ async function apiKeyMiddleware(req, res, next) {
             });
         }
 
-        // 5. Actualizar lastUsedAt (fire-and-forget, no bloquea)
-        apiKey.update({ lastUsedAt: new Date() }).catch(() => {});
+        // 6. Actualizar lastUsedAt (fire-and-forget, no bloquea)
+        apiKey.update({ lastUsedAt: new Date() }).catch(() => { });
 
-        // 6. Adjuntar user + apiKey al request
+        // 7. Adjuntar user + apiKey al request
         //    isApiKey: true es la marca que usamos en read/writeLimiter
         //    para saltar el límite global (el apiKeyLimiter ya aplicó).
         user.isApiKey = true;
