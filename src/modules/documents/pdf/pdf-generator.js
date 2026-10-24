@@ -143,6 +143,37 @@ function normalizeFormat(format) {
     return isValidFormat(f) ? f : DEFAULT_FORMAT;
 }
 
+
+// ------------------------------------------------------------
+// Mapa de Unidades de Medida DGII (código → label legible)
+// Los códigos coinciden con el XSD oficial (1-62).
+// Se usa solo para mostrar en el PDF, no para el XML.
+// ------------------------------------------------------------
+const UNIDADES_DGII = {
+    1: 'Barril', 2: 'Bolsa', 3: 'Bote', 4: 'Bulto',
+    5: 'Botella', 6: 'Caja', 7: 'Cajetilla', 8: 'cm',
+    9: 'Cilindro', 10: 'Conjunto', 11: 'Contenedor', 12: 'Día',
+    13: 'Docena', 14: 'Fardo', 15: 'Galón', 16: 'Grado',
+    17: 'Gramo', 18: 'Granel', 19: 'Hora', 20: 'Huacal',
+    21: 'kg', 22: 'kWh', 23: 'lb', 24: 'Litro',
+    25: 'Lote', 26: 'm', 27: 'm²', 28: 'm³',
+    29: 'MMBTU', 30: 'Minuto', 31: 'Paquete', 32: 'Par',
+    33: 'Pie', 34: 'Pieza', 35: 'Rollo', 36: 'Sobre',
+    37: 'Segundo', 38: 'Tanque', 39: 'Tonelada', 40: 'Tubo',
+    41: 'Yarda', 42: 'Yarda²', 43: 'Unidad', 44: 'Elemento',
+    45: 'Millar', 46: 'Saco', 47: 'Lata', 48: 'Display',
+    49: 'Bidón', 50: 'Ración', 51: 'Quintal', 52: 'TRB',
+    53: 'Pie²', 54: 'Pasajero', 55: 'Pulgada', 56: 'Parqueo',
+    57: 'Bandeja', 58: 'Hectárea', 59: 'ml', 60: 'mg',
+    61: 'oz', 62: 'oz troy'
+};
+
+function getUnidadMedidaLabel(codigo) {
+    if (codigo === null || codigo === undefined) return '';
+    const n = Number(codigo);
+    return UNIDADES_DGII[n] || '';
+}
+
 // ------------------------------------------------------------
 // Construye el payload para el template
 // ------------------------------------------------------------
@@ -199,19 +230,48 @@ async function buildTemplateData(invoice, lines, company) {
 
     const formattedLines = lines.map(l => {
         const line = typeof l.toJSON === 'function' ? l.toJSON() : l;
+
+        // NombreItem con fallback a description (datos históricos)
+        const itemName = line.itemName || line.description || 'Item';
+        const description = line.description || null;
+        // Mostrar description como subtítulo solo si es distinta del nombre
+        const hasDescription = description && description !== itemName;
+
+        const recargo = Number(line.recargo || 0);
+
         return {
             lineNumber: line.lineNumber,
-            itemCode: line.itemCode,
-            description: line.description,
+            itemCode: line.itemCode || null,
+
+            // Identificación
+            itemName,
+            description: hasDescription ? description : null,
+            hasDescription,
+
+            // Cantidad + unidad
             quantity: Number(line.quantity).toFixed(2),
+            unidadMedida: line.unidadMedida || null,
+            unidadMedidaLabel: getUnidadMedidaLabel(line.unidadMedida),
+
+            // Precios
             unitPrice: Number(line.unitPrice).toFixed(2),
             discount: Number(line.discount || 0).toFixed(2),
             hasDiscount: Number(line.discount) > 0,
+            recargo: recargo.toFixed(2),
+            hasRecargo: recargo > 0,
+
+            // ITBIS
             itbisRate: Number(line.itbisRate),
             itbisAmount: Number(line.itbisAmount).toFixed(2),
             total: Number(line.total).toFixed(2)
         };
     });
+
+    // Suma total de recargos (para el desglose de totales)
+    const totalRecargos = lines.reduce((sum, l) => {
+        const line = typeof l.toJSON === 'function' ? l.toJSON() : l;
+        return sum + Number(line.recargo || 0);
+    }, 0);
 
     // Extraer el logo invoice (si existe). El include en getMyInvoicePDF
     // ya filtró por purpose: 'invoice' con required: false, así que:
@@ -290,6 +350,10 @@ async function buildTemplateData(invoice, lines, company) {
         totalItbisRetenido: invoice.totalItbisRetenido ? Number(invoice.totalItbisRetenido).toFixed(2) : null,
         totalIsrRetencion: invoice.totalIsrRetencion ? Number(invoice.totalIsrRetencion).toFixed(2) : null,
         total: Number(invoice.total).toFixed(2),
+
+        // 🔥 NUEVO (Step D2): suma de recargos para el desglose
+        totalRecargos: totalRecargos > 0 ? totalRecargos.toFixed(2) : null,
+        hasTotalRecargos: totalRecargos > 0,
 
         qrDataUrl,
         qrUrl,
