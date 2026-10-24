@@ -103,17 +103,59 @@ function buildInvoiceDataForXML(invoice, lines, company, sequence = null) {
         // --- Líneas ---
         lines: lines.map(l => {
             const line = typeof l.toJSON === 'function' ? l.toJSON() : l;
+
+            // NombreItem: itemName con fallback a description (defensa para
+            // datos históricos anteriores al refactor de InvoiceLine)
+            const itemName = line.itemName || line.description || 'Item';
+
+            // DescripcionItem: opcional. Solo se usa si es distinta del itemName
+            // (buildItems ya maneja la deduplicación, aquí solo lo pasamos crudo).
+            const description = line.description || null;
+
             return {
+                // --- Identificación ---
                 lineNumber: line.lineNumber,
                 itemCode: line.itemCode || null,
-                description: line.description,
+                itemName,
+                description,
+
+                // --- Naturaleza DGII ---
+                indicadorBienoServicio: Number(line.indicadorBienoServicio ?? 1),
+                unidadMedida: line.unidadMedida !== undefined && line.unidadMedida !== null
+                    ? Number(line.unidadMedida)
+                    : null,
+
+                // --- Cantidades y precios ---
                 quantity: Number(line.quantity),
                 unitPrice: Number(line.unitPrice),
                 discount: Number(line.discount || 0),
+                recargo: Number(line.recargo || 0),
+
+                // --- Referencias opcionales (licores, alimentos) ---
+                cantidadReferencia: line.cantidadReferencia !== undefined && line.cantidadReferencia !== null
+                    ? Number(line.cantidadReferencia)
+                    : null,
+                unidadReferencia: line.unidadReferencia !== undefined && line.unidadReferencia !== null
+                    ? Number(line.unidadReferencia)
+                    : null,
+                gradosAlcohol: line.gradosAlcohol !== undefined && line.gradosAlcohol !== null
+                    ? Number(line.gradosAlcohol)
+                    : null,
+                precioUnitarioReferencia: line.precioUnitarioReferencia !== undefined && line.precioUnitarioReferencia !== null
+                    ? Number(line.precioUnitarioReferencia)
+                    : null,
+
+                // --- Fechas (alimentos/medicinas) ---
+                fechaElaboracion: line.fechaElaboracion || null,
+                fechaVencimientoItem: line.fechaVencimientoItem || null,
+
+                // --- ITBIS ---
                 itbisRate: Number(line.itbisRate),
                 itbisAmount: Number(line.itbisAmount),
-                indicadorFacturacion: Number(line.indicadorFacturacion), 
+                indicadorFacturacion: Number(line.indicadorFacturacion),
                 total: Number(line.total),
+
+                // --- Retenciones (41, 47) ---
                 retencion: line.retencionIndicador ? {
                     indicador: line.retencionIndicador,
                     montoItbisRetenido: Number(line.montoItbisRetenido || 0),
