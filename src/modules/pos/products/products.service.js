@@ -94,6 +94,10 @@ async function listMyProducts(companyId, filters = {}) {
         where.isActive = filters.isActive;
     }
 
+    if (filters.indicadorBienoServicio !== undefined) {
+        where.indicadorBienoServicio = filters.indicadorBienoServicio;
+    }
+
     if (filters.search) {
         const term = `%${filters.search}%`;
         where[Op.or] = [
@@ -187,7 +191,17 @@ async function createMyProduct(companyId, data, reqUser, reqInfo = {}) {
         price: data.price,
         taxType: data.taxType,
         itemCode: data.itemCode || null,
-        isActive: data.isActive !== undefined ? data.isActive : true
+        isActive: data.isActive !== undefined ? data.isActive : true,
+
+        // Campos DGII nuevos
+        indicadorBienoServicio: data.indicadorBienoServicio,
+        unidadMedida: data.unidadMedida ?? null,
+        gradosAlcohol: data.gradosAlcohol ?? null,
+        fechaElaboracion: data.fechaElaboracion ?? null,
+        fechaVencimientoItem: data.fechaVencimientoItem ?? null,
+        cantidadReferencia: data.cantidadReferencia ?? null,
+        unidadReferencia: data.unidadReferencia ?? null,
+        precioUnitarioReferencia: data.precioUnitarioReferencia ?? null
     });
 
     // 4. Audit
@@ -201,7 +215,11 @@ async function createMyProduct(companyId, data, reqUser, reqInfo = {}) {
             price: Number(product.price),
             taxType: product.taxType,
             itemCode: product.itemCode || null,
-            isActive: product.isActive
+            isActive: product.isActive,
+            // Campos DGII nuevos para trazabilidad
+            indicadorBienoServicio: product.indicadorBienoServicio,
+            unidadMedida: product.unidadMedida,
+            gradosAlcohol: product.gradosAlcohol !== null ? Number(product.gradosAlcohol) : null
         },
         reqInfo
     });
@@ -237,14 +255,62 @@ async function updateMyProduct(companyId, productId, updates, reqUser, reqInfo =
         await assertItemCodeAvailable(companyId, updates.itemCode || null, productId);
     }
 
-    // 3. Guardar estado anterior para audit (solo los editables)
+    // 2.5. 🔥 Validar coherencia del ESTADO FINAL (body + BD)
+    //      Joi no puede validar Bien↔unidadMedida en updates parciales
+    //      porque no conoce el estado actual en BD. Aquí hacemos el merge.
+    const finalIndicador = updates.indicadorBienoServicio !== undefined
+        ? updates.indicadorBienoServicio
+        : product.indicadorBienoServicio;
+
+    const finalUnidad = updates.unidadMedida !== undefined
+        ? updates.unidadMedida
+        : product.unidadMedida;
+
+    // (a) Bien requiere unidadMedida en el estado final
+    if (finalIndicador === 1
+        && (finalUnidad === null || finalUnidad === undefined)) {
+        throw new AppError(
+            'unidadMedida is required when indicadorBienoServicio=1 (Bien). ' +
+            'If you are changing a service to a bien, you must provide unidadMedida.',
+            409,
+            'UNIDAD_MEDIDA_REQUIRED'
+        );
+    }
+
+    // (b) Servicio no permite gradosAlcohol en el estado final
+    const finalGrados = updates.gradosAlcohol !== undefined
+        ? updates.gradosAlcohol
+        : product.gradosAlcohol;
+
+    if (finalIndicador === 2
+        && finalGrados !== null
+        && finalGrados !== undefined) {
+        throw new AppError(
+            'gradosAlcohol only applies to bienes. ' +
+            'If you are changing a bien to a service, set gradosAlcohol to null.',
+            409,
+            'GRADOS_ALCOHOL_NOT_ALLOWED'
+        );
+    }
+
+    // 3. Guardar estado anterior para audit
     const before = {
         name: product.name,
         description: product.description,
         price: Number(product.price),
         taxType: product.taxType,
         itemCode: product.itemCode,
-        isActive: product.isActive
+        isActive: product.isActive,
+        indicadorBienoServicio: product.indicadorBienoServicio,
+        unidadMedida: product.unidadMedida,
+        gradosAlcohol: product.gradosAlcohol !== null ? Number(product.gradosAlcohol) : null,
+        fechaElaboracion: product.fechaElaboracion,
+        fechaVencimientoItem: product.fechaVencimientoItem,
+        cantidadReferencia: product.cantidadReferencia !== null
+            ? Number(product.cantidadReferencia) : null,
+        unidadReferencia: product.unidadReferencia,
+        precioUnitarioReferencia: product.precioUnitarioReferencia !== null
+            ? Number(product.precioUnitarioReferencia) : null
     };
 
     // 4. Construir el updateData con solo los campos presentes
@@ -255,6 +321,32 @@ async function updateMyProduct(companyId, productId, updates, reqUser, reqInfo =
     if (updates.taxType !== undefined) updateData.taxType = updates.taxType;
     if (updates.itemCode !== undefined) updateData.itemCode = updates.itemCode || null;
     if (updates.isActive !== undefined) updateData.isActive = updates.isActive;
+
+    // Campos DGII nuevos
+    if (updates.indicadorBienoServicio !== undefined) {
+        updateData.indicadorBienoServicio = updates.indicadorBienoServicio;
+    }
+    if (updates.unidadMedida !== undefined) {
+        updateData.unidadMedida = updates.unidadMedida ?? null;
+    }
+    if (updates.gradosAlcohol !== undefined) {
+        updateData.gradosAlcohol = updates.gradosAlcohol ?? null;
+    }
+    if (updates.fechaElaboracion !== undefined) {
+        updateData.fechaElaboracion = updates.fechaElaboracion ?? null;
+    }
+    if (updates.fechaVencimientoItem !== undefined) {
+        updateData.fechaVencimientoItem = updates.fechaVencimientoItem ?? null;
+    }
+    if (updates.cantidadReferencia !== undefined) {
+        updateData.cantidadReferencia = updates.cantidadReferencia ?? null;
+    }
+    if (updates.unidadReferencia !== undefined) {
+        updateData.unidadReferencia = updates.unidadReferencia ?? null;
+    }
+    if (updates.precioUnitarioReferencia !== undefined) {
+        updateData.precioUnitarioReferencia = updates.precioUnitarioReferencia ?? null;
+    }
 
     // 5. Update
     await product.update(updateData);
@@ -362,9 +454,16 @@ async function deleteMyProduct(companyId, productId, reqUser, reqInfo = {}) {
             }]
         });
     } else {
-        // Fallback conservador: buscar por descripción exacta
+        // Fallback conservador: buscar por itemName O description.
+        // itemName es el campo principal (obligatorio en InvoiceLine);
+        // description es fallback para datos históricos pre-refactor.
         invoiceUsage = await InvoiceLine.count({
-            where: { description: product.name },
+            where: {
+                [Op.or]: [
+                    { itemName: product.name },
+                    { description: product.name }
+                ]
+            },
             include: [{
                 model: Invoice,
                 as: 'invoice',
