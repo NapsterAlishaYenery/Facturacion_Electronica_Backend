@@ -215,6 +215,7 @@ function calculateLineTotals(item) {
     const quantity = Number(item.quantity);
     const unitPrice = Number(item.unitPrice);
     const discount = Number(item.discount || 0);
+    const recargo = Number(item.recargo || 0);
 
     // Resolver indicadorFacturacion (si viene explícito, se respeta;
     // si no, se infiere de itbisRate con backward-compat).
@@ -231,8 +232,8 @@ function calculateLineTotals(item) {
     // Tasa efectiva según indicador
     const itbisRate = InvoiceLine.getRateFromIndicador(indicador);
 
-    // Base = (cantidad × precio) - descuento
-    const lineBase = (quantity * unitPrice) - discount;
+    // Base = (cantidad × precio) - descuento + recargo
+    const lineBase = (quantity * unitPrice) - discount + recargo;
 
     // ITBIS = base × (tasa / 100)
     const itbisAmount = lineBase * (itbisRate / 100);
@@ -241,16 +242,31 @@ function calculateLineTotals(item) {
     const total = Math.round((lineBase + itbisAmount) * 100) / 100;
 
     return {
+        // Calculados
         quantity,
         unitPrice,
         discount,
+        recargo,
         itbisRate,
         indicadorFacturacion: indicador,
         lineBase: Math.round(lineBase * 100) / 100,
         itbisAmount: Math.round(itbisAmount * 100) / 100,
-        total
+        total,
+
+        // Propagados tal cual desde el payload (nuevos campos DGII)
+        itemName: item.itemName ?? null,
+        description: item.description ?? null,
+        indicadorBienoServicio: item.indicadorBienoServicio ?? 1,
+        unidadMedida: item.unidadMedida ?? null,
+        cantidadReferencia: item.cantidadReferencia ?? null,
+        unidadReferencia: item.unidadReferencia ?? null,
+        gradosAlcohol: item.gradosAlcohol ?? null,
+        precioUnitarioReferencia: item.precioUnitarioReferencia ?? null,
+        fechaElaboracion: item.fechaElaboracion ?? null,
+        fechaVencimientoItem: item.fechaVencimientoItem ?? null
     };
 }
+
 
 // ------------------------------------------------------------
 // Helper: calcular totales de la factura completa
@@ -823,15 +839,30 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
                 invoiceId: invoice.id,
                 lineNumber: line.lineNumber,
                 itemCode: line.itemCode,
+
+                // 🔥 NUEVO (Step 3): campos DGII del <Item>
+                itemName: line.itemName,
                 description: line.description,
+                indicadorBienoServicio: line.indicadorBienoServicio,
+                unidadMedida: line.unidadMedida,
+                recargo: line.recargo,
+                cantidadReferencia: line.cantidadReferencia,
+                unidadReferencia: line.unidadReferencia,
+                gradosAlcohol: line.gradosAlcohol,
+                precioUnitarioReferencia: line.precioUnitarioReferencia,
+                fechaElaboracion: line.fechaElaboracion,
+                fechaVencimientoItem: line.fechaVencimientoItem,
+
+                // Cálculos
                 quantity: line.quantity,
                 unitPrice: line.unitPrice,
                 discount: line.discount,
                 itbisRate: line.itbisRate,
                 itbisAmount: line.itbisAmount,
-                indicadorFacturacion: line.indicadorFacturacion,   // 🔥 NUEVO
+                indicadorFacturacion: line.indicadorFacturacion,
                 total: line.total,
-                // 🔥 NUEVO: retención por línea (41, 47)
+
+                // Retención por línea (41, 47)
                 retencionIndicador: line.retencion?.indicador ?? null,
                 montoItbisRetenido: line.retencion?.montoItbisRetenido ?? null,
                 montoIsrRetenido: line.retencion?.montoIsrRetenido ?? null
@@ -1118,14 +1149,30 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
                     invoiceId: invoice.id,
                     lineNumber: line.lineNumber,
                     itemCode: line.itemCode,
+
+                    // 🔥 NUEVO (Step 3): campos DGII del <Item>
+                    itemName: line.itemName,
                     description: line.description,
+                    indicadorBienoServicio: line.indicadorBienoServicio,
+                    unidadMedida: line.unidadMedida,
+                    recargo: line.recargo,
+                    cantidadReferencia: line.cantidadReferencia,
+                    unidadReferencia: line.unidadReferencia,
+                    gradosAlcohol: line.gradosAlcohol,
+                    precioUnitarioReferencia: line.precioUnitarioReferencia,
+                    fechaElaboracion: line.fechaElaboracion,
+                    fechaVencimientoItem: line.fechaVencimientoItem,
+
+                    // Cálculos
                     quantity: line.quantity,
                     unitPrice: line.unitPrice,
                     discount: line.discount,
                     itbisRate: line.itbisRate,
                     itbisAmount: line.itbisAmount,
-                    indicadorFacturacion: line.indicadorFacturacion,   // 🔥 NUEVO
+                    indicadorFacturacion: line.indicadorFacturacion,
                     total: line.total,
+
+                    // Retención por línea (41, 47)
                     retencionIndicador: line.retencion?.indicador ?? null,
                     montoItbisRetenido: line.retencion?.montoItbisRetenido ?? null,
                     montoIsrRetenido: line.retencion?.montoIsrRetenido ?? null
