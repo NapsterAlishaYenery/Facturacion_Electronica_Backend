@@ -350,12 +350,11 @@ const createInvoiceSchema = Joi.object({
 
         // 2. Por línea: coherencia indicador ↔ itbisRate
         //    + discount no puede superar quantity × unitPrice
+        //    + reglas cruzadas DGII (Step 4)
         for (let i = 0; i < value.items.length; i++) {
             const item = value.items[i];
 
             // 2.a. Coherencia indicador ↔ tasa
-            //      Si indicadorFacturacion viene, DEBE coincidir con itbisRate.
-            //      Si no viene, se infiere desde itbisRate.
             const expectedRates = {
                 0: 0,    // No Facturable
                 1: 18,   // ITBIS 18%
@@ -366,15 +365,13 @@ const createInvoiceSchema = Joi.object({
 
             let indicador = item.indicadorFacturacion;
 
-            // Inferir desde tasa si no viene explícito
             if (indicador === undefined) {
                 if (item.itbisRate === 18) indicador = 1;
                 else if (item.itbisRate === 16) indicador = 2;
-                else if (item.itbisRate === 0) indicador = 4; // default: exento
-                else indicador = 4; // fallback
+                else if (item.itbisRate === 0) indicador = 4;
+                else indicador = 4;
             }
 
-            // Validar coherencia
             const expectedRate = expectedRates[indicador];
             if (item.itbisRate !== undefined && Number(item.itbisRate) !== expectedRate) {
                 return helpers.error('any.custom', {
@@ -382,8 +379,7 @@ const createInvoiceSchema = Joi.object({
                 });
             }
 
-            // 2.b. Regla: indicadorFacturacion=3 (ITBIS3, 0% gravado) SOLO aplica a tipo 46.
-            //      Para el resto de tipos, el 0% se marca como exento (4).
+            // 2.b. indicadorFacturacion=3 solo aplica a tipo 46
             if (indicador === 3 && value.type !== '46') {
                 return helpers.error('any.custom', {
                     message: `Item ${i + 1}: indicadorFacturacion=3 (ITBIS 0% gravado) solo aplica a tipo 46 (exportaciones). Para 0% usa indicadorFacturacion=4 (exento).`
@@ -395,6 +391,52 @@ const createInvoiceSchema = Joi.object({
             if (lineBase < 0) {
                 return helpers.error('any.custom', {
                     message: `Item ${i + 1}: discount cannot exceed (quantity × unitPrice)`
+                });
+            }
+
+            // 2.d. Bien requiere unidadMedida (regla estricta DGII)
+            //      Si indicadorBienoServicio === 1 (Bien) → unidadMedida requerido
+            //      Si indicadorBienoServicio === 2 (Servicio) → unidadMedida opcional
+            const indicadorBienoServicio = item.indicadorBienoServicio ?? 1;
+            if (indicadorBienoServicio === 1) {
+                if (item.unidadMedida === undefined || item.unidadMedida === null) {
+                    return helpers.error('any.custom', {
+                        message: `Item ${i + 1}: unidadMedida is required when indicadorBienoServicio=1 (Bien). Use a DGII code 1-62.`
+                    });
+                }
+            }
+
+            // 2.e. Coherencia cantidadReferencia ↔ unidadReferencia
+            const hasCantRef = item.cantidadReferencia !== undefined && item.cantidadReferencia !== null;
+            const hasUniRef = item.unidadReferencia !== undefined && item.unidadReferencia !== null;
+            if (hasCantRef && !hasUniRef) {
+                return helpers.error('any.custom', {
+                    message: `Item ${i + 1}: unidadReferencia is required when cantidadReferencia is provided`
+                });
+            }
+            if (hasUniRef && !hasCantRef) {
+                return helpers.error('any.custom', {
+                    message: `Item ${i + 1}: cantidadReferencia is required when unidadReferencia is provided`
+                });
+            }
+
+            // 2.f. fechaVencimientoItem >= fechaElaboracion (si ambas vienen)
+            if (item.fechaElaboracion && item.fechaVencimientoItem) {
+                const elab = new Date(item.fechaElaboracion);
+                const venc = new Date(item.fechaVencimientoItem);
+                if (venc < elab) {
+                    return helpers.error('any.custom', {
+                        message: `Item ${i + 1}: fechaVencimientoItem (${item.fechaVencimientoItem}) cannot be earlier than fechaElaboracion (${item.fechaElaboracion})`
+                    });
+                }
+            }
+
+            // 2.g. gradosAlcohol solo aplica a bienes
+            if (indicadorBienoServicio === 2
+                && item.gradosAlcohol !== undefined
+                && item.gradosAlcohol !== null) {
+                return helpers.error('any.custom', {
+                    message: `Item ${i + 1}: gradosAlcohol only applies to bienes (indicadorBienoServicio=1), not servicios`
                 });
             }
         }
@@ -448,7 +490,7 @@ const createInvoiceSchema = Joi.object({
             });
         }
 
-        // 7. 46 requiere itbis3Base y itbis3Amount (ya forzado por Joi.when, doble check)
+        // 7. 46 requiere itbis3Base y itbis3Amount
         if (value.type === '46') {
             if (value.itbis3Base === undefined || value.itbis3Base === null) {
                 return helpers.error('any.custom', { message: 'Type 46 requires itbis3Base' });
@@ -481,8 +523,6 @@ const createInvoiceSchema = Joi.object({
         }
 
         // 10. e-CF 32: si el total >= 250,000 requiere identificación del comprador (DGII)
-        //    Base legal: Descripción Técnica Servicios DGII - Recepción RFCE vs Recepción e-CF
-        //    Reglamento 587-24, Art. 17 Párrafo VII
         if (value.type === '32') {
             const total = value.items.reduce((sum, it) => {
                 const base = (it.quantity * it.unitPrice) - (it.discount || 0);
@@ -490,7 +530,6 @@ const createInvoiceSchema = Joi.object({
                 return sum + base + itbis;
             }, 0);
 
-            // DGII: monto >= 250,000 requiere envío completo y por ende identificación
             if (total >= 250000) {
                 if (!value.receiverRnc) {
                     return helpers.error('any.custom', {
@@ -587,6 +626,7 @@ const updateInvoiceSchema = Joi.object({
             }
         }
 
+        // 2. Por línea: coherencia indicador ↔ itbisRate + discount
         if (value.items) {
             const expectedRates = { 0: 0, 1: 18, 2: 16, 3: 0, 4: 0 };
 
@@ -617,6 +657,7 @@ const updateInvoiceSchema = Joi.object({
             }
         }
 
+        // 3. Retención por línea: solo 41/47 (validación de indicador)
         if (value.items) {
             for (let i = 0; i < value.items.length; i++) {
                 const ret = value.items[i].retencion;
@@ -626,6 +667,57 @@ const updateInvoiceSchema = Joi.object({
                             message: `Item ${i + 1}: retencion.indicador must be 1 (Retención) or 2 (Percepción)`
                         });
                     }
+                }
+            }
+        }
+
+        // 4. Reglas cruzadas DGII del <Item> (Step 4)
+        if (value.items) {
+            for (let i = 0; i < value.items.length; i++) {
+                const item = value.items[i];
+                const indicadorBienoServicio = item.indicadorBienoServicio ?? 1;
+
+                // (1) Bien requiere unidadMedida
+                if (indicadorBienoServicio === 1) {
+                    if (item.unidadMedida === undefined || item.unidadMedida === null) {
+                        return helpers.error('any.custom', {
+                            message: `Item ${i + 1}: unidadMedida is required when indicadorBienoServicio=1 (Bien). Use a DGII code 1-62.`
+                        });
+                    }
+                }
+
+                // (2) cantidadReferencia ↔ unidadReferencia
+                const hasCantRef = item.cantidadReferencia !== undefined && item.cantidadReferencia !== null;
+                const hasUniRef = item.unidadReferencia !== undefined && item.unidadReferencia !== null;
+                if (hasCantRef && !hasUniRef) {
+                    return helpers.error('any.custom', {
+                        message: `Item ${i + 1}: unidadReferencia is required when cantidadReferencia is provided`
+                    });
+                }
+                if (hasUniRef && !hasCantRef) {
+                    return helpers.error('any.custom', {
+                        message: `Item ${i + 1}: cantidadReferencia is required when unidadReferencia is provided`
+                    });
+                }
+
+                // (3) fechaVencimientoItem >= fechaElaboracion
+                if (item.fechaElaboracion && item.fechaVencimientoItem) {
+                    const elab = new Date(item.fechaElaboracion);
+                    const venc = new Date(item.fechaVencimientoItem);
+                    if (venc < elab) {
+                        return helpers.error('any.custom', {
+                            message: `Item ${i + 1}: fechaVencimientoItem (${item.fechaVencimientoItem}) cannot be earlier than fechaElaboracion (${item.fechaElaboracion})`
+                        });
+                    }
+                }
+
+                // (4) gradosAlcohol solo en bienes
+                if (indicadorBienoServicio === 2
+                    && item.gradosAlcohol !== undefined
+                    && item.gradosAlcohol !== null) {
+                    return helpers.error('any.custom', {
+                        message: `Item ${i + 1}: gradosAlcohol only applies to bienes (indicadorBienoServicio=1), not servicios`
+                    });
                 }
             }
         }
