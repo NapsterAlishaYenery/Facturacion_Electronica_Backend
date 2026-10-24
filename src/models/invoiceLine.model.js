@@ -44,12 +44,11 @@ const InvoiceLine = sequelize.define('InvoiceLine', {
     },
     description: {
         type: DataTypes.STRING(1000),
-        allowNull: false,
+        allowNull: true,
         validate: {
-            notEmpty: { msg: 'Description is required' },
             len: {
-                args: [1, 1000],
-                msg: 'Description must be between 1 and 500 characters'
+                args: [0, 1000],
+                msg: 'Description must be between 0 and 1000 characters'
             }
         }
     },

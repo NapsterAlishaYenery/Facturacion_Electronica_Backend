@@ -3,7 +3,6 @@
 // ============================================================
 const fs = require('fs');
 const path = require('path');
-const libxml = require('libxmljs2');
 const { getTypeProfile } = require('./type-profiles');
 
 // ============================================================
@@ -458,12 +457,56 @@ function buildItems(computed, profile) {
         const quantity = Number(line.quantity);
         const unitPrice = Number(line.unitPrice);
         const discount = Number(line.discount || 0);
-        const itbisRate = line.itbisRate;
-        const montoItem = (quantity * unitPrice) - discount;
-        // 🔥 NUEVO (fix DT-27): pasar la línea completa al helper
+        const recargo = Number(line.recargo || 0);
+
+        // Base de la línea (para MontoItem): qty*price - discount + recargo
+        const montoItem = (quantity * unitPrice) - discount + recargo;
+
+        // Indicador de facturación (ya resuelto en el service)
         const indicadorFacturacion = getIndicadorFacturacion(line);
 
-        // Retención obligatoria (41 y 47)
+        // --- IndicadorBienoServicio (obligatorio): 1=Bien, 2=Servicio
+        const indicadorBienoServicio = Number(line.indicadorBienoServicio ?? 1);
+
+        // --- NombreItem (obligatorio, máx 80 chars)
+        // Fallback a description si itemName falta (defensa en profundidad)
+        const rawItemName = line.itemName ?? line.description ?? 'Item';
+        const itemName = String(rawItemName).slice(0, 80);
+
+        // --- DescripcionItem (opcional, solo si viene y es distinta del nombre)
+        const descripcionItem = (line.description && line.description !== itemName)
+            ? String(line.description)
+            : null;
+
+        // --- UnidadMedida (opcional, solo si tiene valor)
+        const hasUnidadMedida = line.unidadMedida !== undefined
+            && line.unidadMedida !== null
+            && Number(line.unidadMedida) >= 1
+            && Number(line.unidadMedida) <= 62;
+        const unidadMedida = hasUnidadMedida ? Number(line.unidadMedida) : null;
+
+        // --- CantidadReferencia + UnidadReferencia (solo si ambas vienen)
+        const hasCantRef = line.cantidadReferencia !== undefined && line.cantidadReferencia !== null;
+        const hasUniRef = line.unidadReferencia !== undefined && line.unidadReferencia !== null;
+        const hasReferencia = hasCantRef && hasUniRef;
+        const cantidadReferencia = hasReferencia ? Number(line.cantidadReferencia) : null;
+        const unidadReferencia = hasReferencia ? Number(line.unidadReferencia) : null;
+
+        // --- GradosAlcohol (solo si viene y el perfil lo permite)
+        const hasGradosAlcohol = line.gradosAlcohol !== undefined
+            && line.gradosAlcohol !== null
+            && Number(line.gradosAlcohol) > 0;
+
+        // --- PrecioUnitarioReferencia (solo si viene y el perfil lo permite)
+        const hasPrecioRef = line.precioUnitarioReferencia !== undefined
+            && line.precioUnitarioReferencia !== null
+            && Number(line.precioUnitarioReferencia) >= 0;
+
+        // --- Fechas (solo si vienen)
+        const hasFechaElab = !!line.fechaElaboracion;
+        const hasFechaVenc = !!line.fechaVencimientoItem;
+
+        // --- Retención obligatoria (41 y 47)
         const retencionBlock = (profile.items.hasRetencion && profile.items.retencionRequired && line.retencion)
             ? `
       <Retencion>
@@ -472,8 +515,39 @@ function buildItems(computed, profile) {
         ${line.retencion.montoIsrRetenido ? `<MontoISRRetenido>${fmtMoney(line.retencion.montoIsrRetenido)}</MontoISRRetenido>` : ''}
       </Retencion>` : '';
 
+        // --- DescuentoMonto (solo si > 0 y perfil lo permite)
         const descuentoBlock = (profile.items.hasDescuento && discount > 0)
             ? `<DescuentoMonto>${fmtMoney(discount)}</DescuentoMonto>`
+            : '';
+
+        // --- RecargoMonto (solo si > 0 y perfil lo permite)
+        const recargoBlock = (profile.items.hasRecargo && recargo > 0)
+            ? `<RecargoMonto>${fmtMoney(recargo)}</RecargoMonto>`
+            : '';
+
+        // --- Bloque de referencias (CantidadReferencia + UnidadReferencia)
+        const referenciaBlock = hasReferencia
+            ? `
+      <CantidadReferencia>${fmtQuantity(cantidadReferencia)}</CantidadReferencia>
+      <UnidadReferencia>${unidadReferencia}</UnidadReferencia>`
+            : '';
+
+        // --- Bloque de gradosAlcohol (solo si perfil lo permite y viene)
+        const gradosAlcoholBlock = (profile.items.hasGradosAlcohol && hasGradosAlcohol)
+            ? `<GradosAlcohol>${fmtQuantity(line.gradosAlcohol)}</GradosAlcohol>`
+            : '';
+
+        // --- Bloque de precio referencia (solo si perfil lo permite y viene)
+        const precioRefBlock = (profile.items.hasPrecioUnitarioReferencia && hasPrecioRef)
+            ? `<PrecioUnitarioReferencia>${fmtMoney(line.precioUnitarioReferencia)}</PrecioUnitarioReferencia>`
+            : '';
+
+        // --- Bloque de fechas (solo si vienen)
+        const fechaElabBlock = hasFechaElab
+            ? `<FechaElaboracion>${fmtDate(line.fechaElaboracion)}</FechaElaboracion>`
+            : '';
+        const fechaVencBlock = hasFechaVenc
+            ? `<FechaVencimientoItem>${fmtDate(line.fechaVencimientoItem)}</FechaVencimientoItem>`
             : '';
 
         return `
@@ -488,17 +562,25 @@ function buildItems(computed, profile) {
       </TablaCodigosItem>` : ''}
       <IndicadorFacturacion>${indicadorFacturacion}</IndicadorFacturacion>
       ${retencionBlock}
-      <NombreItem>${esc(line.description)}</NombreItem>
-      <IndicadorBienoServicio>2</IndicadorBienoServicio>
+      <NombreItem>${esc(itemName)}</NombreItem>
+      <IndicadorBienoServicio>${indicadorBienoServicio}</IndicadorBienoServicio>
+      ${descripcionItem ? `<DescripcionItem>${esc(descripcionItem)}</DescripcionItem>` : ''}
       <CantidadItem>${fmtQuantity(quantity)}</CantidadItem>
-      <UnidadMedida>43</UnidadMedida>
+      ${unidadMedida !== null ? `<UnidadMedida>${unidadMedida}</UnidadMedida>` : ''}
+      ${referenciaBlock}
+      ${gradosAlcoholBlock}
+      ${precioRefBlock}
+      ${fechaElabBlock}
+      ${fechaVencBlock}
       <PrecioUnitarioItem>${fmtMoney(unitPrice)}</PrecioUnitarioItem>
       ${descuentoBlock}
+      ${recargoBlock}
       <MontoItem>${fmtMoney(montoItem)}</MontoItem>
     </Item>`;
     }).join('')}
   </DetallesItems>`;
 }
+
 
 function buildInformacionReferencia(invoiceData, profile) {
     if (!profile.informacionReferencia.present) return '';
@@ -752,6 +834,9 @@ function loadXSD(type) {
     const typeStr = String(type);
     if (xsdCache[typeStr]) return xsdCache[typeStr];
 
+    // Require perezoso
+    const libxml = require('libxmljs2');  // o libxmljs5
+
     const xsdPath = XSD_PATH_BY_TYPE[typeStr];
     if (!xsdPath) throw new Error(`No XSD configured for type ${typeStr}`);
 
@@ -807,6 +892,25 @@ function validateBasicPreChecks(xml, type) {
 function validateAgainstXSD(xml, type) {
     const preCheck = validateBasicPreChecks(xml, type);
     if (!preCheck.valid) return preCheck;
+
+    // Require perezoso: solo se necesita si se va a validar contra XSD
+    let libxml;
+    try {
+        libxml = require('libxmljs2');
+    } catch (e) {
+        try {
+            libxml = require('libxmljs5');
+        } catch (e2) {
+            return {
+                valid: false,
+                errors: [
+                    'libxmljs2/libxmljs5 no está instalado. ' +
+                    'La validación XSD está deshabilitada en este entorno. ' +
+                    'Instala uno de los dos paquetes para habilitarla.'
+                ]
+            };
+        }
+    }
 
     let xmlDoc;
     try {
