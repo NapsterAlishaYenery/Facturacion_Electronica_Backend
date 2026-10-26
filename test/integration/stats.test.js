@@ -114,6 +114,43 @@ async function loginAndGetCookie(email, password) {
         test('recentInvoices empty', Array.isArray(okRes.body?.data?.recentInvoices) && okRes.body.data.recentInvoices.length === 0);
         test('has alerts array', Array.isArray(okRes.body?.data?.alerts));
 
+        // ============================================================
+        // TEST 5: company_admin SÍ puede ver operator (jerarquía)
+        // ============================================================
+        console.log('\n--- Test 5: company_admin → operator (jerarquía) ---');
+        const adminOpRes = await request('/api/stats/operator', {
+            headers: { Cookie: companyAdminCookie }
+        });
+        test('status 200', adminOpRes.status === 200, `got ${adminOpRes.status}`);
+        test('has kpis', !!adminOpRes.body?.data?.kpis);
+        test('invoicesToday = 0', adminOpRes.body?.data?.kpis?.invoicesToday === 0);
+        test('billedToday = 0', adminOpRes.body?.data?.kpis?.billedToday === 0);
+        test('activeProducts = 0', adminOpRes.body?.data?.kpis?.activeProducts === 0);
+        test('lastInvoice = null', adminOpRes.body?.data?.lastInvoice === null);
+        test('recentInvoices empty', Array.isArray(adminOpRes.body?.data?.recentInvoices) && adminOpRes.body.data.recentInvoices.length === 0);
+        test('stockAlerts empty', Array.isArray(adminOpRes.body?.data?.stockAlerts) && adminOpRes.body.data.stockAlerts.length === 0);
+
+        // ============================================================
+        // TEST 6: operator SÍ accede a su propio dashboard
+        // ============================================================
+        console.log('\n--- Test 6: operator → operator → 200 ---');
+        const opOkRes = await request('/api/stats/operator', {
+            headers: { Cookie: operatorCookie }
+        });
+        test('status 200', opOkRes.status === 200, `got ${opOkRes.status}`);
+        test('has kpis', !!opOkRes.body?.data?.kpis);
+        test('invoicesToday = 0', opOkRes.body?.data?.kpis?.invoicesToday === 0);
+        test('has lastInvoice field', opOkRes.body?.data?.lastInvoice === null);
+        test('has recentInvoices array', Array.isArray(opOkRes.body?.data?.recentInvoices));
+        test('has stockAlerts array', Array.isArray(opOkRes.body?.data?.stockAlerts));
+
+        // ============================================================
+        // TEST 7: sin auth → 401 en operator
+        // ============================================================
+        console.log('\n--- Test 7: sin auth → operator → 401 ---');
+        const noAuthOpRes = await request('/api/stats/operator');
+        test('status 401', noAuthOpRes.status === 401, `got ${noAuthOpRes.status}`);
+
         // Limpieza
         console.log('\n🧹 Cleaned up');
 

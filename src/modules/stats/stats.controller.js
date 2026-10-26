@@ -22,8 +22,21 @@ const getCompanyStats = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// GET /api/stats/operator
+// ------------------------------------------------------------
+const getOperatorStats = catchAsync(async (req, res) => {
+    const stats = await statsService.getOperatorStats(req.user.companyId);
+
+    res.json({
+        success: true,
+        message: 'OK',
+        data: stats
+    });
+});
+
 module.exports = {
-    getCompanyStats
-    // getOperatorStats,  ← luego
+    getCompanyStats,
+    getOperatorStats,
     // getAdminStats      ← luego
 };

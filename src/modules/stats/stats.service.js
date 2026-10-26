@@ -264,8 +264,107 @@ async function getCompanyStats(companyId, { period = 7 } = {}) {
     };
 }
 
+// ------------------------------------------------------------
+// GET /api/stats/operator
+// Dashboard del operator (cajero)
+// Solo mira "hoy" — es su turno, no necesita análisis.
+// ------------------------------------------------------------
+async function getOperatorStats(companyId) {
+    if (!companyId) {
+        throw new AppError(
+            'You do not belong to any company',
+            400,
+            'NO_COMPANY_ASSIGNED'
+        );
+    }
+
+    const now = new Date();
+    const todayStart = startOfDay(now);
+
+    // --------------------------------------------------------
+    // 1. KPIs del día (en paralelo)
+    // --------------------------------------------------------
+    const [
+        invoicesToday,
+        billedToday,
+        activeProducts
+    ] = await Promise.all([
+        Invoice.count({
+            where: {
+                companyId,
+                issuedAt: { [Op.gte]: todayStart }
+            }
+        }),
+        Invoice.sum('total', {
+            where: {
+                companyId,
+                issuedAt: { [Op.gte]: todayStart }
+            }
+        }),
+        Product.count({
+            where: { companyId, isActive: true }
+        })
+    ]);
+
+    // --------------------------------------------------------
+    // 2. Facturas de hoy (recientes, máx 5)
+    //    Nota: Invoice NO tiene createdBy/userId, así que
+    //    "mi última factura" es la última de la empresa hoy.
+    //    TODO: cuando se añada userId a Invoice, filtrar por
+    //    el operator autenticado.
+    // --------------------------------------------------------
+    const recentInvoices = await Invoice.findAll({
+        where: {
+            companyId,
+            issuedAt: { [Op.gte]: todayStart }
+        },
+        attributes: ['id', 'ncf', 'type', 'status', 'total', 'issuedAt', 'receiverName'],
+        order: [['issuedAt', 'DESC']],
+        limit: 5
+    });
+
+    const lastInvoice = recentInvoices.length > 0 ? {
+        id: recentInvoices[0].id,
+        ncf: recentInvoices[0].ncf,
+        type: recentInvoices[0].type,
+        status: recentInvoices[0].status,
+        total: Number(recentInvoices[0].total),
+        issuedAt: recentInvoices[0].issuedAt
+    } : null;
+
+    // --------------------------------------------------------
+    // 3. Stock bajo
+    //    Product NO tiene campo stock todavía.
+    //    Devolvemos array vacío hasta que se añada.
+    //    TODO: cuando exista stock, contar productos con stock <= umbral.
+    // --------------------------------------------------------
+    const stockAlerts = [];
+
+    // --------------------------------------------------------
+    // 4. Respuesta final
+    // --------------------------------------------------------
+    return {
+        kpis: {
+            invoicesToday,
+            billedToday: Number(billedToday) || 0,
+            activeProducts
+        },
+        lastInvoice,
+        recentInvoices: recentInvoices.map(inv => ({
+            id: inv.id,
+            ncf: inv.ncf,
+            type: inv.type,
+            status: inv.status,
+            total: Number(inv.total),
+            issuedAt: inv.issuedAt,
+            receiverName: inv.receiverName
+        })),
+        stockAlerts
+    };
+}
+
 module.exports = {
-    getCompanyStats
-    // getOperatorStats,  ← luego
+    getCompanyStats,
+    getOperatorStats,
     // getAdminStats      ← luego
 };

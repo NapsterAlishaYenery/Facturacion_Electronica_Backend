@@ -45,6 +45,17 @@ router.get('/company',
     statsController.getCompanyStats
 );
 
+// ============================================================
+// GET /api/stats/operator
+// Requiere rol: operator (o superior, incluye company_admin y admin)
+// ============================================================
+router.get('/operator',
+    authMiddleware,
+    roleMiddleware('operator'),
+    readLimiter,
+    statsController.getOperatorStats
+);
+
 // (operator y admin: luego)
 
 module.exports = router;
