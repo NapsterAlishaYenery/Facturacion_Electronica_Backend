@@ -34,7 +34,7 @@ router.get('/ping', (req, res) => {
 // ============================================================
 router.post('/quick',
     authMiddleware,
-    roleMiddleware('company_admin'),
+    roleMiddleware('operator'),
     writeLimiter,
     validate(quickInvoiceSchema),
     posController.quickInvoice

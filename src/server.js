@@ -24,6 +24,7 @@ const subscriptionsRoutes = require('./modules/subscriptions/subscriptions/subsc
 const productsRoutes = require('./modules/pos/products/products.routes');
 const posRoutes = require('./modules/pos/pos.routes');
 const apiKeysRoutes = require('./modules/api-key/api-keys.routes');
+const statsRoutes = require('./modules/stats/stats.routes');
 
 // Imports (middlewares)
 const apiKeyLimiter = require('./shared/middlewares/apiKeyRateLimit.middleware');
@@ -85,6 +86,7 @@ app.use('/api/subscriptions', subscriptionsRoutes);
 app.use('/api/products', productsRoutes);
 app.use('/api/pos', posRoutes);
 app.use('/api/api-keys', apiKeysRoutes);
+app.use('/api/stats', statsRoutes);
 
 
 // Middleware global de errores

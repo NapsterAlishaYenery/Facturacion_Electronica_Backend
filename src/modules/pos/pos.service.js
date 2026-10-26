@@ -2,18 +2,11 @@
 // Servicio del POS (facturación rápida)
 // ============================================================
 //
-// El POS es un "shape reducido + traducción" del endpoint
-// POST /api/invoices/me. NO reimplementa facturación:
+// El POS SOLO emite 31 y 32 (MVP). Traduce items del POS a
+// líneas fiscales con TODOS los campos DGII, valida el payload
+// uniforme con createInvoiceSchema y delega a createMyInvoice.
 //
-//   1. Traduce items del POS (productId + taxType) a líneas fiscales
-//      (itemCode + description + quantity + unitPrice + itbisRate +
-//       indicadorFacturacion + retencion).
-//   2. Compone el payload uniforme (mismo shape que createInvoiceSchema).
-//   3. Valida el payload con createInvoiceSchema (fuente de verdad
-//      fiscal; cero duplicación de reglas).
-//   4. Delega a invoicesService.createMyInvoice.
-//
-// Multi-tenant: companyId viene del JWT (controlador), nunca del body.
+// Multi-tenant: companyId viene del JWT (controlador).
 // ============================================================
 
 const { Product } = require('../../models');
@@ -22,26 +15,18 @@ const invoicesService = require('../invoices/invoices.service');
 const { createInvoiceSchema } = require('../invoices/invoices.validation');
 
 // ------------------------------------------------------------
-// TAX_MAP: traducción de taxType del POS a los campos fiscales
-// que consume createMyInvoice.
-//
-// Los 4 tratamientos de ITBIS:
-//   - ITBIS_18  → indicador 1 (18% general)
-//   - ITBIS_16  → indicador 2 (16% reducido)
-//   - ITBIS_3   → indicador 3 (0% gravado / exportaciones,
-//                 exclusivo tipo 46; createInvoiceSchema lo
-//                 re-valida contra el tipo real)
-//   - EXENTO    → indicador 4 (exento)
+// TAX_MAP: taxType → { itbisRate, indicadorFacturacion }
+// (sin ITBIS_3 porque el POS solo emite 31 y 32)
 // ------------------------------------------------------------
 const TAX_MAP = {
     ITBIS_18: { itbisRate: 18, indicadorFacturacion: 1 },
     ITBIS_16: { itbisRate: 16, indicadorFacturacion: 2 },
-    ITBIS_3:  { itbisRate: 0,  indicadorFacturacion: 3 },
-    EXENTO:   { itbisRate: 0,  indicadorFacturacion: 4 }
+    EXENTO: { itbisRate: 0, indicadorFacturacion: 4 }
 };
 
 // ------------------------------------------------------------
 // Helper: resolver un ítem de catálogo contra la BD
+// Trae TODOS los campos DGII del producto
 // ------------------------------------------------------------
 async function resolveCatalogItem(companyId, item) {
     const product = await Product.findOne({
@@ -60,10 +45,23 @@ async function resolveCatalogItem(companyId, item) {
         );
     }
 
+    // 🔥 NUEVO: si el producto es Bien pero no tiene unidadMedida,
+    // es data legacy inconsistente. Fallamos claro en lugar de que
+    // Joi reviente con "unidadMedida is required" más abajo.
+    if (product.indicadorBienoServicio === 1 && !product.unidadMedida) {
+        throw new AppError(
+            `Product ${product.id} ("${product.name}") is a Bien but has no unidadMedida. ` +
+            `Edit the product to add a DGII unit code (1-62) before using it in POS.`,
+            409,
+            'PRODUCT_MISSING_UNIDAD_MEDIDA'
+        );
+    }
+
     const tax = TAX_MAP[product.taxType];
     if (!tax) {
         throw new AppError(
-            `Product ${product.id} has unsupported taxType: ${product.taxType}`,
+            `Product ${product.id} has unsupported taxType: ${product.taxType}. ` +
+            `POS only supports ITBIS_18, ITBIS_16, EXENTO.`,
             409,
             'UNSUPPORTED_TAX_TYPE'
         );
@@ -71,10 +69,23 @@ async function resolveCatalogItem(companyId, item) {
 
     return {
         itemCode: product.itemCode || null,
-        description: product.name,
+        itemName: product.name,
+        description: product.description || null,
+        indicadorBienoServicio: product.indicadorBienoServicio,
+        unidadMedida: product.unidadMedida,
         quantity: Number(item.quantity),
         unitPrice: Number(product.price),
         discount: 0,
+        recargo: 0,
+        cantidadReferencia: product.cantidadReferencia !== null
+            ? Number(product.cantidadReferencia) : null,
+        unidadReferencia: product.unidadReferencia,
+        gradosAlcohol: product.gradosAlcohol !== null
+            ? Number(product.gradosAlcohol) : null,
+        precioUnitarioReferencia: product.precioUnitarioReferencia !== null
+            ? Number(product.precioUnitarioReferencia) : null,
+        fechaElaboracion: product.fechaElaboracion,
+        fechaVencimientoItem: product.fechaVencimientoItem,
         itbisRate: tax.itbisRate,
         indicadorFacturacion: tax.indicadorFacturacion
     };
@@ -82,11 +93,7 @@ async function resolveCatalogItem(companyId, item) {
 
 // ------------------------------------------------------------
 // Helper: traducir un ítem manual a línea fiscal
-//
-// Si viene taxType → traducir con TAX_MAP.
-// Si NO viene taxType pero sí itbisRate/indicadorFacturacion
-//   → respetarlos tal cual (compatibilidad con shape de
-//     createInvoiceSchema).
+// Propaga TODOS los campos DGII del body
 // ------------------------------------------------------------
 function resolveManualItem(item) {
     let itbisRate;
@@ -104,36 +111,44 @@ function resolveManualItem(item) {
         itbisRate = tax.itbisRate;
         indicadorFacturacion = tax.indicadorFacturacion;
     } else {
-        // Modo "compatibilidad": el cliente ya mandó los campos fiscales
         itbisRate = item.itbisRate !== undefined ? Number(item.itbisRate) : 18;
         indicadorFacturacion = item.indicadorFacturacion !== undefined
             ? Number(item.indicadorFacturacion)
             : undefined;
     }
 
-    const resolved = {
+    return {
         itemCode: item.itemCode || null,
-        description: item.description,
+        itemName: item.itemName,
+        description: item.description || null,
+        indicadorBienoServicio: item.indicadorBienoServicio,
+        unidadMedida: item.unidadMedida ?? null,
         quantity: Number(item.quantity),
         unitPrice: Number(item.unitPrice),
         discount: Number(item.discount || 0),
+        recargo: Number(item.recargo || 0),
+        cantidadReferencia: item.cantidadReferencia ?? null,
+        unidadReferencia: item.unidadReferencia ?? null,
+        gradosAlcohol: item.gradosAlcohol ?? null,
+        precioUnitarioReferencia: item.precioUnitarioReferencia ?? null,
+        fechaElaboracion: item.fechaElaboracion ?? null,
+        fechaVencimientoItem: item.fechaVencimientoItem ?? null,
         itbisRate,
         indicadorFacturacion
+
+        // 🔥 ELIMINADO: if (item.retencion) { resolved.retencion = item.retencion; }
+        // El POS no emite 41/47, así que retencion nunca debe llegar aquí.
     };
-
-    if (item.retencion) {
-        resolved.retencion = item.retencion;
-    }
-
-    return resolved;
 }
 
 // ------------------------------------------------------------
-// Helper: calcular el total estimado de las líneas fiscales
+// Helper: calcular el total estimado
 // ------------------------------------------------------------
 function estimateTotal(fiscalItems) {
     return fiscalItems.reduce((sum, it) => {
-        const base = (it.quantity * it.unitPrice) - (it.discount || 0);
+        const base = (it.quantity * it.unitPrice)
+            - (it.discount || 0)
+            + (it.recargo || 0);
         const rate = it.itbisRate ?? 18;
         const itbis = base * (rate / 100);
         return sum + base + itbis;
@@ -152,31 +167,9 @@ async function createQuickInvoice(companyId, data, reqUser, reqInfo = {}) {
         );
     }
 
-    const {
-        type,
-        receiverRnc,
-        receiverName,
-        issuedAt,
-        items,
-        // Campos opcionales por tipo (se pasan tal cual a createMyInvoice)
-        receiverIdentificadorExtranjero,
-        receiverPais,
-        exemptAmount,
-        itbis3Base,
-        itbis3Amount,
-        totalItbisRetenido,
-        totalIsrRetencion,
-        transporte,
-        informacionesAdicionales,
-        modifiedNcf,
-        modifiedNcfIssuerRnc,
-        modifiedNcfDate,
-        modificationCode,
-        modificationReason,
-        indicadorNotaCredito
-    } = data;
+    const { type, receiverRnc, receiverName, issuedAt, items } = data;
 
-    // 1. Traducir items a líneas fiscales (uniforme)
+    // 1. Traducir items a líneas fiscales
     const fiscalItems = [];
     for (const item of items) {
         if (item.productId) {
@@ -186,8 +179,7 @@ async function createQuickInvoice(companyId, data, reqUser, reqInfo = {}) {
         }
     }
 
-    // 2. Pre-validaciones de alto nivel (fallan rápido con mensajes
-    //    claros antes de molestar a createMyInvoice)
+    // 2. Pre-validaciones de alto nivel
     if (type === '31') {
         if (!receiverRnc) {
             throw new AppError(
@@ -230,7 +222,7 @@ async function createQuickInvoice(companyId, data, reqUser, reqInfo = {}) {
         }
     }
 
-    // 3. Componer el payload uniforme (mismo shape que createInvoiceSchema)
+    // 3. Componer el payload uniforme
     const payload = {
         type,
         receiverRnc: receiverRnc || null,
@@ -238,28 +230,9 @@ async function createQuickInvoice(companyId, data, reqUser, reqInfo = {}) {
         items: fiscalItems
     };
 
-    // Añadir campos opcionales SOLO si vienen (para no ensuciar el payload)
     if (issuedAt) payload.issuedAt = issuedAt;
-    if (receiverIdentificadorExtranjero) payload.receiverIdentificadorExtranjero = receiverIdentificadorExtranjero;
-    if (receiverPais) payload.receiverPais = receiverPais;
-    if (exemptAmount !== undefined) payload.exemptAmount = exemptAmount;
-    if (itbis3Base !== undefined) payload.itbis3Base = itbis3Base;
-    if (itbis3Amount !== undefined) payload.itbis3Amount = itbis3Amount;
-    if (totalItbisRetenido !== undefined) payload.totalItbisRetenido = totalItbisRetenido;
-    if (totalIsrRetencion !== undefined) payload.totalIsrRetencion = totalIsrRetencion;
-    if (transporte) payload.transporte = transporte;
-    if (informacionesAdicionales) payload.informacionesAdicionales = informacionesAdicionales;
-    if (modifiedNcf) payload.modifiedNcf = modifiedNcf;
-    if (modifiedNcfIssuerRnc) payload.modifiedNcfIssuerRnc = modifiedNcfIssuerRnc;
-    if (modifiedNcfDate) payload.modifiedNcfDate = modifiedNcfDate;
-    if (modificationCode !== undefined) payload.modificationCode = modificationCode;
-    if (modificationReason !== undefined) payload.modificationReason = modificationReason;
-    if (indicadorNotaCredito !== undefined) payload.indicadorNotaCredito = indicadorNotaCredito;
 
-    // 4. Validación fina fiscal: createInvoiceSchema es la fuente de verdad.
-    //    Aplica las reglas DGII por tipo (transporte, info adicional,
-    //    retención por línea, ITBIS3, modifiedNcf, coherencia
-    //    indicador↔itbisRate, etc.).
+    // 4. Validación fina fiscal (createInvoiceSchema es la fuente de verdad)
     const { error, value: validatedPayload } = createInvoiceSchema.validate(payload, {
         abortEarly: false,
         stripUnknown: true,
@@ -281,8 +254,7 @@ async function createQuickInvoice(companyId, data, reqUser, reqInfo = {}) {
         );
     }
 
-    // 5. Delegar a createMyInvoice (reutiliza TODA la lógica fiscal:
-    //    NCF, cálculo de totales, XML, audit, suscripción, etc.)
+    // 5. Delegar a createMyInvoice
     const result = await invoicesService.createMyInvoice(
         companyId,
         validatedPayload,

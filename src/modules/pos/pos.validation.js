@@ -2,41 +2,36 @@
 // Validaciones Joi para el módulo POS (facturación rápida)
 // ============================================================
 //
-// El POS es un "shape reducido + traducción" del endpoint
-// POST /api/invoices/me. Acepta los 10 tipos de e-CF y los 4
-// taxType (ITBIS_18, ITBIS_16, ITBIS_3, EXENTO).
+// MVP: el POS SOLO emite tipos 31 y 32.
+// Los demás tipos (33, 34, 41, 43, 44, 45, 46, 47) se manejan
+// por /api/invoices/me con el formulario completo.
 //
-// La validación FINA por tipo (transporte, informacionesAdicionales,
-// retenciones, ITBIS3, modifiedNcf, etc.) NO se duplica aquí:
-// se hace en pos.service.createQuickInvoice llamando directamente
-// a createInvoiceSchema.validate() sobre el payload ya traducido.
+// taxType: solo 3 tratamientos del ITBIS (18, 16, EXENTO).
+// ITBIS_3 (0% gravado / exportación) NO aplica al POS MVP.
 //
-// Este schema solo valida:
-//   - Forma del body del POS (type, receiver*, items)
-//   - Reglas de alto nivel que queremos fallar rápido (31 → RNC+Nombre,
-//     32 ≥ 250K → RNC+Nombre)
-//   - Alternativas de item (productId vs línea manual)
+// El POS acepta los campos DGII nuevos en las líneas manuales
+// (indicadorBienoServicio, unidadMedida, gradosAlcohol, fechas,
+// referencias) para que las facturas cumplan 100% con la DGII.
+//
+// La validación FINA fiscal la hace createInvoiceSchema en
+// pos.service.createQuickInvoice (fuente de verdad).
 // ============================================================
 
 const Joi = require('joi');
 
-// Los 4 tratamientos de ITBIS que el POS puede enviar.
-// ITBIS_3 corresponde a indicadorFacturacion=3 (0% gravado,
-// exclusivo de e-CF 46). createInvoiceSchema lo re-validará
-// contra el tipo real.
-const POS_TAX_TYPES = ['ITBIS_18', 'ITBIS_16', 'ITBIS_3', 'EXENTO'];
+// El POS SOLO emite 31 y 32
+const POS_INVOICE_TYPES = ['31', '32'];
 
-// Los 10 tipos de e-CF que el sistema soporta.
-const POS_INVOICE_TYPES = [
-    '31', '32', '33', '34', '41',
-    '43', '44', '45', '46', '47'
-];
+// Solo 3 tratamientos de ITBIS en el POS (sin ITBIS_3_46)
+const POS_TAX_TYPES = ['ITBIS_18', 'ITBIS_16', 'EXENTO'];
 
 // ============================================================
 // Ítem del POS
 // ============================================================
 
-// Forma 1: producto del catálogo (solo productId + quantity)
+// Forma 1: producto del catálogo (productId + quantity)
+// Los campos DGII se resuelven automáticamente desde el producto
+// (pos.service.resolveCatalogItem).
 const catalogItemSchema = Joi.object({
     productId: Joi.string().uuid().required()
         .messages({
@@ -50,57 +45,149 @@ const catalogItemSchema = Joi.object({
         })
 });
 
-// Forma 2: línea manual
-// Acepta taxType (POS simplificado) O los campos fiscales
-// directos (itbisRate, indicadorFacturacion) para máxima
-// flexibilidad. Si vienen ambos, taxType manda (el servicio
-// lo traduce y sobreescribe itbisRate/indicador).
+// Forma 2: línea manual con todos los campos DGII
 const manualItemSchema = Joi.object({
-    description: Joi.string().min(1).max(500).required()
+    // 🔥 FIX #1: permitir productId: null explícito (frontends que
+    // mandan null para indicar "es manual"). NO se permite UUID aquí
+    // porque eso sería ambiguo con catalogItemSchema.
+    productId: Joi.any().valid(null).optional(),
+
+    // Identificación
+    itemName: Joi.string().min(1).max(80).required()
         .messages({
-            'any.required': 'description is required for manual items',
-            'string.max': 'description cannot exceed 500 characters'
+            'any.required': 'itemName is required for manual items',
+            'string.max': 'itemName cannot exceed 80 characters'
         }),
-    unitPrice: Joi.number().min(0).max(9999999999.9999).required()
+    description: Joi.string().max(1000).optional().allow(null, '')
         .messages({
-            'any.required': 'unitPrice is required for manual items',
-            'number.min': 'unitPrice cannot be negative'
+            'string.max': 'description cannot exceed 1000 characters'
         }),
+    itemCode: Joi.string().max(50).optional().allow(null, ''),
+
+    // Naturaleza del ítem
+    indicadorBienoServicio: Joi.number().integer().valid(1, 2).default(1)
+        .messages({
+            'any.only': 'indicadorBienoServicio must be 1 (Bien) or 2 (Servicio)'
+        }),
+    unidadMedida: Joi.number().integer().min(1).max(62).optional().allow(null)
+        .messages({
+            'number.min': 'unidadMedida must be between 1 and 62',
+            'number.max': 'unidadMedida must be between 1 and 62'
+        }),
+
+    // Cantidades y precios
     quantity: Joi.number().positive().max(9999999.9999).required()
         .messages({
             'any.required': 'quantity is required',
             'number.positive': 'quantity must be greater than 0'
         }),
+    unitPrice: Joi.number().min(0).max(9999999999.9999).required()
+        .messages({
+            'any.required': 'unitPrice is required',
+            'number.min': 'unitPrice cannot be negative'
+        }),
+    discount: Joi.number().min(0).default(0),
+    recargo: Joi.number().min(0).default(0),
 
-    // taxType simplificado (traduce el servicio)
+    // Referencias opcionales
+    cantidadReferencia: Joi.number().min(0).optional().allow(null),
+    unidadReferencia: Joi.number().integer().min(1).max(62).optional().allow(null),
+    gradosAlcohol: Joi.number().min(0).max(100).optional().allow(null),
+    precioUnitarioReferencia: Joi.number().min(0).optional().allow(null),
+    fechaElaboracion: Joi.date().iso().optional().allow(null),
+    fechaVencimientoItem: Joi.date().iso().optional().allow(null),
+
+    // ITBIS: taxType (simplificado) o campos fiscales directos
     taxType: Joi.string().valid(...POS_TAX_TYPES).optional()
         .messages({
             'any.only': `taxType must be one of: ${POS_TAX_TYPES.join(', ')}`
         }),
-
-    // Campos fiscales directos (alternativa a taxType; el
-    // servicio los respeta tal cual si taxType no viene)
     itbisRate: Joi.number().min(0).max(100).optional(),
-    indicadorFacturacion: Joi.number().integer().valid(0, 1, 2, 3, 4).optional(),
 
-    // Campos opcionales de la línea fiscal (compatibilidad con createInvoiceSchema)
-    itemCode: Joi.string().max(50).optional().allow(null, ''),
-    discount: Joi.number().min(0).default(0),
-    retencion: Joi.object({
-        indicador: Joi.number().integer().valid(1, 2).required(),
-        montoItbisRetenido: Joi.number().min(0).optional().allow(null),
-        montoIsrRetenido: Joi.number().min(0).optional().allow(null)
-    }).optional().allow(null)
+    // 🔥 FIX #3: excluir indicadorFacturacion=3 (solo aplica a tipo 46,
+    // que el POS no emite). Si el usuario necesita 0% gravado debe usar
+    // /api/invoices/me tipo 46.
+    indicadorFacturacion: Joi.number().integer().valid(0, 1, 2, 4).optional()
+        .messages({
+            'any.only': 'indicadorFacturacion must be 0, 1, 2, or 4 in POS (3 is only for type 46)'
+        })
+
+    // 🔥 FIX #2: ELIMINADO el campo `retencion`.
+    // El POS solo emite 31/32, y createInvoiceSchema rechaza retencion
+    // en tipos distintos a 41/47. Mantenerlo aquí solo producía un
+    // error confuso desde invoices en lugar de rechazarlo en el POS.
 })
     .or('taxType', 'itbisRate', 'indicadorFacturacion')
     .messages({
         'object.missing': 'Manual item requires taxType OR itbisRate/indicadorFacturacion'
+    })
+    .custom((item, helpers) => {
+        // Reglas cruzadas DGII (idénticas a invoices.validation)
+        const indicador = item.indicadorBienoServicio;
+
+        // 🔥 FIX #5: si el ítem NO tiene indicadorBienoServicio, el default
+        // es 1 (Bien). Pero como el default se aplica DESPUÉS de custom en
+        // algunos casos, normalizamos:
+        const indicadorEfectivo = indicador === undefined ? 1 : indicador;
+
+        // (1) Bien requiere unidadMedida
+        if (indicadorEfectivo === 1) {
+            if (item.unidadMedida === undefined || item.unidadMedida === null) {
+                return helpers.error('any.custom', {
+                    message: 'unidadMedida is required when indicadorBienoServicio=1 (Bien). Use a DGII code 1-62.'
+                });
+            }
+        }
+
+        // (2) Servicio no permite gradosAlcohol
+        if (indicadorEfectivo === 2
+            && item.gradosAlcohol !== undefined
+            && item.gradosAlcohol !== null) {
+            return helpers.error('any.custom', {
+                message: 'gradosAlcohol only applies to bienes, not servicios'
+            });
+        }
+
+        // (3) cantidadReferencia ↔ unidadReferencia
+        const hasCantRef = item.cantidadReferencia !== undefined && item.cantidadReferencia !== null;
+        const hasUniRef = item.unidadReferencia !== undefined && item.unidadReferencia !== null;
+        if (hasCantRef && !hasUniRef) {
+            return helpers.error('any.custom', {
+                message: 'unidadReferencia is required when cantidadReferencia is provided'
+            });
+        }
+        if (hasUniRef && !hasCantRef) {
+            return helpers.error('any.custom', {
+                message: 'cantidadReferencia is required when unidadReferencia is provided'
+            });
+        }
+
+        // (4) fechaVencimientoItem >= fechaElaboracion
+        if (item.fechaElaboracion && item.fechaVencimientoItem) {
+            const elab = new Date(item.fechaElaboracion);
+            const venc = new Date(item.fechaVencimientoItem);
+            if (venc < elab) {
+                return helpers.error('any.custom', {
+                    message: 'fechaVencimientoItem cannot be earlier than fechaElaboracion'
+                });
+            }
+        }
+
+        return item;
+    })
+    .messages({
+        'any.custom': '{{#message}}'
     });
 
-const posItemSchema = Joi.alternatives().try(
-    catalogItemSchema,
-    manualItemSchema
-);
+// 🔥 FIX #4: match('one') fuerza que el ítem sea EXACTAMENTE uno de los dos
+// schemas (no ambos, no ninguno). Y el mensaje de error es claro cuando no
+// calza con ninguno.
+const posItemSchema = Joi.alternatives()
+    .try(catalogItemSchema, manualItemSchema)
+    .match('one')
+    .messages({
+        'alternatives.match': 'Item must be either a catalog item (productId+quantity) OR a manual item (itemName+quantity+unitPrice+tax info)'
+    });
 
 // ============================================================
 // Schema: crear factura rápida (POST /api/pos/quick)
@@ -112,48 +199,17 @@ const quickInvoiceSchema = Joi.object({
             'any.only': `Type must be one of: ${POS_INVOICE_TYPES.join(', ')}`
         }),
 
-    // --- Comprador nacional ---
-    receiverRnc: Joi.string().max(15).optional().allow(null, '')
-        .messages({
-            'string.max': 'receiverRnc cannot exceed 15 characters'
-        }),
-    receiverName: Joi.string().max(200).optional().allow(null, '')
-        .messages({
-            'string.max': 'receiverName cannot exceed 200 characters'
-        }),
+    // Comprador nacional
+    receiverRnc: Joi.string().max(15).optional().allow(null, ''),
+    receiverName: Joi.string().max(200).optional().allow(null, ''),
 
-    // --- Comprador extranjero (46, 47) ---
-    receiverIdentificadorExtranjero: Joi.string().max(20).optional().allow(null, ''),
-    receiverPais: Joi.string().max(60).optional().allow(null, ''),
-
-    // --- Fechas ---
+    // Fecha
     issuedAt: Joi.date().iso().optional()
         .messages({
             'date.format': 'issuedAt must be a valid ISO date'
         }),
 
-    // --- Notas (33/34) ---
-    modifiedNcf: Joi.string().min(11).max(19).optional(),
-    modifiedNcfIssuerRnc: Joi.string().max(15).optional().allow(null, ''),
-    modifiedNcfDate: Joi.date().iso().optional(),
-    modificationCode: Joi.number().integer().min(1).max(5).optional(),
-    modificationReason: Joi.string().max(90).optional().allow(null, ''),
-    indicadorNotaCredito: Joi.number().integer().valid(0, 1).optional(),
-
-    // --- Montos especiales por tipo ---
-    exemptAmount: Joi.number().min(0).optional(),
-    itbis3Base: Joi.number().min(0).optional(),
-    itbis3Amount: Joi.number().min(0).optional(),
-    totalItbisRetenido: Joi.number().min(0).optional(),
-    totalIsrRetencion: Joi.number().min(0).optional(),
-
-    // --- Transporte / info adicional ---
-    // (aceptamos cualquier objeto; createInvoiceSchema lo re-valida
-    //  con su schema detallado por tipo)
-    transporte: Joi.object().optional().allow(null),
-    informacionesAdicionales: Joi.object().optional().allow(null),
-
-    // --- Líneas ---
+    // Líneas
     items: Joi.array()
         .items(posItemSchema)
         .min(1)
@@ -184,8 +240,7 @@ const quickInvoiceSchema = Joi.object({
             }
         }
 
-        // 2. Tipo 31: RNC + Nombre obligatorios (regla de alto nivel,
-        //    createInvoiceSchema también lo valida, pero fallamos rápido)
+        // 2. Tipo 31: RNC + Nombre obligatorios
         if (value.type === '31') {
             if (!value.receiverRnc) {
                 return helpers.error('any.custom', {
@@ -199,18 +254,17 @@ const quickInvoiceSchema = Joi.object({
             }
         }
 
-        // 3. Tipo 32 con estimado ≥ 250K: RNC + Nombre obligatorios.
-        //    Estimación solo con líneas manuales (productos se
-        //    resuelven después). createInvoiceSchema re-valida
-        //    con el total real.
+        // 3. Tipo 32 con estimado ≥ 250K: RNC + Nombre obligatorios
         if (value.type === '32') {
             const estimado = value.items.reduce((sum, it) => {
-                if (it.productId) return sum;
-                const base = (it.quantity || 0) * (it.unitPrice || 0);
+                if (it.productId) return sum; // catálogo se resuelve después
+                const base = (it.quantity || 0) * (it.unitPrice || 0)
+                    - (it.discount || 0)
+                    + (it.recargo || 0);
                 const rate = it.taxType === 'ITBIS_18' ? 0.18
                     : it.taxType === 'ITBIS_16' ? 0.16
-                    : it.itbisRate != null ? it.itbisRate / 100
-                    : 0;
+                        : it.itbisRate != null ? it.itbisRate / 100
+                            : 0;
                 return sum + base * (1 + rate);
             }, 0);
 

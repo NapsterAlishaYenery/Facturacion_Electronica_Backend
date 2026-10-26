@@ -162,8 +162,8 @@ const UNIDADES_DGII = {
     37: 'Segundo', 38: 'Tanque', 39: 'Tonelada', 40: 'Tubo',
     41: 'Yarda', 42: 'Yarda²', 43: 'Unidad', 44: 'Elemento',
     45: 'Millar', 46: 'Saco', 47: 'Lata', 48: 'Display',
-    49: 'Bidón', 50: 'Ración', 51: 'Quintal', 52: 'TRB',
-    53: 'Pie²', 54: 'Pasajero', 55: 'Pulgada', 56: 'Parqueo',
+    49: 'Bidón', 50: 'Ración', 51: 'Quintal', 52: 'Reg. Tonnage',
+    53: 'Pie cuadrado', 54: 'Pasajero', 55: 'Pulgada', 56: 'Parqueo barco muelle',
     57: 'Bandeja', 58: 'Hectárea', 59: 'ml', 60: 'mg',
     61: 'oz', 62: 'oz troy'
 };
