@@ -12,6 +12,7 @@ const {
     Sequence,
     Subscription,
     Plan,
+    SubscriptionPayment,
     Company
 } = require('../../models');
 const { AppError } = require('../../shared/middlewares/error.middleware');
@@ -363,8 +364,217 @@ async function getOperatorStats(companyId) {
     };
 }
 
+// ------------------------------------------------------------
+// GET /api/stats/admin
+// Dashboard del admin global (SaaS)
+// Solo accesible por rol 'admin'. No filtra por companyId.
+// ------------------------------------------------------------
+async function getAdminStats({ mrrMonths = 6 } = {}) {
+    const now = new Date();
+    const monthStart = startOfMonth(now);
+    const mrrStart = startOfMonth(daysAgo(mrrMonths * 30, now));
+    const threeDaysAgo = daysAgo(3, now);
+    const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+    // --------------------------------------------------------
+    // 1. KPIs globales (en paralelo)
+    // --------------------------------------------------------
+    const [
+        activeCompanies,
+        totalInvoicesThisMonth,
+        subscriptionsByStatusRaw
+    ] = await Promise.all([
+        Company.count({ where: { isActive: true } }),
+        Invoice.count({ where: { issuedAt: { [Op.gte]: monthStart } } }),
+        Subscription.findAll({
+            attributes: ['status', [fn('COUNT', col('id')), 'count']],
+            group: ['status'],
+            raw: true
+        })
+    ]);
+
+    const subscriptionsByStatus = {
+        trial: 0,
+        active: 0,
+        past_due: 0,
+        cancelled: 0,
+        expired: 0
+    };
+    for (const row of subscriptionsByStatusRaw) {
+        subscriptionsByStatus[row.status] = Number(row.count);
+    }
+
+    // --------------------------------------------------------
+    // 2. MRR actual: suma de priceDop de suscripciones activas
+    // --------------------------------------------------------
+    const activeSubs = await Subscription.findAll({
+        where: { status: { [Op.in]: ['active', 'past_due'] } },
+        include: [{ model: Plan, as: 'plan', attributes: ['priceDop'] }],
+        attributes: ['id']
+    });
+    const mrr = activeSubs.reduce(
+        (sum, s) => sum + Number(s.plan?.priceDop || 0),
+        0
+    );
+
+    // --------------------------------------------------------
+    // 3. MRR de los últimos N meses (desde SubscriptionPayment.paid)
+    //    Agrupamos por mes (YYYY-MM) y sumamos amount.
+    // --------------------------------------------------------
+    const mrrByMonthRaw = await SubscriptionPayment.findAll({
+        attributes: [
+            [fn('TO_CHAR', col('paid_at'), 'YYYY-MM'), 'month'],
+            [fn('SUM', col('amount')), 'total']
+        ],
+        where: {
+            status: 'paid',
+            paidAt: { [Op.gte]: mrrStart }
+        },
+        group: [literal("TO_CHAR(paid_at, 'YYYY-MM')")],
+        order: [[literal("TO_CHAR(paid_at, 'YYYY-MM')"), 'ASC']],
+        raw: true
+    });
+
+    // Rellenar meses sin pagos con 0
+    const mrrSeries = [];
+    for (let i = 0; i < mrrMonths; i++) {
+        const d = new Date(now.getFullYear(), now.getMonth() - (mrrMonths - 1 - i), 1);
+        const monthStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        const found = mrrByMonthRaw.find(r => r.month === monthStr);
+        mrrSeries.push({
+            month: monthStr,
+            total: found ? Number(found.total) : 0
+        });
+    }
+
+    // --------------------------------------------------------
+    // 4. Top 5 empresas por volumen facturado (mes actual)
+    // --------------------------------------------------------
+    const topCompaniesRaw = await Invoice.findAll({
+        attributes: [
+            'companyId',
+            [fn('SUM', col('total')), 'totalBilled'],
+            [fn('COUNT', col('id')), 'invoiceCount']
+        ],
+        where: { issuedAt: { [Op.gte]: monthStart } },
+        group: ['companyId'],
+        order: [[literal('"totalBilled"'), 'DESC']],
+        limit: 5,
+        raw: true
+    });
+
+    // Enriquecer con nombres de empresa
+    const companyIds = topCompaniesRaw.map(r => r.companyId);
+    const companiesMap = {};
+    if (companyIds.length > 0) {
+        const companies = await Company.findAll({
+            where: { id: { [Op.in]: companyIds } },
+            attributes: ['id', 'rnc', 'name', 'tradeName'],
+            raw: true
+        });
+        for (const c of companies) companiesMap[c.id] = c;
+    }
+
+    const topCompanies = topCompaniesRaw.map(r => ({
+        companyId: r.companyId,
+        rnc: companiesMap[r.companyId]?.rnc || null,
+        name: companiesMap[r.companyId]?.tradeName
+            || companiesMap[r.companyId]?.name
+            || 'Unknown',
+        totalBilled: Number(r.totalBilled) || 0,
+        invoiceCount: Number(r.invoiceCount) || 0
+    }));
+
+    // --------------------------------------------------------
+    // 5. Suscripciones por vencer (≤7 días)
+    // --------------------------------------------------------
+    const expiringSubs = await Subscription.findAll({
+        where: {
+            status: { [Op.in]: ['trial', 'active', 'past_due'] },
+            [Op.or]: [
+                { endsAt: { [Op.between]: [now, sevenDaysFromNow] } },
+                { trialEndsAt: { [Op.between]: [now, sevenDaysFromNow] } }
+            ]
+        },
+        include: [
+            { model: Company, as: 'company', attributes: ['id', 'name', 'rnc'] },
+            { model: Plan, as: 'plan', attributes: ['code', 'name'] }
+        ],
+        order: [['endsAt', 'ASC']]
+    });
+
+    const subscriptionsExpiring = expiringSubs.map(s => {
+        const ends = s.endsAt || s.trialEndsAt;
+        const daysLeft = Math.ceil((new Date(ends).getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+        return {
+            subscriptionId: s.id,
+            companyId: s.company?.id || null,
+            companyName: s.company?.name || 'Unknown',
+            companyRnc: s.company?.rnc || null,
+            planCode: s.plan?.code || null,
+            planName: s.plan?.name || null,
+            endsAt: ends,
+            daysLeft
+        };
+    });
+
+    // --------------------------------------------------------
+    // 6. Alertas críticas
+    // --------------------------------------------------------
+    const criticalAlerts = [];
+
+    // 6a. Facturas sin XML firmado en los últimos 3 días
+    const invoicesWithoutXml = await Invoice.count({
+        where: {
+            xmlSigned: null,
+            issuedAt: { [Op.gte]: threeDaysAgo }
+        }
+    });
+    if (invoicesWithoutXml > 0) {
+        criticalAlerts.push({
+            type: 'invoices_without_xml',
+            severity: 'critical',
+            message: `${invoicesWithoutXml} factura(s) sin XML en los últimos 3 días`,
+            meta: { count: invoicesWithoutXml, windowDays: 3 }
+        });
+    }
+
+    // 6b. Pagos huérfanos (paid + sin invoice_id)
+    const orphanPayments = await SubscriptionPayment.count({
+        where: {
+            status: 'paid',
+            invoiceId: null
+        }
+    });
+    if (orphanPayments > 0) {
+        criticalAlerts.push({
+            type: 'orphan_payments',
+            severity: 'critical',
+            message: `${orphanPayments} pago(s) huérfano(s) pendiente(s) de reconciliación`,
+            meta: { count: orphanPayments }
+        });
+    }
+
+    // --------------------------------------------------------
+    // 7. Respuesta final
+    // --------------------------------------------------------
+    return {
+        kpis: {
+            activeCompanies,
+            mrr: Number(mrr) || 0,
+            totalInvoicesThisMonth,
+            subscriptionsByStatus
+        },
+        mrrSeries,
+        topCompanies,
+        subscriptionsExpiring,
+        criticalAlerts,
+        recentJobs: [] // TODO: cuando exista modelo de jobs (Fase 5)
+    };
+}
+
 module.exports = {
     getCompanyStats,
     getOperatorStats,
-    // getAdminStats      ← luego
+    getAdminStats
 };

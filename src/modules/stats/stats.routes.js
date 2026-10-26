@@ -56,6 +56,16 @@ router.get('/operator',
     statsController.getOperatorStats
 );
 
-// (operator y admin: luego)
+// ============================================================
+// GET /api/stats/admin
+// Requiere rol: admin (SOLO admin global)
+// ============================================================
+router.get('/admin',
+    authMiddleware,
+    roleMiddleware('admin'),
+    readLimiter,
+    validate(adminStatsQuerySchema, 'query'),
+    statsController.getAdminStats
+);
 
 module.exports = router;

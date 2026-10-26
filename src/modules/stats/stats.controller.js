@@ -35,8 +35,23 @@ const getOperatorStats = catchAsync(async (req, res) => {
     });
 });
 
+// ------------------------------------------------------------
+// GET /api/stats/admin
+// ------------------------------------------------------------
+const getAdminStats = catchAsync(async (req, res) => {
+    const stats = await statsService.getAdminStats(
+        req.validated.query || {}
+    );
+
+    res.json({
+        success: true,
+        message: 'OK',
+        data: stats
+    });
+});
+
 module.exports = {
     getCompanyStats,
     getOperatorStats,
-    // getAdminStats      ← luego
+    getAdminStats
 };
