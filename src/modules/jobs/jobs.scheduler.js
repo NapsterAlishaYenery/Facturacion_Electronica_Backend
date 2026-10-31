@@ -21,6 +21,7 @@
 
 const cron = require('node-cron');
 const logger = require('../../shared/logs/logger');
+const { JobRun } = require('../../models');
 
 // ============================================================
 // Definiciones de jobs
@@ -99,6 +100,15 @@ function buildJobDefinitions() {
             enabled: true,
             handler: require('./jobs/membership-invoice-reconciliation.job')
         },
+        // ---------------------------------------------------------
+        // Housekeeping — Purga de job_runs viejos
+        // ---------------------------------------------------------
+        {
+            name: 'job-runs-cleanup',
+            schedule: '0 3 * * *',       // diario, 03:00
+            enabled: true,
+            handler: require('./jobs/job-runs-cleanup.job')
+        },
     ];
 }
 
@@ -144,13 +154,34 @@ function startScheduler() {
             def.schedule,
             async () => {
                 logger.info(`[JOB:${def.name}] tick`);
+                const startedAt = new Date();
                 const result = await def.handler();
 
-                // Guardar metadata de la última corrida (en memoria)
+                // 1. Persistir la corrida en BD (best-effort: nunca rompe el scheduler)
+                try {
+                    await JobRun.create({
+                        jobName: def.name,
+                        status: result?.status || 'unknown',
+                        affected: result?.affected ?? 0,
+                        durationMs: result?.durationMs ?? 0,
+                        error: result?.error || null,
+                        meta: result && typeof result === 'object'
+                            ? JSON.parse(JSON.stringify(result))
+                            : null,
+                        triggeredBy: 'cron',
+                        startedAt
+                    });
+                } catch (err) {
+                    logger.error(`[JOB:${def.name}] failed to persist JobRun`, {
+                        error: err.message
+                    });
+                }
+
+                // 2. Guardar metadata de la última corrida (en memoria)
                 const record = scheduledJobs.find(j => j.name === def.name);
                 if (record) {
                     record.lastRun = {
-                        at: new Date().toISOString(),
+                        at: startedAt.toISOString(),
                         status: result?.status || 'unknown',
                         affected: result?.affected ?? 0,
                         durationMs: result?.durationMs ?? 0,

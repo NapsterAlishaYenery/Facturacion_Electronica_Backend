@@ -166,25 +166,95 @@ async function getCompanyStats(companyId, { period = 7 } = {}) {
     // --------------------------------------------------------
     const alerts = [];
 
-    // 5a. Secuencia más usada (la que esté al mayor %)
-    const sequences = await Sequence.findAll({
-        where: { companyId, isActive: true },
-        attributes: ['id', 'type', 'prefix', 'startNumber', 'endNumber', 'currentNumber']
+    // --------------------------------------------------------
+    // 5a. Alertas de secuencias POR TIPO
+    //     Refleja exactamente el flujo de assignNextNCF:
+    //     - Filtra activas + no vencidas del tipo
+    //     - Ordena por expiresAt ASC, createdAt ASC (mismo orden)
+    //     - Mira solo la PRIMERA con remaining > 0 (la que se usará)
+    //     - Si ninguna tiene remaining > 0 → tipo agotado (critical)
+    //     - Si la primera disponible está ≥85% → "casi llena"
+    // --------------------------------------------------------
+
+    const allActiveSequences = await Sequence.findAll({
+        where: {
+            companyId,
+            isActive: true,
+            expiresAt: { [Op.gt]: now }
+        },
+        attributes: ['id', 'type', 'prefix', 'startNumber', 'endNumber', 'currentNumber', 'createdAt', 'expiresAt'],
+        order: [['expiresAt', 'ASC'], ['createdAt', 'ASC']],
+        raw: true
     });
 
-    for (const seq of sequences) {
-        const total = Number(seq.endNumber) - Number(seq.startNumber) + 1;
-        const used = Number(seq.currentNumber) - Number(seq.startNumber) + 1;
+    // Agrupar por tipo
+    const sequencesByType = {};
+    for (const seq of allActiveSequences) {
+        if (!sequencesByType[seq.type]) sequencesByType[seq.type] = [];
+        sequencesByType[seq.type].push(seq);
+    }
+
+    // Para cada tipo con al menos una secuencia configurada:
+    for (const [type, seqs] of Object.entries(sequencesByType)) {
+
+        // Buscar la primera con números disponibles (remaining > 0).
+        // Saltamos las agotadas para reflejar el comportamiento real
+        // de assignNextNCF.
+        let firstAvailable = null;
+        for (const seq of seqs) {
+            const start = Number(seq.startNumber);
+            const end = Number(seq.endNumber);
+            const current = Number(seq.currentNumber);
+            const remaining = end - current;
+            if (remaining > 0) {
+                firstAvailable = { seq, start, end, current, remaining };
+                break;
+            }
+        }
+
+        // CASO A: no hay ninguna con números disponibles → tipo agotado
+        if (!firstAvailable) {
+            alerts.push({
+                type: 'sequence_type_exhausted',
+                severity: 'critical',
+                message: `No tienes números disponibles para el tipo ${type}. Crea o activa una nueva secuencia tipo ${type} para seguir facturando.`,
+                meta: {
+                    ecfType: type,
+                    exhaustedSequences: seqs.length,
+                    totalSequencesOfType: seqs.length
+                }
+            });
+            continue;
+        }
+
+        // CASO B: hay disponible → medir % de uso de ESA
+        const { seq, start, end, current, remaining } = firstAvailable;
+        const total = end - start + 1;
+        const used = current - start + 1;
+
+        // Guard defensivo por si total <= 0 (datos corruptos en BD)
         if (total <= 0) continue;
+
         const pct = Math.round((used / total) * 100);
+
         if (pct >= 85) {
             alerts.push({
                 type: 'sequence_almost_full',
                 severity: pct >= 95 ? 'critical' : 'warning',
-                message: `Tu secuencia tipo ${seq.type} está al ${pct}% (${used}/${total} números usados)`,
-                meta: { sequenceId: seq.id, type: seq.type, used, total, pct }
+                message: `Tu próxima secuencia a usar para el tipo ${type} (${seq.prefix}${type}) está al ${pct}% (${used}/${total}). Te quedan ${remaining} número${remaining === 1 ? '' : 's'}.`,
+                meta: {
+                    ecfType: type,
+                    sequenceId: seq.id,
+                    prefix: seq.prefix,
+                    used,
+                    total,
+                    remaining,
+                    pct,
+                    totalSequencesOfType: seqs.length
+                }
             });
         }
+        // else: margen suficiente, no alertar
     }
 
     // 5b. Certificado por vencer (≤ 30 días)

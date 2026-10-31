@@ -18,6 +18,7 @@ const PasswordReset = require('./passwordReset.model');
 const CompanyLogo = require('./companyLogo.model');
 const Product = require('./product.model');
 const ApiKey = require('./apiKey.model');
+const JobRun = require('./jobRun.model');
 
 // ============================================================
 // Company (1) ─── (N) Subscription
@@ -298,5 +299,6 @@ module.exports = {
     PasswordReset,
     CompanyLogo,
     Product,
-    ApiKey
+    ApiKey,
+    JobRun
 };

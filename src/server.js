@@ -25,6 +25,8 @@ const productsRoutes = require('./modules/pos/products/products.routes');
 const posRoutes = require('./modules/pos/pos.routes');
 const apiKeysRoutes = require('./modules/api-key/api-keys.routes');
 const statsRoutes = require('./modules/stats/stats.routes');
+const autdiRoutes = require('./modules/audit/audit.routes')
+const jobRoutes = require('./modules/jobs/jobs.routes')
 
 // Imports (middlewares)
 const apiKeyLimiter = require('./shared/middlewares/apiKeyRateLimit.middleware');
@@ -87,6 +89,8 @@ app.use('/api/products', productsRoutes);
 app.use('/api/pos', posRoutes);
 app.use('/api/api-keys', apiKeysRoutes);
 app.use('/api/stats', statsRoutes);
+app.use('/api/audit-logs', autdiRoutes);
+app.use('/api/jobs', jobRoutes);
 
 
 // Middleware global de errores
