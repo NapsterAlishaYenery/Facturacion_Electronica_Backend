@@ -2,6 +2,9 @@ const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
 
 const Invoice = sequelize.define('Invoice', {
+    // ============================================================
+    // METADATOS DEL SISTEMA
+    // ============================================================
     id: {
         type: DataTypes.UUID,
         defaultValue: DataTypes.UUIDV4,
@@ -65,22 +68,190 @@ const Invoice = sequelize.define('Invoice', {
         allowNull: true,
         field: 'dgii_response'
     },
-    issuerRnc: {
+    sendAttempts: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+        field: 'send_attempts',
+        validate: {
+            min: { args: [0], msg: 'send_attempts cannot be negative' }
+        }
+    },
+
+    // ============================================================
+    // SECCIÓN 1 — ENCABEZADO
+    // ============================================================
+
+    // ------------------------------------------------------------
+    // 1.1 — <IdDoc>
+    // ------------------------------------------------------------
+    indicadorNotaCredito: {
+        type: DataTypes.SMALLINT,
+        allowNull: true,
+        field: 'indicador_nota_credito',
+        validate: {
+            isIn: { args: [[0, 1]], msg: 'IndicadorNotaCredito must be 0 or 1' }
+        }
+    },
+    indicadorEnvioDiferido: {
+        type: DataTypes.SMALLINT,
+        allowNull: true,
+        field: 'indicador_envio_diferido',
+        validate: {
+            isIn: { args: [[0, 1]], msg: 'indicadorEnvioDiferido must be 0 or 1' }
+        }
+    },
+    indicadorMontoGravado: {
+        type: DataTypes.SMALLINT,
+        allowNull: true,
+        field: 'indicador_monto_gravado',
+        validate: {
+            isIn: { args: [[0, 1]], msg: 'indicadorMontoGravado must be 0 or 1' }
+        }
+    },
+    indicadorServicioTodoIncluido: {
+        type: DataTypes.SMALLINT,
+        allowNull: true,
+        field: 'indicador_servicio_todo_incluido',
+        validate: {
+            isIn: { args: [[0, 1]], msg: 'indicadorServicioTodoIncluido must be 0 or 1' }
+        }
+    },
+    tipoIngresos: {
+        type: DataTypes.STRING(2),
+        allowNull: true,
+        field: 'tipo_ingresos',
+        validate: {
+            isIn: {
+                args: [['01', '02', '03', '04', '05', '06']],
+                msg: 'tipoIngresos must be 01-06'
+            }
+        }
+    },
+    tipoPago: {
+        type: DataTypes.SMALLINT,
+        allowNull: true,
+        field: 'tipo_pago',
+        validate: {
+            isIn: { args: [[1, 2, 3]], msg: 'tipoPago must be 1, 2 or 3' }
+        }
+    },
+    fechaLimitePago: {
+        type: DataTypes.DATEONLY,
+        allowNull: true,
+        field: 'fecha_limite_pago'
+    },
+    terminoPago: {
         type: DataTypes.STRING(15),
-        allowNull: false,
-        field: 'issuer_rnc',
+        allowNull: true,
+        field: 'termino_pago',
         validate: {
-            notEmpty: { msg: 'Issuer RNC is required' }
+            len: { args: [0, 15], msg: 'terminoPago cannot exceed 15 characters' }
         }
     },
-    issuerName: {
-        type: DataTypes.STRING(200),
-        allowNull: false,
-        field: 'issuer_name',
+    formasPago: {
+        type: DataTypes.JSONB,
+        allowNull: true,
+        field: 'formas_pago'
+    },
+    tipoCuentaPago: {
+        type: DataTypes.STRING(2),
+        allowNull: true,
+        field: 'tipo_cuenta_pago',
         validate: {
-            notEmpty: { msg: 'Issuer name is required' }
+            isIn: { args: [['CT', 'AH', 'OT']], msg: 'tipoCuentaPago must be CT, AH or OT' }
         }
     },
+    numeroCuentaPago: {
+        type: DataTypes.STRING(28),
+        allowNull: true,
+        field: 'numero_cuenta_pago',
+        validate: {
+            len: { args: [0, 28], msg: 'numeroCuentaPago cannot exceed 28 characters' }
+        }
+    },
+    bancoPago: {
+        type: DataTypes.STRING(75),
+        allowNull: true,
+        field: 'banco_pago',
+        validate: {
+            len: { args: [0, 75], msg: 'bancoPago cannot exceed 75 characters' }
+        }
+    },
+    fechaDesde: {
+        type: DataTypes.DATEONLY,
+        allowNull: true,
+        field: 'fecha_desde'
+    },
+    fechaHasta: {
+        type: DataTypes.DATEONLY,
+        allowNull: true,
+        field: 'fecha_hasta'
+    },
+    totalPaginas: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: 'total_paginas',
+        validate: {
+            min: { args: [1], msg: 'totalPaginas must be >= 1' }
+        }
+    },
+
+    // ------------------------------------------------------------
+    // 1.2 — <Emisor> (los de la factura, no de Company)
+    // ------------------------------------------------------------
+    codigoVendedor: {
+        type: DataTypes.STRING(60),
+        allowNull: true,
+        field: 'codigo_vendedor',
+        validate: {
+            len: { args: [0, 60], msg: 'codigoVendedor cannot exceed 60 characters' }
+        }
+    },
+    numeroFacturaInterna: {
+        type: DataTypes.STRING(20),
+        allowNull: true,
+        field: 'numero_factura_interna',
+        validate: {
+            len: { args: [0, 20], msg: 'numeroFacturaInterna cannot exceed 20 characters' }
+        }
+    },
+    numeroPedidoInterno: {
+        type: DataTypes.STRING(20),
+        allowNull: true,
+        field: 'numero_pedido_interno',
+        validate: {
+            len: { args: [0, 20], msg: 'numeroPedidoInterno cannot exceed 20 characters' }
+        }
+    },
+    zonaVenta: {
+        type: DataTypes.STRING(20),
+        allowNull: true,
+        field: 'zona_venta',
+        validate: {
+            len: { args: [0, 20], msg: 'zonaVenta cannot exceed 20 characters' }
+        }
+    },
+    rutaVenta: {
+        type: DataTypes.STRING(20),
+        allowNull: true,
+        field: 'ruta_venta',
+        validate: {
+            len: { args: [0, 20], msg: 'rutaVenta cannot exceed 20 characters' }
+        }
+    },
+    informacionAdicionalEmisor: {
+        type: DataTypes.STRING(250),
+        allowNull: true,
+        field: 'informacion_adicional_emisor',
+        validate: {
+            len: { args: [0, 250], msg: 'informacionAdicionalEmisor cannot exceed 250 characters' }
+        }
+    },
+
+    // ------------------------------------------------------------
+    // 1.3 — <Comprador>
+    // ------------------------------------------------------------
     receiverRnc: {
         type: DataTypes.STRING(15),
         allowNull: true,
@@ -91,7 +262,6 @@ const Invoice = sequelize.define('Invoice', {
         allowNull: true,
         field: 'receiver_name'
     },
-    // 🔥 NUEVO: comprador extranjero (46, 47)
     receiverIdentificadorExtranjero: {
         type: DataTypes.STRING(20),
         allowNull: true,
@@ -102,162 +272,256 @@ const Invoice = sequelize.define('Invoice', {
         allowNull: true,
         field: 'receiver_pais'
     },
-    subtotal: {
-        type: DataTypes.DECIMAL(15, 2),
-        allowNull: false,
-        validate: {
-            min: {
-                args: [0],
-                msg: 'Subtotal cannot be negative'
-            }
-        }
-    },
-    itbis: {
-        type: DataTypes.DECIMAL(15, 2),
-        allowNull: false,
-        defaultValue: 0,
-        validate: {
-            min: {
-                args: [0],
-                msg: 'ITBIS cannot be negative'
-            }
-        }
-    },
-    montoGravado: {
-        type: DataTypes.DECIMAL(15, 2),
-        allowNull: false,
-        defaultValue: 0,
-        field: 'monto_gravado',
-        validate: {
-            min: {
-                args: [0],
-                msg: 'Monto gravado cannot be negative'
-            }
-        }
-    },
-    itbis1Base: {
-        type: DataTypes.DECIMAL(15, 2),
-        allowNull: false,
-        defaultValue: 0,
-        field: 'itbis1_base',
-        validate: {
-            min: {
-                args: [0],
-                msg: 'ITBIS1 base cannot be negative'
-            }
-        }
-    },
-    itbis1Amount: {
-        type: DataTypes.DECIMAL(15, 2),
-        allowNull: false,
-        defaultValue: 0,
-        field: 'itbis1_amount',
-        validate: {
-            min: {
-                args: [0],
-                msg: 'ITBIS1 amount cannot be negative'
-            }
-        }
-    },
-    itbis2Base: {
-        type: DataTypes.DECIMAL(15, 2),
-        allowNull: false,
-        defaultValue: 0,
-        field: 'itbis2_base',
-        validate: {
-            min: {
-                args: [0],
-                msg: 'ITBIS2 base cannot be negative'
-            }
-        }
-    },
-    itbis2Amount: {
-        type: DataTypes.DECIMAL(15, 2),
-        allowNull: false,
-        defaultValue: 0,
-        field: 'itbis2_amount',
-        validate: {
-            min: {
-                args: [0],
-                msg: 'ITBIS2 amount cannot be negative'
-            }
-        }
-    },
-    // 🔥 NUEVO: monto exento (43, 44, 47)
-    exemptAmount: {
-        type: DataTypes.DECIMAL(15, 2),
+    contactoComprador: {
+        type: DataTypes.STRING(80),
         allowNull: true,
-        field: 'exempt_amount',
+        field: 'contacto_comprador',
         validate: {
-            min: {
-                args: [0],
-                msg: 'Exempt amount cannot be negative'
-            }
+            len: { args: [0, 80], msg: 'contactoComprador cannot exceed 80 characters' }
         }
     },
-    // 🔥 NUEVO: ITBIS3 (46 — exportación)
-    itbis3Base: {
-        type: DataTypes.DECIMAL(15, 2),
+    correoComprador: {
+        type: DataTypes.STRING(80),
         allowNull: true,
-        field: 'itbis3_base',
+        field: 'correo_comprador',
         validate: {
-            min: {
-                args: [0],
-                msg: 'ITBIS3 base cannot be negative'
+            isValidEmail(value) {
+                if (!value) return;
+                const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                if (!re.test(value)) throw new Error('correoComprador must be a valid email');
             }
         }
     },
-    itbis3Amount: {
-        type: DataTypes.DECIMAL(15, 2),
+    direccionComprador: {
+        type: DataTypes.STRING(100),
         allowNull: true,
-        field: 'itbis3_amount',
+        field: 'direccion_comprador',
         validate: {
-            min: {
-                args: [0],
-                msg: 'ITBIS3 amount cannot be negative'
-            }
+            len: { args: [0, 100], msg: 'direccionComprador cannot exceed 100 characters' }
         }
     },
-    // 🔥 NUEVO: retención a nivel encabezado (41, 47)
-    totalItbisRetenido: {
-        type: DataTypes.DECIMAL(15, 2),
+    municipioComprador: {
+        type: DataTypes.STRING(6),
         allowNull: true,
-        field: 'total_itbis_retenido',
+        field: 'municipio_comprador',
         validate: {
-            min: {
-                args: [0],
-                msg: 'Total ITBIS retenido cannot be negative'
-            }
+            is: { args: /^\d{6}$/, msg: 'municipioComprador must be 6 digits (Tabla III)' }
         }
     },
-    totalIsrRetencion: {
-        type: DataTypes.DECIMAL(15, 2),
+    provinciaComprador: {
+        type: DataTypes.STRING(6),
         allowNull: true,
-        field: 'total_isr_retencion',
+        field: 'provincia_comprador',
         validate: {
-            min: {
-                args: [0],
-                msg: 'Total ISR retención cannot be negative'
+            is: { args: /^\d{6}$/, msg: 'provinciaComprador must be 6 digits (Tabla III)' }
+        }
+    },
+    fechaEntrega: {
+        type: DataTypes.DATEONLY,
+        allowNull: true,
+        field: 'fecha_entrega'
+    },
+    contactoEntrega: {
+        type: DataTypes.STRING(100),
+        allowNull: true,
+        field: 'contacto_entrega',
+        validate: {
+            len: { args: [0, 100], msg: 'contactoEntrega cannot exceed 100 characters' }
+        }
+    },
+    direccionEntrega: {
+        type: DataTypes.STRING(100),
+        allowNull: true,
+        field: 'direccion_entrega',
+        validate: {
+            len: { args: [0, 100], msg: 'direccionEntrega cannot exceed 100 characters' }
+        }
+    },
+    telefonoAdicional: {
+        type: DataTypes.STRING(12),
+        allowNull: true,
+        field: 'telefono_adicional',
+        validate: {
+            is: {
+                args: /^\d{3}-\d{3}-\d{4}$/,
+                msg: 'telefonoAdicional must have format xxx-xxx-xxxx'
             }
         }
     },
-    total: {
-        type: DataTypes.DECIMAL(15, 2),
-        allowNull: false,
+    fechaOrdenCompra: {
+        type: DataTypes.DATEONLY,
+        allowNull: true,
+        field: 'fecha_orden_compra'
+    },
+    numeroOrdenCompra: {
+        type: DataTypes.STRING(20),
+        allowNull: true,
+        field: 'numero_orden_compra',
         validate: {
-            min: {
-                args: [0],
-                msg: 'Total cannot be negative'
-            }
+            len: { args: [0, 20], msg: 'numeroOrdenCompra cannot exceed 20 characters' }
         }
     },
-    issuedAt: {
-        type: DataTypes.DATE,
-        allowNull: false,
-        field: 'issued_at'
+    codigoInternoComprador: {
+        type: DataTypes.STRING(20),
+        allowNull: true,
+        field: 'codigo_interno_comprador',
+        validate: {
+            len: { args: [0, 20], msg: 'codigoInternoComprador cannot exceed 20 characters' }
+        }
+    },
+    responsablePago: {
+        type: DataTypes.STRING(20),
+        allowNull: true,
+        field: 'responsable_pago',
+        validate: {
+            len: { args: [0, 20], msg: 'responsablePago cannot exceed 20 characters' }
+        }
+    },
+    informacionAdicionalComprador: {
+        type: DataTypes.STRING(150),
+        allowNull: true,
+        field: 'informacion_adicional_comprador',
+        validate: {
+            len: { args: [0, 150], msg: 'informacionAdicionalComprador cannot exceed 150 characters' }
+        }
     },
 
-    // 🔥 NUEVO: bloque <Transporte> (31-34, 44-47)
+    // ------------------------------------------------------------
+    // 1.4 — <InformacionesAdicionales>
+    // ------------------------------------------------------------
+    infoFechaEmbarque: {
+        type: DataTypes.DATE,
+        allowNull: true,
+        field: 'info_fecha_embarque'
+    },
+    infoNumeroEmbarque: {
+        type: DataTypes.STRING(25),
+        allowNull: true,
+        field: 'info_numero_embarque'
+    },
+    infoNumeroContenedor: {
+        type: DataTypes.STRING(100),
+        allowNull: true,
+        field: 'info_numero_contenedor'
+    },
+    infoNumeroReferencia: {
+        type: DataTypes.STRING(20),
+        allowNull: true,
+        field: 'info_numero_referencia',
+        validate: {
+            len: { args: [0, 20], msg: 'infoNumeroReferencia cannot exceed 20 characters' }
+        }
+    },
+    infoNombrePuertoEmbarque: {
+        type: DataTypes.STRING(40),
+        allowNull: true,
+        field: 'info_nombre_puerto_embarque'
+    },
+    infoCondicionesEntrega: {
+        type: DataTypes.STRING(3),
+        allowNull: true,
+        field: 'info_condiciones_entrega'
+    },
+    infoTotalFob: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'info_total_fob'
+    },
+    infoSeguro: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'info_seguro'
+    },
+    infoFlete: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'info_flete'
+    },
+    infoOtrosGastos: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'info_otros_gastos'
+    },
+    infoTotalCif: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'info_total_cif'
+    },
+    infoRegimenAduanero: {
+        type: DataTypes.STRING(35),
+        allowNull: true,
+        field: 'info_regimen_aduanero'
+    },
+    infoNombrePuertoSalida: {
+        type: DataTypes.STRING(40),
+        allowNull: true,
+        field: 'info_nombre_puerto_salida'
+    },
+    infoNombrePuertoDesembarque: {
+        type: DataTypes.STRING(40),
+        allowNull: true,
+        field: 'info_nombre_puerto_desembarque'
+    },
+    infoPesoBruto: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'info_peso_bruto'
+    },
+    infoPesoNeto: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'info_peso_neto'
+    },
+    infoUnidadPesoBruto: {
+        type: DataTypes.SMALLINT,
+        allowNull: true,
+        field: 'info_unidad_peso_bruto',
+        validate: {
+            min: { args: [1], msg: 'infoUnidadPesoBruto must be 1-62' },
+            max: { args: [62], msg: 'infoUnidadPesoBruto must be 1-62' }
+        }
+    },
+    infoUnidadPesoNeto: {
+        type: DataTypes.SMALLINT,
+        allowNull: true,
+        field: 'info_unidad_peso_neto',
+        validate: {
+            min: { args: [1], msg: 'infoUnidadPesoNeto must be 1-62' },
+            max: { args: [62], msg: 'infoUnidadPesoNeto must be 1-62' }
+        }
+    },
+    infoCantidadBulto: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'info_cantidad_bulto'
+    },
+    infoUnidadBulto: {
+        type: DataTypes.SMALLINT,
+        allowNull: true,
+        field: 'info_unidad_bulto',
+        validate: {
+            min: { args: [1], msg: 'infoUnidadBulto must be 1-62' },
+            max: { args: [62], msg: 'infoUnidadBulto must be 1-62' }
+        }
+    },
+    infoVolumenBulto: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'info_volumen_bulto'
+    },
+    infoUnidadVolumen: {
+        type: DataTypes.SMALLINT,
+        allowNull: true,
+        field: 'info_unidad_volumen',
+        validate: {
+            min: { args: [1], msg: 'infoUnidadVolumen must be 1-62' },
+            max: { args: [62], msg: 'infoUnidadVolumen must be 1-62' }
+        }
+    },
+
+    // ------------------------------------------------------------
+    // 1.5 — <Transporte>
+    // ------------------------------------------------------------
     transporteVia: {
         type: DataTypes.STRING(2),
         allowNull: true,
@@ -335,83 +599,273 @@ const Invoice = sequelize.define('Invoice', {
         field: 'transporte_numero_albaran'
     },
 
-    // 🔥 NUEVO: <InformacionesAdicionales> extendido (46)
-    infoFechaEmbarque: {
-        type: DataTypes.DATE,
-        allowNull: true,
-        field: 'info_fecha_embarque'
+    // ------------------------------------------------------------
+    // 1.6 — <Totales>
+    // ------------------------------------------------------------
+    issuerRnc: {
+        type: DataTypes.STRING(15),
+        allowNull: false,
+        field: 'issuer_rnc',
+        validate: {
+            notEmpty: { msg: 'Issuer RNC is required' }
+        }
     },
-    infoNumeroEmbarque: {
-        type: DataTypes.STRING(25),
-        allowNull: true,
-        field: 'info_numero_embarque'
+    issuerName: {
+        type: DataTypes.STRING(200),
+        allowNull: false,
+        field: 'issuer_name',
+        validate: {
+            notEmpty: { msg: 'Issuer name is required' }
+        }
     },
-    infoNumeroContenedor: {
-        type: DataTypes.STRING(100),
-        allowNull: true,
-        field: 'info_numero_contenedor'
+    subtotal: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: false,
+        validate: {
+            min: { args: [0], msg: 'Subtotal cannot be negative' }
+        }
     },
-    infoNombrePuertoEmbarque: {
-        type: DataTypes.STRING(40),
-        allowNull: true,
-        field: 'info_nombre_puerto_embarque'
+    itbis: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: false,
+        defaultValue: 0,
+        validate: {
+            min: { args: [0], msg: 'ITBIS cannot be negative' }
+        }
     },
-    infoCondicionesEntrega: {
-        type: DataTypes.STRING(3),
-        allowNull: true,
-        field: 'info_condiciones_entrega'
+    montoGravado: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: false,
+        defaultValue: 0,
+        field: 'monto_gravado',
+        validate: {
+            min: { args: [0], msg: 'Monto gravado cannot be negative' }
+        }
     },
-    infoTotalFob: {
+    itbis1Base: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: false,
+        defaultValue: 0,
+        field: 'itbis1_base',
+        validate: {
+            min: { args: [0], msg: 'ITBIS1 base cannot be negative' }
+        }
+    },
+    itbis1Amount: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: false,
+        defaultValue: 0,
+        field: 'itbis1_amount',
+        validate: {
+            min: { args: [0], msg: 'ITBIS1 amount cannot be negative' }
+        }
+    },
+    itbis2Base: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: false,
+        defaultValue: 0,
+        field: 'itbis2_base',
+        validate: {
+            min: { args: [0], msg: 'ITBIS2 base cannot be negative' }
+        }
+    },
+    itbis2Amount: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: false,
+        defaultValue: 0,
+        field: 'itbis2_amount',
+        validate: {
+            min: { args: [0], msg: 'ITBIS2 amount cannot be negative' }
+        }
+    },
+    exemptAmount: {
         type: DataTypes.DECIMAL(15, 2),
         allowNull: true,
-        field: 'info_total_fob'
+        field: 'exempt_amount',
+        validate: {
+            min: { args: [0], msg: 'Exempt amount cannot be negative' }
+        }
     },
-    infoSeguro: {
+    itbis3Base: {
         type: DataTypes.DECIMAL(15, 2),
         allowNull: true,
-        field: 'info_seguro'
+        field: 'itbis3_base',
+        validate: {
+            min: { args: [0], msg: 'ITBIS3 base cannot be negative' }
+        }
     },
-    infoFlete: {
+    itbis3Amount: {
         type: DataTypes.DECIMAL(15, 2),
         allowNull: true,
-        field: 'info_flete'
+        field: 'itbis3_amount',
+        validate: {
+            min: { args: [0], msg: 'ITBIS3 amount cannot be negative' }
+        }
     },
-    infoOtrosGastos: {
+    totalItbisRetenido: {
         type: DataTypes.DECIMAL(15, 2),
         allowNull: true,
-        field: 'info_otros_gastos'
+        field: 'total_itbis_retenido',
+        validate: {
+            min: { args: [0], msg: 'Total ITBIS retenido cannot be negative' }
+        }
     },
-    infoTotalCif: {
+    totalIsrRetencion: {
         type: DataTypes.DECIMAL(15, 2),
         allowNull: true,
-        field: 'info_total_cif'
+        field: 'total_isr_retencion',
+        validate: {
+            min: { args: [0], msg: 'Total ISR retención cannot be negative' }
+        }
     },
-    infoRegimenAduanero: {
-        type: DataTypes.STRING(35),
-        allowNull: true,
-        field: 'info_regimen_aduanero'
+    total: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: false,
+        validate: {
+            min: { args: [0], msg: 'Total cannot be negative' }
+        }
     },
-    infoNombrePuertoSalida: {
-        type: DataTypes.STRING(40),
+    montoImpuestoAdicional: {
+        type: DataTypes.DECIMAL(15, 2),
         allowNull: true,
-        field: 'info_nombre_puerto_salida'
+        field: 'monto_impuesto_adicional'
     },
-    infoNombrePuertoDesembarque: {
-        type: DataTypes.STRING(40),
+    impuestosAdicionales: {
+        type: DataTypes.JSONB,
         allowNull: true,
-        field: 'info_nombre_puerto_desembarque'
+        field: 'impuestos_adicionales'
+    },
+    montoNoFacturable: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'monto_no_facturable'
+    },
+    montoPeriodo: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'monto_periodo'
+    },
+    saldoAnterior: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'saldo_anterior'
+    },
+    montoAvancePago: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'monto_avance_pago'
+    },
+    valorPagar: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'valor_pagar'
+    },
+    totalItbisPercepcion: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'total_itbis_percepcion',
+        validate: {
+            min: { args: [0], msg: 'totalItbisPercepcion cannot be negative' }
+        }
+    },
+    totalIsrPercepcion: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'total_isr_percepcion',
+        validate: {
+            min: { args: [0], msg: 'totalIsrPercepcion cannot be negative' }
+        }
     },
 
-    // 🔥 Campos específicos de Notas de Débito/Crédito (33/34)
+    // ------------------------------------------------------------
+    // 1.7 — <OtraMoneda>
+    // ------------------------------------------------------------
+    tipoMoneda: {
+        type: DataTypes.STRING(3),
+        allowNull: true,
+        field: 'tipo_moneda',
+        validate: {
+            len: { args: [0, 3], msg: 'tipoMoneda must be 3 chars ISO 4217' }
+        }
+    },
+    tipoCambio: {
+        type: DataTypes.DECIMAL(10, 4),
+        allowNull: true,
+        field: 'tipo_cambio',
+        validate: {
+            min: { args: [0], msg: 'tipoCambio must be > 0' }
+        }
+    },
+    montoGravadoTotalOtraMoneda: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'monto_gravado_total_otra_moneda'
+    },
+    montoGravado1OtraMoneda: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'monto_gravado_1_otra_moneda'
+    },
+    montoGravado2OtraMoneda: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'monto_gravado_2_otra_moneda'
+    },
+    montoGravado3OtraMoneda: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'monto_gravado_3_otra_moneda'
+    },
+    montoExentoOtraMoneda: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'monto_exento_otra_moneda'
+    },
+    totalItbisOtraMoneda: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'total_itbis_otra_moneda'
+    },
+    totalItbis1OtraMoneda: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'total_itbis_1_otra_moneda'
+    },
+    totalItbis2OtraMoneda: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'total_itbis_2_otra_moneda'
+    },
+    totalItbis3OtraMoneda: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'total_itbis_3_otra_moneda'
+    },
+    montoImpuestoAdicionalOtraMoneda: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'monto_impuesto_adicional_otra_moneda'
+    },
+    impuestosAdicionalesOtraMoneda: {
+        type: DataTypes.JSONB,
+        allowNull: true,
+        field: 'impuestos_adicionales_otra_moneda'
+    },
+    montoTotalOtraMoneda: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'monto_total_otra_moneda'
+    },
+
+    // ============================================================
+    // SECCIÓN 6 — INFORMACIÓN DE REFERENCIA (33/34)
+    // ============================================================
     modifiedNcf: {
         type: DataTypes.STRING(20),
         allowNull: true,
         field: 'modified_ncf',
         validate: {
-            len: {
-                args: [11, 19],
-                msg: 'Modified NCF must be between 11 and 19 characters'
-            }
+            len: { args: [11, 19], msg: 'Modified NCF must be between 11 and 19 characters' }
         }
     },
     modifiedNcfIssuerRnc: {
@@ -429,14 +883,8 @@ const Invoice = sequelize.define('Invoice', {
         allowNull: true,
         field: 'modification_code',
         validate: {
-            min: {
-                args: [1],
-                msg: 'Modification code must be between 1 and 5'
-            },
-            max: {
-                args: [5],
-                msg: 'Modification code must be between 1 and 5'
-            }
+            min: { args: [1], msg: 'Modification code must be between 1 and 5' },
+            max: { args: [5], msg: 'Modification code must be between 1 and 5' }
         }
     },
     modificationReason: {
@@ -444,31 +892,17 @@ const Invoice = sequelize.define('Invoice', {
         allowNull: true,
         field: 'modification_reason',
         validate: {
-            len: {
-                args: [0, 90],
-                msg: 'Modification reason cannot exceed 90 characters'
-            }
+            len: { args: [0, 90], msg: 'Modification reason cannot exceed 90 characters' }
         }
     },
-    indicadorNotaCredito: {
-        type: DataTypes.SMALLINT,
-        allowNull: true,
-        field: 'indicador_nota_credito',
-        validate: {
-            isIn: {
-                args: [[0, 1]],
-                msg: 'IndicadorNotaCredito must be 0 or 1'
-            }
-        }
-    },
-    sendAttempts: {
-        type: DataTypes.INTEGER,
+
+    // ============================================================
+    // Fecha de emisión
+    // ============================================================
+    issuedAt: {
+        type: DataTypes.DATE,
         allowNull: false,
-        defaultValue: 0,
-        field: 'send_attempts',
-        validate: {
-            min: { args: [0], msg: 'send_attempts cannot be negative' }
-        }
+        field: 'issued_at'
     }
 }, {
     tableName: 'invoices',

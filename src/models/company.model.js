@@ -1,6 +1,7 @@
 const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
 
+
 const Company = sequelize.define('Company', {
     id: {
         type: DataTypes.UUID,
@@ -108,6 +109,79 @@ const Company = sequelize.define('Company', {
         allowNull: false,
         defaultValue: false,
         field: 'is_system_owner'
+    },
+    provinceDgiiCode: {
+        type: DataTypes.STRING(6),
+        allowNull: false,
+        field: 'province_dgii_code',
+        validate: {
+            is: {
+                args: /^\d{6}$/,
+                msg: 'provinceDgiiCode must be exactly 6 digits'
+            }
+        }
+    },
+    municipalityDgiiCode: {
+        type: DataTypes.STRING(6),
+        allowNull: false,
+        field: 'municipality_dgii_code',
+        validate: {
+            is: {
+                args: /^\d{6}$/,
+                msg: 'municipalityDgiiCode must be exactly 6 digits'
+            }
+        }
+    },
+    // ============================================================
+    // DT30 — Campos adicionales del <Emisor> (PDF DGII v1.0)
+    // ============================================================
+    sucursal: {
+        type: DataTypes.STRING(20),
+        allowNull: true,
+        field: 'sucursal',
+        validate: {
+            len: {
+                args: [0, 20],
+                msg: 'Sucursal cannot exceed 20 characters'
+            }
+        }
+    },
+    website: {
+        type: DataTypes.STRING(50),
+        allowNull: true,
+        field: 'website',
+        validate: {
+            len: {
+                args: [0, 50],
+                msg: 'Website cannot exceed 50 characters'
+            }
+        }
+    },
+    additionalPhones: {
+        // Hasta 2 teléfonos adicionales al campo `phone`.
+        // Formato: ["809-555-1234", "829-555-5678"]
+        type: DataTypes.JSONB,
+        allowNull: true,
+        field: 'additional_phones',
+        validate: {
+            isValidPhonesArray(value) {
+                if (value === null || value === undefined) return;
+                if (!Array.isArray(value)) {
+                    throw new Error('additionalPhones must be an array');
+                }
+                if (value.length > 2) {
+                    throw new Error('additionalPhones cannot have more than 2 items');
+                }
+                for (const p of value) {
+                    if (typeof p !== 'string') {
+                        throw new Error('additionalPhones items must be strings');
+                    }
+                    if (p.length > 30) {
+                        throw new Error('additionalPhones items cannot exceed 30 characters');
+                    }
+                }
+            }
+        }
     },
 }, {
     tableName: 'companies',

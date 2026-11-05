@@ -68,6 +68,7 @@ function mapInfoAdicionalFields(info) {
     if (!info) return {};
 
     return {
+        // Básicos (ya existían)
         infoFechaEmbarque: info.fechaEmbarque ? new Date(info.fechaEmbarque) : null,
         infoNumeroEmbarque: info.numeroEmbarque || null,
         infoNumeroContenedor: info.numeroContenedor || null,
@@ -80,7 +81,18 @@ function mapInfoAdicionalFields(info) {
         infoTotalCif: info.totalCif ?? null,
         infoRegimenAduanero: info.regimenAduanero || null,
         infoNombrePuertoSalida: info.nombrePuertoSalida || null,
-        infoNombrePuertoDesembarque: info.nombrePuertoDesembarque || null
+        infoNombrePuertoDesembarque: info.nombrePuertoDesembarque || null,
+
+        // DT30 — Nuevos de <InformacionesAdicionales>
+        infoNumeroReferencia: info.numeroReferencia || null,
+        infoPesoBruto: info.pesoBruto ?? null,
+        infoPesoNeto: info.pesoNeto ?? null,
+        infoUnidadPesoBruto: info.unidadPesoBruto ?? null,
+        infoUnidadPesoNeto: info.unidadPesoNeto ?? null,
+        infoCantidadBulto: info.cantidadBulto ?? null,
+        infoUnidadBulto: info.unidadBulto ?? null,
+        infoVolumenBulto: info.volumenBulto ?? null,
+        infoUnidadVolumen: info.unidadVolumen ?? null
     };
 }
 
@@ -263,7 +275,17 @@ function calculateLineTotals(item) {
         gradosAlcohol: item.gradosAlcohol ?? null,
         precioUnitarioReferencia: item.precioUnitarioReferencia ?? null,
         fechaElaboracion: item.fechaElaboracion ?? null,
-        fechaVencimientoItem: item.fechaVencimientoItem ?? null
+        fechaVencimientoItem: item.fechaVencimientoItem ?? null,
+        // DT31 — Sub-bloques del <Item>
+        additionalCodes: item.additionalCodes ?? null,
+        subcantidades: item.subcantidades ?? null,
+        subDescuentos: item.subDescuentos ?? null,
+        subRecargos: item.subRecargos ?? null,
+        impuestosAdicionales: item.impuestosAdicionales ?? null,
+        pesoNetoKilogramo: item.pesoNetoKilogramo ?? null,
+        pesoNetoMineria: item.pesoNetoMineria ?? null,
+        tipoAfiliacion: item.tipoAfiliacion ?? null,
+        liquidacion: item.liquidacion ?? null,
     };
 }
 
@@ -682,7 +704,91 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
         modifiedNcfDate,
         modificationCode,
         modificationReason,
-        indicadorNotaCredito
+        indicadorNotaCredito,
+
+        // ============================================================
+        // DT30 — IdDoc extendido
+        // ============================================================
+        indicadorEnvioDiferido,
+        indicadorMontoGravado,
+        indicadorServicioTodoIncluido,
+        tipoIngresos,
+        tipoPago,
+        fechaLimitePago,
+        terminoPago,
+        formasPago,
+        tipoCuentaPago,
+        numeroCuentaPago,
+        bancoPago,
+        fechaDesde,
+        fechaHasta,
+        totalPaginas,
+
+        // ============================================================
+        // DT30 — Emisor extendido (los que viven en Invoice)
+        // ============================================================
+        codigoVendedor,
+        numeroFacturaInterna,
+        numeroPedidoInterno,
+        zonaVenta,
+        rutaVenta,
+        informacionAdicionalEmisor,
+
+        // ============================================================
+        // DT30 — Comprador extendido
+        // ============================================================
+        contactoComprador,
+        correoComprador,
+        direccionComprador,
+        municipioComprador,
+        provinciaComprador,
+        fechaEntrega,
+        contactoEntrega,
+        direccionEntrega,
+        telefonoAdicional,
+        fechaOrdenCompra,
+        numeroOrdenCompra,
+        codigoInternoComprador,
+        responsablePago,
+        informacionAdicionalComprador,
+
+        // ============================================================
+        // DT30 — Info adicional extendido (los sueltos, no anidados)
+        // OJO: los 9 campos del InfoAdicional (numeroReferencia, pesoBruto,
+        // etc.) van anidados dentro de `informacionesAdicionales`. Aquí
+        // NO se destructuran — viajan dentro del objeto.
+        // ============================================================
+
+        // ============================================================
+        // DT30 — Totales extendido
+        // ============================================================
+        montoImpuestoAdicional,
+        impuestosAdicionales,
+        montoNoFacturable,
+        montoPeriodo,
+        saldoAnterior,
+        montoAvancePago,
+        valorPagar,
+        totalItbisPercepcion,
+        totalIsrPercepcion,
+
+        // ============================================================
+        // DT30 — OtraMoneda (encabezado)
+        // ============================================================
+        tipoMoneda,
+        tipoCambio,
+        montoGravadoTotalOtraMoneda,
+        montoGravado1OtraMoneda,
+        montoGravado2OtraMoneda,
+        montoGravado3OtraMoneda,
+        montoExentoOtraMoneda,
+        totalItbisOtraMoneda,
+        totalItbis1OtraMoneda,
+        totalItbis2OtraMoneda,
+        totalItbis3OtraMoneda,
+        montoImpuestoAdicionalOtraMoneda,
+        impuestosAdicionalesOtraMoneda,
+        montoTotalOtraMoneda
     } = data;
 
     const isNota = type === '33' || type === '34';
@@ -799,12 +905,11 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
             receiverPais: receiverPais || null,
 
             // Totales base
-            // Totales base
             subtotal: invoiceTotals.subtotal,
             itbis: invoiceTotals.itbis,
             total: invoiceTotals.total,
 
-            // 🔥 NUEVO: desglose fiscal (fix DT-27)
+            // Desglose fiscal (fix DT-27)
             montoGravado: invoiceTotals.montoGravado,
             itbis1Base: invoiceTotals.itbis1Base,
             itbis1Amount: invoiceTotals.itbis1Amount,
@@ -824,6 +929,84 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
             totalIsrRetencion: totalIsrRetencion ?? null,
 
             issuedAt: finalIssuedAt,
+
+            // ============================================================
+            // DT30 — IdDoc extendido
+            // ============================================================
+            indicadorEnvioDiferido: indicadorEnvioDiferido ?? null,
+            indicadorMontoGravado: indicadorMontoGravado ?? null,
+            indicadorServicioTodoIncluido: indicadorServicioTodoIncluido ?? null,
+            tipoIngresos: tipoIngresos || null,
+            tipoPago: tipoPago ?? null,
+            fechaLimitePago: fechaLimitePago ? new Date(fechaLimitePago) : null,
+            terminoPago: terminoPago || null,
+            formasPago: formasPago || null,
+            tipoCuentaPago: tipoCuentaPago || null,
+            numeroCuentaPago: numeroCuentaPago || null,
+            bancoPago: bancoPago || null,
+            fechaDesde: fechaDesde ? new Date(fechaDesde) : null,
+            fechaHasta: fechaHasta ? new Date(fechaHasta) : null,
+            totalPaginas: totalPaginas ?? null,
+
+            // ============================================================
+            // DT30 — Emisor extendido
+            // codigoVendedor: se toma del body o, si no viene, del User
+            // ============================================================
+            codigoVendedor: codigoVendedor || reqUser?.codigoVendedor || null,
+            numeroFacturaInterna: numeroFacturaInterna || null,
+            numeroPedidoInterno: numeroPedidoInterno || null,
+            zonaVenta: zonaVenta || null,
+            rutaVenta: rutaVenta || null,
+            informacionAdicionalEmisor: informacionAdicionalEmisor || null,
+
+            // ============================================================
+            // DT30 — Comprador extendido
+            // ============================================================
+            contactoComprador: contactoComprador || null,
+            correoComprador: correoComprador || null,
+            direccionComprador: direccionComprador || null,
+            municipioComprador: municipioComprador || null,
+            provinciaComprador: provinciaComprador || null,
+            fechaEntrega: fechaEntrega ? new Date(fechaEntrega) : null,
+            contactoEntrega: contactoEntrega || null,
+            direccionEntrega: direccionEntrega || null,
+            telefonoAdicional: telefonoAdicional || null,
+            fechaOrdenCompra: fechaOrdenCompra ? new Date(fechaOrdenCompra) : null,
+            numeroOrdenCompra: numeroOrdenCompra || null,
+            codigoInternoComprador: codigoInternoComprador || null,
+            responsablePago: responsablePago || null,
+            informacionAdicionalComprador: informacionAdicionalComprador || null,
+
+            // ============================================================
+            // DT30 — Totales extendido
+            // ============================================================
+            montoImpuestoAdicional: montoImpuestoAdicional ?? null,
+            impuestosAdicionales: impuestosAdicionales || null,
+            montoNoFacturable: montoNoFacturable ?? null,
+            montoPeriodo: montoPeriodo ?? null,
+            saldoAnterior: saldoAnterior ?? null,
+            montoAvancePago: montoAvancePago ?? null,
+            valorPagar: valorPagar ?? null,
+            totalItbisPercepcion: totalItbisPercepcion ?? null,
+            totalIsrPercepcion: totalIsrPercepcion ?? null,
+
+            // ============================================================
+            // DT30 — OtraMoneda (encabezado)
+            // ============================================================
+            tipoMoneda: tipoMoneda || null,
+            tipoCambio: tipoCambio ?? null,
+            montoGravadoTotalOtraMoneda: montoGravadoTotalOtraMoneda ?? null,
+            montoGravado1OtraMoneda: montoGravado1OtraMoneda ?? null,
+            montoGravado2OtraMoneda: montoGravado2OtraMoneda ?? null,
+            montoGravado3OtraMoneda: montoGravado3OtraMoneda ?? null,
+            montoExentoOtraMoneda: montoExentoOtraMoneda ?? null,
+            totalItbisOtraMoneda: totalItbisOtraMoneda ?? null,
+            totalItbis1OtraMoneda: totalItbis1OtraMoneda ?? null,
+            totalItbis2OtraMoneda: totalItbis2OtraMoneda ?? null,
+            totalItbis3OtraMoneda: totalItbis3OtraMoneda ?? null,
+            montoImpuestoAdicionalOtraMoneda: montoImpuestoAdicionalOtraMoneda ?? null,
+            impuestosAdicionalesOtraMoneda: impuestosAdicionalesOtraMoneda || null,
+            montoTotalOtraMoneda: montoTotalOtraMoneda ?? null,
 
             // Transporte + Info adicional
             ...mapTransporteFields(transporte),
@@ -852,6 +1035,17 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
                 precioUnitarioReferencia: line.precioUnitarioReferencia,
                 fechaElaboracion: line.fechaElaboracion,
                 fechaVencimientoItem: line.fechaVencimientoItem,
+
+                // DT31
+                additionalCodes: line.additionalCodes,
+                subcantidades: line.subcantidades,
+                subDescuentos: line.subDescuentos,
+                subRecargos: line.subRecargos,
+                impuestosAdicionales: line.impuestosAdicionales,
+                pesoNetoKilogramo: line.pesoNetoKilogramo,
+                pesoNetoMineria: line.pesoNetoMineria,
+                tipoAfiliacion: line.tipoAfiliacion,
+                liquidacion: line.liquidacion,
 
                 // Cálculos
                 quantity: line.quantity,
@@ -915,7 +1109,13 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
                     totalIsrRetencion: invoice.totalIsrRetencion || null,
                     // Transporte (solo si aplica)
                     transporteVia: invoice.transporteVia || null,
-                    transportePaisDestino: invoice.transportePaisDestino || null
+                    transportePaisDestino: invoice.transportePaisDestino || null,
+                    // DT30 — resumen de campos nuevos que se guardaron
+                    tipoPago: invoice.tipoPago ?? null,
+                    tipoIngresos: invoice.tipoIngresos || null,
+                    codigoVendedor: invoice.codigoVendedor || null,
+                    tipoMoneda: invoice.tipoMoneda || null,
+                    montoImpuestoAdicional: invoice.montoImpuestoAdicional ?? null
                 },
                 ip: reqInfo.ip || null,
                 userAgent: reqInfo.userAgent || null
@@ -1041,6 +1241,71 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
         }
     }
 
+    // DT31 — Validaciones por tipo al actualizar items
+    if (updates.items !== undefined) {
+        // Retención: 31, 33, 34, 41, 47 permiten; 41 y 47 la exigen
+        const tiposConRetencion = ['31', '33', '34', '41', '47'];
+        const tiposQueExigenRetencion = ['41', '47'];
+
+        for (let i = 0; i < updates.items.length; i++) {
+            const item = updates.items[i];
+            const hasRetencion = item.retencion !== undefined && item.retencion !== null;
+
+            if (hasRetencion && !tiposConRetencion.includes(invoice.type)) {
+                throw new AppError(
+                    `Item ${i + 1}: retencion only applies to types 31, 33, 34, 41 and 47`,
+                    409,
+                    'RETENCION_NOT_ALLOWED'
+                );
+            }
+            if (!hasRetencion && tiposQueExigenRetencion.includes(invoice.type)) {
+                throw new AppError(
+                    `Item ${i + 1}: retencion is required for types 41 and 47`,
+                    409,
+                    'RETENCION_REQUIRED'
+                );
+            }
+        }
+
+        // IndicadorFacturacion forzado por tipo
+        if (['43', '44', '47'].includes(invoice.type)) {
+            for (let i = 0; i < updates.items.length; i++) {
+                const ind = Number(updates.items[i].indicadorFacturacion ?? 4);
+                if (ind !== 4) {
+                    throw new AppError(
+                        `Item ${i + 1}: type ${invoice.type} requires indicadorFacturacion=4 (Exento)`,
+                        409,
+                        'INDICADOR_FACTURACION_FORZADO'
+                    );
+                }
+            }
+        }
+        if (invoice.type === '46') {
+            for (let i = 0; i < updates.items.length; i++) {
+                const ind = Number(updates.items[i].indicadorFacturacion ?? 4);
+                if (ind !== 3) {
+                    throw new AppError(
+                        `Item ${i + 1}: type 46 requires indicadorFacturacion=3 (ITBIS 0%)`,
+                        409,
+                        'INDICADOR_FACTURACION_FORZADO'
+                    );
+                }
+            }
+        }
+        if (invoice.type === '47') {
+            for (let i = 0; i < updates.items.length; i++) {
+                const ind = Number(updates.items[i].indicadorBienoServicio ?? 1);
+                if (ind !== 2) {
+                    throw new AppError(
+                        `Item ${i + 1}: type 47 requires indicadorBienoServicio=2 (Servicio)`,
+                        409,
+                        'INDICADOR_BIENO_SERVICIO_FORZADO'
+                    );
+                }
+            }
+        }
+    }
+
     // B) e-CF 32: si el total final >= 250,000 requiere identificación (DGII)
     //    Resolvemos el estado FINAL: items del body o los de BD si no vienen.
     //    El total incluye recargo (Step 6): base = qty*price - discount + recargo
@@ -1098,7 +1363,13 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
         itbis: invoice.itbis,
         total: invoice.total,
         modificationCode: invoice.modificationCode,
-        modificationReason: invoice.modificationReason
+        modificationReason: invoice.modificationReason,
+        tipoPago: invoice.tipoPago,
+        tipoIngresos: invoice.tipoIngresos,
+        codigoVendedor: invoice.codigoVendedor,
+        terminoPago: invoice.terminoPago,
+        tipoMoneda: invoice.tipoMoneda,
+        tipoCambio: invoice.tipoCambio
     };
 
     // 4. Procesar en transacción
@@ -1115,6 +1386,96 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
         if (updates.issuedAt !== undefined) {
             updateData.issuedAt = new Date(updates.issuedAt);
         }
+
+        // ============================================================
+        // DT30 — IdDoc extendido
+        // ============================================================
+        if (updates.indicadorEnvioDiferido !== undefined) updateData.indicadorEnvioDiferido = updates.indicadorEnvioDiferido ?? null;
+        if (updates.indicadorMontoGravado !== undefined) updateData.indicadorMontoGravado = updates.indicadorMontoGravado ?? null;
+        if (updates.indicadorServicioTodoIncluido !== undefined) updateData.indicadorServicioTodoIncluido = updates.indicadorServicioTodoIncluido ?? null;
+        if (updates.tipoIngresos !== undefined) updateData.tipoIngresos = updates.tipoIngresos || null;
+        if (updates.tipoPago !== undefined) updateData.tipoPago = updates.tipoPago ?? null;
+        if (updates.fechaLimitePago !== undefined) updateData.fechaLimitePago = updates.fechaLimitePago ? new Date(updates.fechaLimitePago) : null;
+        if (updates.terminoPago !== undefined) updateData.terminoPago = updates.terminoPago || null;
+        if (updates.formasPago !== undefined) updateData.formasPago = updates.formasPago || null;
+        if (updates.tipoCuentaPago !== undefined) updateData.tipoCuentaPago = updates.tipoCuentaPago || null;
+        if (updates.numeroCuentaPago !== undefined) updateData.numeroCuentaPago = updates.numeroCuentaPago || null;
+        if (updates.bancoPago !== undefined) updateData.bancoPago = updates.bancoPago || null;
+        if (updates.fechaDesde !== undefined) updateData.fechaDesde = updates.fechaDesde ? new Date(updates.fechaDesde) : null;
+        if (updates.fechaHasta !== undefined) updateData.fechaHasta = updates.fechaHasta ? new Date(updates.fechaHasta) : null;
+        if (updates.totalPaginas !== undefined) updateData.totalPaginas = updates.totalPaginas ?? null;
+
+        // ============================================================
+        // DT30 — Emisor extendido
+        // ============================================================
+        if (updates.codigoVendedor !== undefined) updateData.codigoVendedor = updates.codigoVendedor || null;
+        if (updates.numeroFacturaInterna !== undefined) updateData.numeroFacturaInterna = updates.numeroFacturaInterna || null;
+        if (updates.numeroPedidoInterno !== undefined) updateData.numeroPedidoInterno = updates.numeroPedidoInterno || null;
+        if (updates.zonaVenta !== undefined) updateData.zonaVenta = updates.zonaVenta || null;
+        if (updates.rutaVenta !== undefined) updateData.rutaVenta = updates.rutaVenta || null;
+        if (updates.informacionAdicionalEmisor !== undefined) updateData.informacionAdicionalEmisor = updates.informacionAdicionalEmisor || null;
+
+        // ============================================================
+        // DT30 — Comprador extendido
+        // ============================================================
+        if (updates.contactoComprador !== undefined) updateData.contactoComprador = updates.contactoComprador || null;
+        if (updates.correoComprador !== undefined) updateData.correoComprador = updates.correoComprador || null;
+        if (updates.direccionComprador !== undefined) updateData.direccionComprador = updates.direccionComprador || null;
+        if (updates.municipioComprador !== undefined) updateData.municipioComprador = updates.municipioComprador || null;
+        if (updates.provinciaComprador !== undefined) updateData.provinciaComprador = updates.provinciaComprador || null;
+        if (updates.fechaEntrega !== undefined) updateData.fechaEntrega = updates.fechaEntrega ? new Date(updates.fechaEntrega) : null;
+        if (updates.contactoEntrega !== undefined) updateData.contactoEntrega = updates.contactoEntrega || null;
+        if (updates.direccionEntrega !== undefined) updateData.direccionEntrega = updates.direccionEntrega || null;
+        if (updates.telefonoAdicional !== undefined) updateData.telefonoAdicional = updates.telefonoAdicional || null;
+        if (updates.fechaOrdenCompra !== undefined) updateData.fechaOrdenCompra = updates.fechaOrdenCompra ? new Date(updates.fechaOrdenCompra) : null;
+        if (updates.numeroOrdenCompra !== undefined) updateData.numeroOrdenCompra = updates.numeroOrdenCompra || null;
+        if (updates.codigoInternoComprador !== undefined) updateData.codigoInternoComprador = updates.codigoInternoComprador || null;
+        if (updates.responsablePago !== undefined) updateData.responsablePago = updates.responsablePago || null;
+        if (updates.informacionAdicionalComprador !== undefined) updateData.informacionAdicionalComprador = updates.informacionAdicionalComprador || null;
+
+        // ============================================================
+        // DT30 — Info adicional extendido (pesos, bultos, ref)
+        // ============================================================
+        if (updates.numeroReferencia !== undefined) updateData.infoNumeroReferencia = updates.numeroReferencia || null;
+        if (updates.pesoBruto !== undefined) updateData.infoPesoBruto = updates.pesoBruto ?? null;
+        if (updates.pesoNeto !== undefined) updateData.infoPesoNeto = updates.pesoNeto ?? null;
+        if (updates.unidadPesoBruto !== undefined) updateData.infoUnidadPesoBruto = updates.unidadPesoBruto ?? null;
+        if (updates.unidadPesoNeto !== undefined) updateData.infoUnidadPesoNeto = updates.unidadPesoNeto ?? null;
+        if (updates.cantidadBulto !== undefined) updateData.infoCantidadBulto = updates.cantidadBulto ?? null;
+        if (updates.unidadBulto !== undefined) updateData.infoUnidadBulto = updates.unidadBulto ?? null;
+        if (updates.volumenBulto !== undefined) updateData.infoVolumenBulto = updates.volumenBulto ?? null;
+        if (updates.unidadVolumen !== undefined) updateData.infoUnidadVolumen = updates.unidadVolumen ?? null;
+
+        // ============================================================
+        // DT30 — Totales extendido
+        // ============================================================
+        if (updates.montoImpuestoAdicional !== undefined) updateData.montoImpuestoAdicional = updates.montoImpuestoAdicional ?? null;
+        if (updates.impuestosAdicionales !== undefined) updateData.impuestosAdicionales = updates.impuestosAdicionales || null;
+        if (updates.montoNoFacturable !== undefined) updateData.montoNoFacturable = updates.montoNoFacturable ?? null;
+        if (updates.montoPeriodo !== undefined) updateData.montoPeriodo = updates.montoPeriodo ?? null;
+        if (updates.saldoAnterior !== undefined) updateData.saldoAnterior = updates.saldoAnterior ?? null;
+        if (updates.montoAvancePago !== undefined) updateData.montoAvancePago = updates.montoAvancePago ?? null;
+        if (updates.valorPagar !== undefined) updateData.valorPagar = updates.valorPagar ?? null;
+        if (updates.totalItbisPercepcion !== undefined) updateData.totalItbisPercepcion = updates.totalItbisPercepcion ?? null;
+        if (updates.totalIsrPercepcion !== undefined) updateData.totalIsrPercepcion = updates.totalIsrPercepcion ?? null;
+
+        // ============================================================
+        // DT30 — OtraMoneda (encabezado)
+        // ============================================================
+        if (updates.tipoMoneda !== undefined) updateData.tipoMoneda = updates.tipoMoneda || null;
+        if (updates.tipoCambio !== undefined) updateData.tipoCambio = updates.tipoCambio ?? null;
+        if (updates.montoGravadoTotalOtraMoneda !== undefined) updateData.montoGravadoTotalOtraMoneda = updates.montoGravadoTotalOtraMoneda ?? null;
+        if (updates.montoGravado1OtraMoneda !== undefined) updateData.montoGravado1OtraMoneda = updates.montoGravado1OtraMoneda ?? null;
+        if (updates.montoGravado2OtraMoneda !== undefined) updateData.montoGravado2OtraMoneda = updates.montoGravado2OtraMoneda ?? null;
+        if (updates.montoGravado3OtraMoneda !== undefined) updateData.montoGravado3OtraMoneda = updates.montoGravado3OtraMoneda ?? null;
+        if (updates.montoExentoOtraMoneda !== undefined) updateData.montoExentoOtraMoneda = updates.montoExentoOtraMoneda ?? null;
+        if (updates.totalItbisOtraMoneda !== undefined) updateData.totalItbisOtraMoneda = updates.totalItbisOtraMoneda ?? null;
+        if (updates.totalItbis1OtraMoneda !== undefined) updateData.totalItbis1OtraMoneda = updates.totalItbis1OtraMoneda ?? null;
+        if (updates.totalItbis2OtraMoneda !== undefined) updateData.totalItbis2OtraMoneda = updates.totalItbis2OtraMoneda ?? null;
+        if (updates.totalItbis3OtraMoneda !== undefined) updateData.totalItbis3OtraMoneda = updates.totalItbis3OtraMoneda ?? null;
+        if (updates.montoImpuestoAdicionalOtraMoneda !== undefined) updateData.montoImpuestoAdicionalOtraMoneda = updates.montoImpuestoAdicionalOtraMoneda ?? null;
+        if (updates.impuestosAdicionalesOtraMoneda !== undefined) updateData.impuestosAdicionalesOtraMoneda = updates.impuestosAdicionalesOtraMoneda || null;
+        if (updates.montoTotalOtraMoneda !== undefined) updateData.montoTotalOtraMoneda = updates.montoTotalOtraMoneda ?? null;
 
         // 4.2. Si se envían items, reemplazar TODAS las líneas
         if (updates.items !== undefined) {
@@ -1165,6 +1526,17 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
                     precioUnitarioReferencia: line.precioUnitarioReferencia,
                     fechaElaboracion: line.fechaElaboracion,
                     fechaVencimientoItem: line.fechaVencimientoItem,
+
+                    // DT31 — Sub-bloques del <Item>
+                    additionalCodes: line.additionalCodes,
+                    subcantidades: line.subcantidades,
+                    subDescuentos: line.subDescuentos,
+                    subRecargos: line.subRecargos,
+                    impuestosAdicionales: line.impuestosAdicionales,
+                    pesoNetoKilogramo: line.pesoNetoKilogramo,
+                    pesoNetoMineria: line.pesoNetoMineria,
+                    tipoAfiliacion: line.tipoAfiliacion,
+                    liquidacion: line.liquidacion,
 
                     // Cálculos
                     quantity: line.quantity,
@@ -1497,7 +1869,13 @@ async function getInvoiceById(invoiceId) {
             {
                 model: Company,
                 as: 'company',
-                attributes: ['id', 'rnc', 'name', 'tradeName', 'email', 'phone', 'address', 'dgiiEnvironment', 'isActive']
+                attributes: [
+                    'id', 'rnc', 'name', 'tradeName',
+                    'email', 'phone', 'address', 'economicActivity',
+                    'dgiiEnvironment', 'isActive',
+                    'provinceDgiiCode', 'municipalityDgiiCode',
+                    'sucursal', 'website', 'additionalPhones'
+                ]
             },
             {
                 model: Sequence,

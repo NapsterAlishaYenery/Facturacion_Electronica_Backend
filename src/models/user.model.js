@@ -65,6 +65,17 @@ const User = sequelize.define('User', {
             }
         }
     },
+    codigoVendedor: {
+        type: DataTypes.STRING(60),
+        allowNull: true,
+        field: 'codigo_vendedor',
+        validate: {
+            len: {
+                args: [0, 60],
+                msg: 'codigoVendedor cannot exceed 60 characters'
+            }
+        }
+    },
     isActive: {
         type: DataTypes.BOOLEAN,
         allowNull: false,

@@ -5,7 +5,18 @@
 
 const { Op } = require('sequelize');
 const sequelize = require('../../config/database');
-const { Company, User, Subscription, Plan, Sequence, Invoice, CompanyLogo, AuditLog } = require('../../models');
+const {
+    Company,
+    User,
+    Subscription,
+    Plan,
+    Sequence,
+    Invoice,
+    CompanyLogo,
+    AuditLog,
+    Province,
+    Municipality
+} = require('../../models');
 const { AppError } = require('../../shared/middlewares/error.middleware');
 const cloudinaryService = require('../../shared/services/cloudinary.service');
 const fs = require('fs');
@@ -113,6 +124,18 @@ async function getMyCompany(companyId) {
                 as: 'logos',
                 attributes: ['id', 'purpose', 'secureUrl', 'format', 'width', 'height'],
                 required: false
+            },
+            {
+                model: Province,
+                as: 'province',
+                attributes: ['dgiiCode', 'name'],
+                required: false
+            },
+            {
+                model: Municipality,
+                as: 'municipality',
+                attributes: ['dgiiCode', 'name', 'isDistrict'],
+                required: false
             }
         ]
     });
@@ -190,11 +213,28 @@ async function updateMyCompany(companyId, updates, reqUser, reqInfo = {}) {
         email: company.email,
         phone: company.phone,
         address: company.address,
-        economicActivity: company.economicActivity
+        economicActivity: company.economicActivity,
+        provinceDgiiCode: company.provinceDgiiCode,
+        municipalityDgiiCode: company.municipalityDgiiCode,
+        sucursal: company.sucursal,
+        website: company.website,
+        additionalPhones: company.additionalPhones
     };
 
     // 5. Filtrar campos permitidos (doble protección)
-    const allowedFields = ['name', 'tradeName', 'email', 'phone', 'address', 'economicActivity'];
+    const allowedFields = [
+        'name',
+        'tradeName',
+        'email',
+        'phone',
+        'address',
+        'economicActivity',
+        'provinceDgiiCode',
+        'municipalityDgiiCode',
+        'sucursal',
+        'website',
+        'additionalPhones'
+    ];
     const updateData = {};
     for (const field of allowedFields) {
         if (updates[field] !== undefined) {
@@ -204,6 +244,21 @@ async function updateMyCompany(companyId, updates, reqUser, reqInfo = {}) {
 
     if (Object.keys(updateData).length === 0) {
         throw new AppError('No valid fields to update', 400, 'NO_FIELDS_TO_UPDATE');
+    }
+
+    // 5.5. Validar coherencia provincia ↔ municipio si vienen en el update
+    if (updateData.provinceDgiiCode || updateData.municipalityDgiiCode) {
+        const newProvince = updateData.provinceDgiiCode || company.provinceDgiiCode;
+        const newMunicipality = updateData.municipalityDgiiCode || company.municipalityDgiiCode;
+
+        const muni = await Municipality.findByPk(newMunicipality);
+        if (!muni || muni.provinceDgiiCode !== newProvince) {
+            throw new AppError(
+                `Municipality ${newMunicipality} does not belong to province ${newProvince}`,
+                400,
+                'MUNICIPALITY_PROVINCE_MISMATCH'
+            );
+        }
     }
 
     // 6. Actualizar
@@ -280,7 +335,20 @@ async function listCompanies(filters = {}) {
                 as: 'plan',
                 attributes: ['id', 'code', 'name', 'priceDop', 'priceUsd', 'invoicesPerMonth']
             }]
-        }],
+        },
+        {
+            model: Province,
+            as: 'province',
+            attributes: ['dgiiCode', 'name'],
+            required: false
+        },
+        {
+            model: Municipality,
+            as: 'municipality',
+            attributes: ['dgiiCode', 'name', 'isDistrict'],
+            required: false
+        }
+        ],
         order: [['createdAt', 'DESC']],
         limit,
         offset,
@@ -405,13 +473,19 @@ async function updateCompanyById(companyId, updates, reqUser, reqInfo = {}) {
         address: company.address,
         economicActivity: company.economicActivity,
         dgiiEnvironment: company.dgiiEnvironment,
-        isActive: company.isActive
+        isActive: company.isActive,
+        provinceDgiiCode: company.provinceDgiiCode,
+        municipalityDgiiCode: company.municipalityDgiiCode,
+        sucursal: company.sucursal,
+        website: company.website,
+        additionalPhones: company.additionalPhones
     };
 
     // 3. Filtrar campos permitidos (doble protección)
     const allowedFields = [
         'name', 'tradeName', 'email', 'phone', 'address', 'economicActivity',
-        'dgiiEnvironment', 'isActive'
+        'dgiiEnvironment', 'isActive', 'provinceDgiiCode', 'municipalityDgiiCode',
+        'sucursal', 'website', 'additionalPhones'
     ];
     const updateData = {};
     for (const field of allowedFields) {
@@ -422,6 +496,21 @@ async function updateCompanyById(companyId, updates, reqUser, reqInfo = {}) {
 
     if (Object.keys(updateData).length === 0) {
         throw new AppError('No valid fields to update', 400, 'NO_FIELDS_TO_UPDATE');
+    }
+
+    // 5.5. Validar coherencia provincia ↔ municipio si vienen en el update
+    if (updateData.provinceDgiiCode || updateData.municipalityDgiiCode) {
+        const newProvince = updateData.provinceDgiiCode || company.provinceDgiiCode;
+        const newMunicipality = updateData.municipalityDgiiCode || company.municipalityDgiiCode;
+
+        const muni = await Municipality.findByPk(newMunicipality);
+        if (!muni || muni.provinceDgiiCode !== newProvince) {
+            throw new AppError(
+                `Municipality ${newMunicipality} does not belong to province ${newProvince}`,
+                400,
+                'MUNICIPALITY_PROVINCE_MISMATCH'
+            );
+        }
     }
 
     // 4. Actualizar
@@ -550,7 +639,9 @@ async function deleteCompany(companyId, reqUser, reqInfo = {}) {
         tradeName: company.tradeName,
         email: company.email,
         isActive: company.isActive,
-        dgiiEnvironment: company.dgiiEnvironment
+        dgiiEnvironment: company.dgiiEnvironment,
+        provinceDgiiCode: company.provinceDgiiCode,
+        municipalityDgiiCode: company.municipalityDgiiCode
     };
 
     // 4. Borrar los logos de Cloudinary ANTES de la transacción.

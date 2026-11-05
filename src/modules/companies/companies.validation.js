@@ -20,7 +20,30 @@ const updateMyCompanySchema = Joi.object({
         }),
     phone: Joi.string().max(30).optional().allow(null, ''),
     address: Joi.string().max(300).optional().allow(null, ''),
-    economicActivity: Joi.string().max(200).optional().allow(null, '')
+    economicActivity: Joi.string().max(200).optional().allow(null, ''),
+    provinceDgiiCode: Joi.string().pattern(/^\d{6}$/).optional()
+        .messages({
+            'string.pattern.base': 'provinceDgiiCode must be exactly 6 digits'
+        }),
+    municipalityDgiiCode: Joi.string().pattern(/^\d{6}$/).optional()
+        .messages({
+            'string.pattern.base': 'municipalityDgiiCode must be exactly 6 digits'
+        }),
+    // DT30 — Emisor extendido
+    sucursal: Joi.string().max(20).optional().allow(null, '')
+        .messages({
+            'string.max': 'sucursal cannot exceed 20 characters'
+        }),
+    website: Joi.string().max(50).optional().allow(null, '')
+        .messages({
+            'string.max': 'website cannot exceed 50 characters'
+        }),
+    additionalPhones: Joi.array().items(
+        Joi.string().max(30)
+    ).max(2).optional().allow(null)
+        .messages({
+            'array.max': 'additionalPhones cannot have more than 2 items'
+        })
 }).min(1).messages({
     'object.min': 'At least one field is required to update'
 });
@@ -51,7 +74,21 @@ const updateCompanyByIdSchema = Joi.object({
     economicActivity: Joi.string().max(200).optional().allow(null, ''),
     // Campos exclusivos del admin
     dgiiEnvironment: Joi.string().valid('testecf', 'production').optional(),
-    isActive: Joi.boolean().optional()
+    isActive: Joi.boolean().optional(),
+    provinceDgiiCode: Joi.string().pattern(/^\d{6}$/).optional()
+        .messages({
+            'string.pattern.base': 'provinceDgiiCode must be exactly 6 digits'
+        }),
+    municipalityDgiiCode: Joi.string().pattern(/^\d{6}$/).optional()
+        .messages({
+            'string.pattern.base': 'municipalityDgiiCode must be exactly 6 digits'
+        }),
+    // DT30 — Emisor extendido
+    sucursal: Joi.string().max(20).optional().allow(null, ''),
+    website: Joi.string().max(50).optional().allow(null, ''),
+    additionalPhones: Joi.array().items(
+        Joi.string().max(30)
+    ).max(2).optional().allow(null)
 }).min(1).messages({
     'object.min': 'At least one field is required to update'
 });

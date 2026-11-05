@@ -68,6 +68,15 @@ function normalizeError(err) {
         };
     }
 
+    // Trigger de coherencia provincia↔municipio
+    if (err.parent?.code === 'P0001') {
+        return {
+            statusCode: 400,
+            code: 'MUNICIPALITY_PROVINCE_MISMATCH',
+            message: err.parent.message || 'Municipality does not belong to the specified province'
+        };
+    }
+
     // 2. Errores de PostgreSQL: unique constraint (prioridad antes de ValidationError)
     // Sequelize a veces envuelve el UniqueConstraintError en ValidationError
     if (err.name === 'SequelizeUniqueConstraintError' || err.parent?.code === '23505') {

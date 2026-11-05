@@ -254,6 +254,232 @@ const InvoiceLine = sequelize.define('InvoiceLine', {
     },
 
     // ============================================================
+    // DT30 — <OtraMonedaDetalle> (solo si la factura usa moneda extranjera)
+    // ============================================================
+    precioOtraMoneda: {
+        type: DataTypes.DECIMAL(15, 4),
+        allowNull: true,
+        field: 'precio_otra_moneda',
+        validate: {
+            min: { args: [0], msg: 'precioOtraMoneda cannot be negative' }
+        }
+    },
+    descuentoOtraMoneda: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'descuento_otra_moneda',
+        validate: {
+            min: { args: [0], msg: 'descuentoOtraMoneda cannot be negative' }
+        }
+    },
+    recargoOtraMoneda: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'recargo_otra_moneda',
+        validate: {
+            min: { args: [0], msg: 'recargoOtraMoneda cannot be negative' }
+        }
+    },
+    montoItemOtraMoneda: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: true,
+        field: 'monto_item_otra_moneda',
+        validate: {
+            min: { args: [0], msg: 'montoItemOtraMoneda cannot be negative' }
+        }
+    },
+    // ============================================================
+    // DT31 — Sub-bloques del <Item>
+    // ============================================================
+
+    // B.1.2 — <TablaCodigosItem> (hasta 5)
+    additionalCodes: {
+        type: DataTypes.JSONB,
+        allowNull: true,
+        field: 'additional_codes',
+        validate: {
+            isValidCodesArray(value) {
+                if (value === null || value === undefined) return;
+                if (!Array.isArray(value)) {
+                    throw new Error('additionalCodes must be an array');
+                }
+                if (value.length > 5) {
+                    throw new Error('additionalCodes cannot have more than 5 items');
+                }
+                const validTypes = ['Interna', 'EAN', 'PLU', 'DUN'];
+                for (const c of value) {
+                    if (typeof c !== 'object' || c === null) {
+                        throw new Error('additionalCodes items must be objects');
+                    }
+                    if (c.tipoCodigo && !validTypes.includes(c.tipoCodigo)) {
+                        throw new Error(`additionalCodes[].tipoCodigo must be one of: ${validTypes.join(', ')}`);
+                    }
+                    if (!c.codigoItem || typeof c.codigoItem !== 'string') {
+                        throw new Error('additionalCodes[].codigoItem is required (string)');
+                    }
+                    if (c.codigoItem.length > 35) {
+                        throw new Error('additionalCodes[].codigoItem cannot exceed 35 characters');
+                    }
+                }
+            }
+        }
+    },
+
+    // B.4.3 — <TablaSubcantidad> (hasta 5)
+    subcantidades: {
+        type: DataTypes.JSONB,
+        allowNull: true,
+        field: 'subcantidades',
+        validate: {
+            isValidSubcantidadesArray(value) {
+                if (value === null || value === undefined) return;
+                if (!Array.isArray(value)) {
+                    throw new Error('subcantidades must be an array');
+                }
+                if (value.length > 5) {
+                    throw new Error('subcantidades cannot have more than 5 items');
+                }
+                for (const s of value) {
+                    if (typeof s !== 'object' || s === null) {
+                        throw new Error('subcantidades items must be objects');
+                    }
+                    if (s.subcantidad == null || Number(s.subcantidad) < 0) {
+                        throw new Error('subcantidades[].subcantidad is required and cannot be negative');
+                    }
+                    const code = Number(s.codigoSubcantidad);
+                    if (!Number.isInteger(code) || code < 1 || code > 62) {
+                        throw new Error('subcantidades[].codigoSubcantidad must be 1-62');
+                    }
+                }
+            }
+        }
+    },
+
+    // B.6.3 — <TablaSubDescuento> (hasta 12)
+    subDescuentos: {
+        type: DataTypes.JSONB,
+        allowNull: true,
+        field: 'sub_descuentos',
+        validate: {
+            isValidSubDescuentosArray(value) {
+                if (value === null || value === undefined) return;
+                if (!Array.isArray(value)) {
+                    throw new Error('subDescuentos must be an array');
+                }
+                if (value.length > 12) {
+                    throw new Error('subDescuentos cannot have more than 12 items');
+                }
+                for (const d of value) {
+                    if (typeof d !== 'object' || d === null) {
+                        throw new Error('subDescuentos items must be objects');
+                    }
+                    if (d.tipoSubDescuento !== '$' && d.tipoSubDescuento !== '%') {
+                        throw new Error('subDescuentos[].tipoSubDescuento must be "$" or "%"');
+                    }
+                    if (d.tipoSubDescuento === '%' && (d.subDescuentoPorcentaje == null || d.subDescuentoPorcentaje < 0)) {
+                        throw new Error('subDescuentos[].subDescuentoPorcentaje is required when tipoSubDescuento is "%"');
+                    }
+                    if (d.montoSubDescuento == null || Number(d.montoSubDescuento) < 0) {
+                        throw new Error('subDescuentos[].montoSubDescuento is required and cannot be negative');
+                    }
+                }
+            }
+        }
+    },
+
+    // B.6.8 — <TablaSubRecargo> (hasta 12)
+    subRecargos: {
+        type: DataTypes.JSONB,
+        allowNull: true,
+        field: 'sub_recargos',
+        validate: {
+            isValidSubRecargosArray(value) {
+                if (value === null || value === undefined) return;
+                if (!Array.isArray(value)) {
+                    throw new Error('subRecargos must be an array');
+                }
+                if (value.length > 12) {
+                    throw new Error('subRecargos cannot have more than 12 items');
+                }
+                for (const r of value) {
+                    if (typeof r !== 'object' || r === null) {
+                        throw new Error('subRecargos items must be objects');
+                    }
+                    if (r.tipoSubRecargo !== '$' && r.tipoSubRecargo !== '%') {
+                        throw new Error('subRecargos[].tipoSubRecargo must be "$" or "%"');
+                    }
+                    if (r.tipoSubRecargo === '%' && (r.subRecargoPorcentaje == null || r.subRecargoPorcentaje < 0)) {
+                        throw new Error('subRecargos[].subRecargoPorcentaje is required when tipoSubRecargo is "%"');
+                    }
+                    if (r.montoSubRecargo == null || Number(r.montoSubRecargo) < 0) {
+                        throw new Error('subRecargos[].montoSubRecargo is required and cannot be negative');
+                    }
+                }
+            }
+        }
+    },
+
+    // B.7.1 — <TablaImpuestoAdicional> (hasta 2)
+    impuestosAdicionales: {
+        type: DataTypes.JSONB,
+        allowNull: true,
+        field: 'impuestos_adicionales',
+        validate: {
+            isValidItemImpuestosArray(value) {
+                if (value === null || value === undefined) return;
+                if (!Array.isArray(value)) {
+                    throw new Error('impuestosAdicionales must be an array');
+                }
+                if (value.length > 2) {
+                    throw new Error('impuestosAdicionales cannot have more than 2 items');
+                }
+                for (const t of value) {
+                    if (typeof t !== 'object' || t === null) {
+                        throw new Error('impuestosAdicionales items must be objects');
+                    }
+                    if (!t.codigo || !/^\d{3}$/.test(String(t.codigo))) {
+                        throw new Error('impuestosAdicionales[].codigo must be 3 digits (001-039)');
+                    }
+                }
+            }
+        }
+    },
+
+    // B.5 — <Mineria>
+    pesoNetoKilogramo: {
+        type: DataTypes.DECIMAL(19, 3),
+        allowNull: true,
+        field: 'peso_neto_kilogramo',
+        validate: {
+            min: { args: [0], msg: 'pesoNetoKilogramo cannot be negative' }
+        }
+    },
+    pesoNetoMineria: {
+        type: DataTypes.DECIMAL(19, 3),
+        allowNull: true,
+        field: 'peso_neto_mineria',
+        validate: {
+            min: { args: [0], msg: 'pesoNetoMineria cannot be negative' }
+        }
+    },
+    tipoAfiliacion: {
+        type: DataTypes.SMALLINT,
+        allowNull: true,
+        field: 'tipo_afiliacion',
+        validate: {
+            isIn: { args: [[1, 2]], msg: 'tipoAfiliacion must be 1 or 2' }
+        }
+    },
+    liquidacion: {
+        type: DataTypes.SMALLINT,
+        allowNull: true,
+        field: 'liquidacion',
+        validate: {
+            isIn: { args: [[1, 2]], msg: 'liquidacion must be 1 or 2' }
+        }
+    },
+
+    // ============================================================
     // TOTAL DE LA LÍNEA
     // ============================================================
     total: {

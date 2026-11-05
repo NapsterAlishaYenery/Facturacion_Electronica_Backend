@@ -25,7 +25,32 @@ const registerCompanySchema = Joi.object({
         phone: Joi.string().max(30).optional().allow(null, ''),
         address: Joi.string().max(300).optional().allow(null, ''),
         economicActivity: Joi.string().max(200).optional().allow(null, ''),
-        dgiiEnvironment: Joi.string().valid('testecf', 'production').default('testecf')
+        dgiiEnvironment: Joi.string().valid('testecf', 'production').default('testecf'),
+        provinceDgiiCode: Joi.string().pattern(/^\d{6}$/).required()
+            .messages({
+                'string.pattern.base': 'provinceDgiiCode must be exactly 6 digits',
+                'any.required': 'provinceDgiiCode is required'
+            }),
+        municipalityDgiiCode: Joi.string().pattern(/^\d{6}$/).required()
+            .messages({
+                'string.pattern.base': 'municipalityDgiiCode must be exactly 6 digits',
+                'any.required': 'municipalityDgiiCode is required'
+            }),
+        // DT30 — Emisor extendido
+        sucursal: Joi.string().max(20).optional().allow(null, '')
+            .messages({
+                'string.max': 'sucursal cannot exceed 20 characters'
+            }),
+        website: Joi.string().max(50).optional().allow(null, '')
+            .messages({
+                'string.max': 'website cannot exceed 50 characters'
+            }),
+        additionalPhones: Joi.array().items(
+            Joi.string().max(30)
+        ).max(2).optional().allow(null)
+            .messages({
+                'array.max': 'additionalPhones cannot have more than 2 items'
+            })
     }).required(),
 
     // Datos del dueño
@@ -69,7 +94,11 @@ const updateProfileSchema = Joi.object({
     firstName: Joi.string().min(2).max(80).optional(),
     middleName: Joi.string().max(80).optional().allow(null, ''),
     lastName: Joi.string().min(2).max(80).optional(),
-    secondLastName: Joi.string().max(80).optional().allow(null, '')
+    secondLastName: Joi.string().max(80).optional().allow(null, ''),
+    codigoVendedor: Joi.string().max(60).optional().allow(null, '')
+        .messages({
+            'string.max': 'codigoVendedor cannot exceed 60 characters'
+        })
 }).min(1).messages({
     'object.min': 'At least one field is required to update'
 });
@@ -142,7 +171,15 @@ const adminCreateUserSchema = Joi.object({
     lastName: Joi.string().min(2).max(80).required(),
     secondLastName: Joi.string().max(80).optional().allow(null, ''),
     role: Joi.string().valid('admin', 'company_admin', 'operator').required(),
-    companyId: Joi.string().uuid().optional().allow(null)
+    companyId: Joi.string().uuid().optional().allow(null),
+    codigoVendedor: Joi.string().max(60).optional().allow(null, '')
+        .when('role', {
+            is: 'admin',
+            then: Joi.forbidden().messages({
+                'any.unknown': 'admin users cannot have codigoVendedor'
+            }),
+            otherwise: Joi.optional().allow(null, '')
+        })
 });
 
 // ------------------------------------------------------------
@@ -153,7 +190,11 @@ const companyCreateUserSchema = Joi.object({
     firstName: Joi.string().min(2).max(80).required(),
     middleName: Joi.string().max(80).optional().allow(null, ''),
     lastName: Joi.string().min(2).max(80).required(),
-    secondLastName: Joi.string().max(80).optional().allow(null, '')
+    secondLastName: Joi.string().max(80).optional().allow(null, ''),
+    codigoVendedor: Joi.string().max(60).optional().allow(null, '')
+        .messages({
+            'string.max': 'codigoVendedor cannot exceed 60 characters'
+        })
     // No role, no companyId — son fijos
 });
 
@@ -165,7 +206,11 @@ const updateUserSchema = Joi.object({
     middleName: Joi.string().max(80).optional().allow(null, ''),
     lastName: Joi.string().min(2).max(80).optional(),
     secondLastName: Joi.string().max(80).optional().allow(null, ''),
-    isActive: Joi.boolean().optional()
+    isActive: Joi.boolean().optional(),
+    codigoVendedor: Joi.string().max(60).optional().allow(null, '')
+        .messages({
+            'string.max': 'codigoVendedor cannot exceed 60 characters'
+        })
 }).min(1).messages({
     'object.min': 'At least one field is required to update'
 });

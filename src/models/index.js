@@ -19,6 +19,8 @@ const CompanyLogo = require('./companyLogo.model');
 const Product = require('./product.model');
 const ApiKey = require('./apiKey.model');
 const JobRun = require('./jobRun.model');
+const Province = require('./province.model');
+const Municipality = require('./municipality.model');
 
 // ============================================================
 // Company (1) ─── (N) Subscription
@@ -282,6 +284,54 @@ ApiKey.belongsTo(User, {
     foreignKey: 'createdBy'
 });
 
+// ============================================================
+// Province (1) ─── (N) Municipality
+// ============================================================
+Province.hasMany(Municipality, {
+    as: 'municipalities',
+    foreignKey: 'provinceDgiiCode',
+    sourceKey: 'dgiiCode',
+    onDelete: 'CASCADE',
+    onUpdate: 'CASCADE'
+});
+Municipality.belongsTo(Province, {
+    as: 'province',
+    foreignKey: 'provinceDgiiCode',
+    targetKey: 'dgiiCode'
+});
+
+// ============================================================
+// Province (1) ─── (N) Company  (Emisor.Provincia)
+// ============================================================
+Province.hasMany(Company, {
+    as: 'companies',
+    foreignKey: 'provinceDgiiCode',
+    sourceKey: 'dgiiCode',
+    onDelete: 'RESTRICT',
+    onUpdate: 'CASCADE'
+});
+Company.belongsTo(Province, {
+    as: 'province',
+    foreignKey: 'provinceDgiiCode',
+    targetKey: 'dgiiCode'
+});
+
+// ============================================================
+// Municipality (1) ─── (N) Company  (Emisor.Municipio)
+// ============================================================
+Municipality.hasMany(Company, {
+    as: 'companies',
+    foreignKey: 'municipalityDgiiCode',
+    sourceKey: 'dgiiCode',
+    onDelete: 'RESTRICT',
+    onUpdate: 'CASCADE'
+});
+Company.belongsTo(Municipality, {
+    as: 'municipality',
+    foreignKey: 'municipalityDgiiCode',
+    targetKey: 'dgiiCode'
+});
+
 
 // ============================================================
 // Exportar todos los modelos con sus asociaciones registradas
@@ -300,5 +350,7 @@ module.exports = {
     CompanyLogo,
     Product,
     ApiKey,
-    JobRun
+    JobRun,
+    Province,
+    Municipality
 };

@@ -6,7 +6,7 @@
 const { hashPassword, generateTemporaryPassword } = require('../../shared/utils/password');
 const { Op } = require('sequelize');
 const sequelize = require('../../config/database');
-const { User, Company, Subscription, Plan, AuditLog } = require('../../models');
+const { User, Company, Subscription, Plan, Province, Municipality, AuditLog } = require('../../models');
 const { TRIAL_DAYS } = require('../../constants/subscription');
 const notificationsConfig = require('../../config/notifications');
 const { signAccessToken, signRefreshToken } = require('../../shared/utils/jwt');
@@ -31,6 +31,16 @@ async function registerCompany(data, reqInfo = {}) {
         throw new AppError('A user with this email already exists', 409, 'EMAIL_ALREADY_EXISTS');
     }
 
+    // 👈 NUEVO: Validar coherencia provincia ↔ municipio ANTES de la transacción
+    const muni = await Municipality.findByPk(companyData.municipalityDgiiCode);
+    if (!muni || muni.provinceDgiiCode !== companyData.provinceDgiiCode) {
+        throw new AppError(
+            `Municipality ${companyData.municipalityDgiiCode} does not belong to province ${companyData.provinceDgiiCode}`,
+            400,
+            'MUNICIPALITY_PROVINCE_MISMATCH'
+        );
+    }
+
     // Transacción: empresa + dueño + suscripción trial
     const result = await sequelize.transaction(async (t) => {
         // 1. Crear la empresa
@@ -42,7 +52,13 @@ async function registerCompany(data, reqInfo = {}) {
             phone: companyData.phone || null,
             address: companyData.address || null,
             economicActivity: companyData.economicActivity || null,
-            dgiiEnvironment: companyData.dgiiEnvironment || 'testecf'
+            dgiiEnvironment: companyData.dgiiEnvironment || 'testecf',
+            provinceDgiiCode: companyData.provinceDgiiCode,
+            municipalityDgiiCode: companyData.municipalityDgiiCode,
+            // DT30 — Emisor extendido
+            sucursal: companyData.sucursal || null,
+            website: companyData.website || null,
+            additionalPhones: companyData.additionalPhones || null
         }, { transaction: t });
 
         // 2. Crear el dueño (company_admin)
@@ -89,7 +105,12 @@ async function registerCompany(data, reqInfo = {}) {
             after: {
                 rnc: company.rnc,
                 name: company.name,
-                ownerEmail: user.email
+                ownerEmail: user.email,
+                provinceDgiiCode: company.provinceDgiiCode,
+                municipalityDgiiCode: company.municipalityDgiiCode,
+                sucursal: company.sucursal,
+                website: company.website,
+                additionalPhones: company.additionalPhones
             },
             ip: reqInfo.ip || null,
             userAgent: reqInfo.userAgent || null
@@ -140,9 +161,35 @@ async function registerCompany(data, reqInfo = {}) {
 
     const refreshToken = signRefreshToken({ userId: result.user.id });
 
+    // 7. Recargar la company con los nombres de provincia/municipio
+    const companyWithLocation = await Company.findByPk(result.company.id, {
+        attributes: {
+            exclude: [
+                'certificatePasswordEncrypted',
+                'certificateIv',
+                'certificateAuthTag',
+                'certificatePath'
+            ]
+        },
+        include: [
+            {
+                model: Province,
+                as: 'province',
+                attributes: ['dgiiCode', 'name'],
+                required: false
+            },
+            {
+                model: Municipality,
+                as: 'municipality',
+                attributes: ['dgiiCode', 'name', 'isDistrict'],
+                required: false
+            }
+        ]
+    });
+
     return {
         user: sanitizeUser(result.user),
-        company: result.company,
+        company: companyWithLocation,
         subscription: result.subscription,
         accessToken,
         refreshToken
@@ -239,7 +286,14 @@ async function getCurrentUser(userId) {
             {
                 model: Company,
                 as: 'company',
-                attributes: ['id', 'rnc', 'name', 'tradeName', 'dgiiEnvironment', 'isActive']
+                attributes: [
+                    'id', 'rnc', 'name', 'tradeName', 'dgiiEnvironment', 'isActive',
+                    'provinceDgiiCode', 'municipalityDgiiCode'
+                ],
+                include: [
+                    { model: Province, as: 'province', attributes: ['dgiiCode', 'name'], required: false },
+                    { model: Municipality, as: 'municipality', attributes: ['dgiiCode', 'name', 'isDistrict'], required: false }
+                ]
             }
         ]
     });
@@ -276,11 +330,12 @@ async function updateProfile(userId, updates, reqInfo = {}) {
         firstName: user.firstName,
         middleName: user.middleName,
         lastName: user.lastName,
-        secondLastName: user.secondLastName
+        secondLastName: user.secondLastName,
+        codigoVendedor: user.codigoVendedor
     };
 
     // 3. Aplicar solo los campos permitidos
-    const allowedFields = ['firstName', 'middleName', 'lastName', 'secondLastName'];
+    const allowedFields = ['firstName', 'middleName', 'lastName', 'secondLastName', 'codigoVendedor'];
     const updateData = {};
     for (const field of allowedFields) {
         if (updates[field] !== undefined) {
@@ -690,7 +745,8 @@ async function createUser(reqUser, userData, reqInfo = {}) {
         lastName: data.lastName,
         secondLastName: data.secondLastName || null,
         role: data.role,
-        companyId: data.companyId || null
+        companyId: data.companyId || null,
+        codigoVendedor: data.codigoVendedor || null
     });
 
     // Audit log
@@ -764,7 +820,7 @@ async function updateUser(reqUser, targetUserId, updates, reqInfo = {}) {
     }
 
     // 4. Filtrar campos permitidos
-    const allowedFields = ['firstName', 'middleName', 'lastName', 'secondLastName', 'isActive'];
+    const allowedFields = ['firstName', 'middleName', 'lastName', 'secondLastName', 'isActive', 'codigoVendedor'];
     const updateData = {};
     for (const field of allowedFields) {
         if (updates[field] !== undefined) {
@@ -782,7 +838,8 @@ async function updateUser(reqUser, targetUserId, updates, reqInfo = {}) {
         middleName: targetUser.middleName,
         lastName: targetUser.lastName,
         secondLastName: targetUser.secondLastName,
-        isActive: targetUser.isActive
+        isActive: targetUser.isActive,
+        codigoVendedor: targetUser.codigoVendedor
     };
 
     // 6. Actualizar
