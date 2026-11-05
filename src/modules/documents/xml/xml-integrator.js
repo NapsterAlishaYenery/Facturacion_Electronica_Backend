@@ -580,6 +580,12 @@ async function loadFullInvoice(invoiceId, transaction = null) {
             order: [['lineNumber', 'ASC']]
         },
         {
+            model: InvoiceSubtotal,
+            as: 'subtotales',
+            separate: true,
+            order: [['numeroSubtotal', 'ASC']]
+        },
+        {
             model: Company,
             as: 'company',
             attributes: [

@@ -13,6 +13,7 @@ const {
     Sequence,
     Invoice,
     InvoiceLine,
+    InvoiceSubtotal,
     CompanyLogo,
     AuditLog
 } = require('../../models');
@@ -788,7 +789,9 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
         totalItbis3OtraMoneda,
         montoImpuestoAdicionalOtraMoneda,
         impuestosAdicionalesOtraMoneda,
-        montoTotalOtraMoneda
+        montoTotalOtraMoneda,
+        // DT32 — Subtotales
+        subtotales,
     } = data;
 
     const isNota = type === '33' || type === '34';
@@ -1064,6 +1067,33 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
             { transaction: t, returning: true }
         );
 
+        // 4.8.1. DT32 — Crear subtotales
+        let subtotalesCreados = [];
+        if (Array.isArray(subtotales) && subtotales.length > 0) {
+            subtotalesCreados = await InvoiceSubtotal.bulkCreate(
+                subtotales.map((st) => ({
+                    invoiceId: invoice.id,
+                    numeroSubtotal: st.numeroSubtotal,
+                    descripcion: st.descripcion || null,
+                    orden: st.orden ?? null,
+                    montoGravadoTotal: st.montoGravadoTotal ?? 0,
+                    montoGravadoI1: st.montoGravadoI1 ?? 0,
+                    montoGravadoI2: st.montoGravadoI2 ?? 0,
+                    montoGravadoI3: st.montoGravadoI3 ?? 0,
+                    subTotalItbis: st.subTotalItbis ?? 0,
+                    subTotalItbis1: st.subTotalItbis1 ?? 0,
+                    subTotalItbis2: st.subTotalItbis2 ?? 0,
+                    subTotalItbis3: st.subTotalItbis3 ?? 0,
+                    subTotalImpuestoAdicional: st.subTotalImpuestoAdicional ?? 0,
+                    subTotalExento: st.subTotalExento ?? 0,
+                    montoSubTotal: st.montoSubTotal ?? 0,
+                    lineas: st.lineas ?? null
+                })),
+                { transaction: t, returning: true }
+            );
+        }
+
+
         // 4.8.5. 🔥 Generar y persistir XML
         // No rompemos la factura si el XML falla: xml_content queda null
         // y se puede regenerar con updateMyInvoice o un endpoint manual.
@@ -1140,6 +1170,12 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
                 as: 'lines',
                 separate: true,
                 order: [['lineNumber', 'ASC']]
+            },
+            {
+                model: InvoiceSubtotal,
+                as: 'subtotales',
+                separate: true,
+                order: [['numeroSubtotal', 'ASC']]
             }
         ]
     });
@@ -1477,6 +1513,38 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
         if (updates.impuestosAdicionalesOtraMoneda !== undefined) updateData.impuestosAdicionalesOtraMoneda = updates.impuestosAdicionalesOtraMoneda || null;
         if (updates.montoTotalOtraMoneda !== undefined) updateData.montoTotalOtraMoneda = updates.montoTotalOtraMoneda ?? null;
 
+        // DT32 — Si se envían subtotales, reemplazar todos
+        if (updates.subtotales !== undefined) {
+            await InvoiceSubtotal.destroy({
+                where: { invoiceId: invoice.id },
+                transaction: t
+            });
+
+            if (Array.isArray(updates.subtotales) && updates.subtotales.length > 0) {
+                await InvoiceSubtotal.bulkCreate(
+                    updates.subtotales.map((st) => ({
+                        invoiceId: invoice.id,
+                        numeroSubtotal: st.numeroSubtotal,
+                        descripcion: st.descripcion || null,
+                        orden: st.orden ?? null,
+                        montoGravadoTotal: st.montoGravadoTotal ?? 0,
+                        montoGravadoI1: st.montoGravadoI1 ?? 0,
+                        montoGravadoI2: st.montoGravadoI2 ?? 0,
+                        montoGravadoI3: st.montoGravadoI3 ?? 0,
+                        subTotalItbis: st.subTotalItbis ?? 0,
+                        subTotalItbis1: st.subTotalItbis1 ?? 0,
+                        subTotalItbis2: st.subTotalItbis2 ?? 0,
+                        subTotalItbis3: st.subTotalItbis3 ?? 0,
+                        subTotalImpuestoAdicional: st.subTotalImpuestoAdicional ?? 0,
+                        subTotalExento: st.subTotalExento ?? 0,
+                        montoSubTotal: st.montoSubTotal ?? 0,
+                        lineas: st.lineas ?? null
+                    })),
+                    { transaction: t }
+                );
+            }
+        }
+
         // 4.2. Si se envían items, reemplazar TODAS las líneas
         if (updates.items !== undefined) {
             const calculatedLines = updates.items.map((item, index) => {
@@ -1633,6 +1701,12 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
                 as: 'lines',
                 separate: true,
                 order: [['lineNumber', 'ASC']]
+            },
+            {
+                model: InvoiceSubtotal,
+                as: 'subtotales',
+                separate: true,
+                order: [['numeroSubtotal', 'ASC']]
             }
         ]
     });
@@ -1887,6 +1961,12 @@ async function getInvoiceById(invoiceId) {
                 as: 'lines',
                 separate: true,
                 order: [['lineNumber', 'ASC']]
+            },
+            {
+                model: InvoiceSubtotal,
+                as: 'subtotales',
+                separate: true,
+                order: [['numeroSubtotal', 'ASC']]
             }
         ]
     });

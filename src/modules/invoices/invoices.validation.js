@@ -204,6 +204,36 @@ const itemSchema = Joi.object({
     }).optional().allow(null)
 });
 
+// ============================================================
+// DT32 — Sub-schema: Subtotales
+// ============================================================
+const subtotalSchema = Joi.object({
+    numeroSubtotal: Joi.number().integer().min(1).max(20).required()
+        .messages({
+            'any.required': 'numeroSubtotal is required',
+            'number.min': 'numeroSubtotal must be between 1 and 20',
+            'number.max': 'numeroSubtotal must be between 1 and 20'
+        }),
+    descripcion: Joi.string().max(40).optional().allow(null, '')
+        .messages({ 'string.max': 'DescripcionSubtotal cannot exceed 40 characters' }),
+    orden: Joi.number().integer().min(1).optional().allow(null),
+
+    montoGravadoTotal: Joi.number().min(0).default(0),
+    montoGravadoI1: Joi.number().min(0).default(0),
+    montoGravadoI2: Joi.number().min(0).default(0),
+    montoGravadoI3: Joi.number().min(0).default(0),
+
+    subTotalItbis: Joi.number().min(0).default(0),
+    subTotalItbis1: Joi.number().min(0).default(0),
+    subTotalItbis2: Joi.number().min(0).default(0),
+    subTotalItbis3: Joi.number().min(0).default(0),
+
+    subTotalImpuestoAdicional: Joi.number().min(0).default(0),
+    subTotalExento: Joi.number().min(0).default(0),
+    montoSubTotal: Joi.number().min(0).default(0),
+    lineas: Joi.number().integer().min(0).optional().allow(null)
+});
+
 // Transporte — solo aplica en tipos 31, 32, 33, 34, 44, 45, 46, 47
 const transporteSchema = Joi.object({
     viaTransporte: Joi.string().valid('01', '02', '03').optional()
@@ -813,6 +843,17 @@ const createInvoiceSchema = Joi.object({
     montoTotalOtraMoneda: otraMonedaSchema.extract('montoTotalOtraMoneda'),
 
     // ============================================================
+    // DT32 — Subtotales
+    // ============================================================
+    subtotales: Joi.array()
+        .items(subtotalSchema)
+        .max(20)
+        .optional()
+        .allow(null)
+        .messages({
+            'array.max': 'No puede haber más de 20 subtotales'
+        }),
+    // ============================================================
     // Líneas
     // ============================================================
     items: Joi.array()
@@ -1141,6 +1182,18 @@ const createInvoiceSchema = Joi.object({
             });
         }
 
+        // DT32 — numeroSubtotal único dentro del array
+        if (value.subtotales && value.subtotales.length > 0) {
+            const numeros = value.subtotales.map(s => s.numeroSubtotal);
+            const unicos = new Set(numeros);
+            if (unicos.size !== numeros.length) {
+                return helpers.error('any.custom', {
+                    message: 'subtotales: numeroSubtotal debe ser único dentro del array'
+                });
+            }
+        }
+
+
         return value;
     })
     .messages({
@@ -1165,6 +1218,12 @@ const updateInvoiceSchema = Joi.object({
         .messages({
             'date.format': 'issuedAt must be a valid ISO date'
         }),
+    // DT32 — Subtotales
+    subtotales: Joi.array()
+        .items(subtotalSchema)
+        .max(20)
+        .optional()
+        .allow(null),
     items: Joi.array()
         .items(itemSchema)
         .min(1)
@@ -1416,6 +1475,17 @@ const updateInvoiceSchema = Joi.object({
             });
         }
 
+        // DT32 — numeroSubtotal único dentro del array
+        if (value.subtotales && value.subtotales.length > 0) {
+            const numeros = value.subtotales.map(s => s.numeroSubtotal);
+            const unicos = new Set(numeros);
+            if (unicos.size !== numeros.length) {
+                return helpers.error('any.custom', {
+                    message: 'subtotales: numeroSubtotal debe ser único dentro del array'
+                });
+            }
+        }
+
         return value;
     })
     .messages({
@@ -1461,5 +1531,6 @@ module.exports = {
     compradorExtrasSchema,
     infoAdicionalExtrasSchema,
     totalesExtrasSchema,
-    otraMonedaSchema
+    otraMonedaSchema,
+    subtotalSchema
 };

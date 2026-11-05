@@ -21,6 +21,7 @@ const ApiKey = require('./apiKey.model');
 const JobRun = require('./jobRun.model');
 const Province = require('./province.model');
 const Municipality = require('./municipality.model');
+const InvoiceSubtotal = require('./invoiceSubtotal.model');
 
 // ============================================================
 // Company (1) ─── (N) Subscription
@@ -332,6 +333,22 @@ Company.belongsTo(Municipality, {
     targetKey: 'dgiiCode'
 });
 
+// ============================================================
+// Invoice line (1) ─── (1) subtotal  
+// ============================================================
+// DT32 — Invoice hasMany InvoiceSubtotal
+Invoice.hasMany(InvoiceSubtotal, {
+    foreignKey: 'invoiceId',
+    as: 'subtotales',
+    onDelete: 'CASCADE',
+    onUpdate: 'CASCADE'
+});
+InvoiceSubtotal.belongsTo(Invoice, {
+    foreignKey: 'invoiceId',
+    as: 'invoice'
+});
+
+
 
 // ============================================================
 // Exportar todos los modelos con sus asociaciones registradas
@@ -352,5 +369,6 @@ module.exports = {
     ApiKey,
     JobRun,
     Province,
-    Municipality
+    Municipality,
+    InvoiceSubtotal,
 };
