@@ -1,4 +1,4 @@
-// src/modules/invoices/ecf/type-profiles.js
+// src/modules/invoices/ecf/type-profiles2.js
 //
 // ============================================================
 // PERFILES COMPLETOS DE LOS 10 TIPOS DE e-CF DGII

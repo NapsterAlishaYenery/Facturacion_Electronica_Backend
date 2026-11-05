@@ -234,6 +234,64 @@ const subtotalSchema = Joi.object({
     lineas: Joi.number().integer().min(0).optional().allow(null)
 });
 
+// ============================================================
+// DT33 — Sub-schema: Descuentos o Recargos globales (hasta 20)
+// ============================================================
+const descuentoORecargoSchema = Joi.object({
+    numeroLinea: Joi.number().integer().min(1).max(20).required()
+        .messages({
+            'any.required': 'numeroLinea is required',
+            'number.min': 'numeroLinea must be between 1 and 20',
+            'number.max': 'numeroLinea must be between 1 and 20'
+        }),
+    tipoAjuste: Joi.string().valid('D', 'R').required()
+        .messages({
+            'any.required': 'tipoAjuste is required',
+            'any.only': 'tipoAjuste must be "D" (descuento) or "R" (recargo)'
+        }),
+    indicadorNorma1007: Joi.number().integer().valid(1).optional().allow(null)
+        .messages({
+            'any.only': 'indicadorNorma1007 must be 1 or null'
+        }),
+    descripcion: Joi.string().max(45).optional().allow(null, '')
+        .messages({
+            'string.max': 'DescripcionDescuentooRecargo cannot exceed 45 characters'
+        }),
+    tipoValor: Joi.string().valid('%', '$').required()
+        .messages({
+            'any.required': 'tipoValor is required',
+            'any.only': 'tipoValor must be "%" (porcentaje) or "$" (monto)'
+        }),
+    valor: Joi.when('tipoValor', {
+        is: '%',
+        then: Joi.number().positive().max(100).required()
+            .messages({
+                'any.required': 'valor is required when tipoValor is "%"',
+                'number.positive': 'valor must be greater than 0 when tipoValor is "%"',
+                'number.max': 'valor cannot exceed 100'
+            }),
+        otherwise: Joi.forbidden()
+            .messages({ 'any.unknown': 'valor must not be provided when tipoValor is "$"' })
+    }),
+    monto: Joi.when('tipoValor', {
+        is: '$',
+        then: Joi.number().min(0).required()
+            .messages({
+                'any.required': 'monto is required when tipoValor is "$"',
+                'number.min': 'monto cannot be negative'
+            }),
+        otherwise: Joi.number().min(0).optional().allow(null)
+            .messages({ 'number.min': 'monto cannot be negative' })
+    }),
+    montoOtraMoneda: Joi.number().min(0).optional().allow(null)
+        .messages({ 'number.min': 'montoOtraMoneda cannot be negative' }),
+    indicadorFacturacion: Joi.number().integer().valid(1, 2, 3, 4).required()
+        .messages({
+            'any.required': 'indicadorFacturacion is required',
+            'any.only': 'indicadorFacturacion must be 1, 2, 3 or 4'
+        })
+});
+
 // Transporte — solo aplica en tipos 31, 32, 33, 34, 44, 45, 46, 47
 const transporteSchema = Joi.object({
     viaTransporte: Joi.string().valid('01', '02', '03').optional()
@@ -853,6 +911,18 @@ const createInvoiceSchema = Joi.object({
         .messages({
             'array.max': 'No puede haber más de 20 subtotales'
         }),
+
+    // ============================================================
+    // DT33 — Descuentos o Recargos globales
+    // ============================================================
+    descuentosORecargos: Joi.array()
+        .items(descuentoORecargoSchema)
+        .max(20)
+        .optional()
+        .allow(null)
+        .messages({
+            'array.max': 'No puede haber más de 20 descuentos o recargos'
+        }),
     // ============================================================
     // Líneas
     // ============================================================
@@ -1193,6 +1263,77 @@ const createInvoiceSchema = Joi.object({
             }
         }
 
+        // ============================================================
+        // DT33 — Validaciones cruzadas de descuentos/recargos globales
+        // ============================================================
+
+        // 1. numeroLinea único dentro del array
+        if (value.descuentosORecargos && value.descuentosORecargos.length > 0) {
+            const numeros = value.descuentosORecargos.map(d => d.numeroLinea);
+            const unicos = new Set(numeros);
+            if (unicos.size !== numeros.length) {
+                return helpers.error('any.custom', {
+                    message: 'descuentosORecargos: numeroLinea debe ser único dentro del array'
+                });
+            }
+        }
+
+        // 2. Tipos que NO admiten descuentos/recargos globales: 43 y 47
+        //    (el PDF dice 0 = No aplica)
+        if (value.descuentosORecargos && value.descuentosORecargos.length > 0) {
+            if (value.type === '43' || value.type === '47') {
+                return helpers.error('any.custom', {
+                    message: `Type ${value.type} does not allow descuentosORecargos (global discounts/charges)`
+                });
+            }
+        }
+
+        // 3. indicadorNorma1007 solo aplica a descuentos (tipoAjuste = D), no a recargos (R)
+        if (value.descuentosORecargos && value.descuentosORecargos.length > 0) {
+            for (let i = 0; i < value.descuentosORecargos.length; i++) {
+                const d = value.descuentosORecargos[i];
+                if (d.indicadorNorma1007 === 1 && d.tipoAjuste !== 'D') {
+                    return helpers.error('any.custom', {
+                        message: `descuentosORecargos[${i}]: indicadorNorma1007 only applies to descuentos (tipoAjuste="D"), not recargos (tipoAjuste="R")`
+                    });
+                }
+            }
+        }
+
+        // 4. Regla del PDF: si en <Detalle> hay ítems con distintos
+        //    códigos de impuesto, el tipoValor del descuento/recargo
+        //    DEBE ser "%" (porcentaje). Si es "$" con distintos
+        //    indicadores, DGII rechaza.
+        if (value.descuentosORecargos && value.descuentosORecargos.length > 0 && value.items) {
+            const indicadoresEnItems = new Set(
+                value.items.map(it => Number(it.indicadorFacturacion ?? 4))
+            );
+            const hayMultiplesIndicadores = indicadoresEnItems.size > 1;
+
+            if (hayMultiplesIndicadores) {
+                for (let i = 0; i < value.descuentosORecargos.length; i++) {
+                    const d = value.descuentosORecargos[i];
+                    if (d.tipoValor === '$') {
+                        return helpers.error('any.custom', {
+                            message: `descuentosORecargos[${i}]: cuando hay ítems con distintos indicadores de facturación, tipoValor debe ser "%" (porcentaje), no "$"`
+                        });
+                    }
+                }
+            }
+        }
+
+        // 5. Coherencia: si el descuento/recargo aplica a varios
+        //    indicadores de facturación, debe haber una línea por
+        //    cada indicador afectado (regla del PDF D.9).
+        //    Solo lo validamos si el usuario declaró el afectado
+        //    como "todos" mediante múltiples líneas; no podemos
+        //    inferir automáticamente qué afecta cada línea sin más
+        //    metadata, así que esta regla se delega al service
+        //    (que sí sabe qué base corresponde a cada indicador).
+        //    Aquí solo validamos que no haya duplicados exactos
+        //    (mismo numeroLinea ya cubierto arriba).
+
+
 
         return value;
     })
@@ -1224,6 +1365,18 @@ const updateInvoiceSchema = Joi.object({
         .max(20)
         .optional()
         .allow(null),
+
+    // ============================================================
+    // DT33 — Descuentos o Recargos globales
+    // ============================================================
+    descuentosORecargos: Joi.array()
+        .items(descuentoORecargoSchema)
+        .max(20)
+        .optional()
+        .allow(null)
+        .messages({
+            'array.max': 'No puede haber más de 20 descuentos o recargos'
+        }),
     items: Joi.array()
         .items(itemSchema)
         .min(1)
@@ -1486,6 +1639,55 @@ const updateInvoiceSchema = Joi.object({
             }
         }
 
+        // ============================================================
+        // DT33 — Validaciones cruzadas de descuentos/recargos globales
+        // (mismas que en create, pero sin poder validar contra el
+        // tipo real porque en update no viene en el body)
+        // ============================================================
+
+        // 1. numeroLinea único dentro del array
+        if (value.descuentosORecargos && value.descuentosORecargos.length > 0) {
+            const numeros = value.descuentosORecargos.map(d => d.numeroLinea);
+            const unicos = new Set(numeros);
+            if (unicos.size !== numeros.length) {
+                return helpers.error('any.custom', {
+                    message: 'descuentosORecargos: numeroLinea debe ser único dentro del array'
+                });
+            }
+        }
+
+        // 2. indicadorNorma1007 solo aplica a descuentos (tipoAjuste = D)
+        if (value.descuentosORecargos && value.descuentosORecargos.length > 0) {
+            for (let i = 0; i < value.descuentosORecargos.length; i++) {
+                const d = value.descuentosORecargos[i];
+                if (d.indicadorNorma1007 === 1 && d.tipoAjuste !== 'D') {
+                    return helpers.error('any.custom', {
+                        message: `descuentosORecargos[${i}]: indicadorNorma1007 only applies to descuentos (tipoAjuste="D"), not recargos (tipoAjuste="R")`
+                    });
+                }
+            }
+        }
+
+        // 3. Regla del PDF: si hay ítems con distintos indicadores
+        //    de facturación, tipoValor debe ser "%"
+        if (value.descuentosORecargos && value.descuentosORecargos.length > 0 && value.items) {
+            const indicadoresEnItems = new Set(
+                value.items.map(it => Number(it.indicadorFacturacion ?? 4))
+            );
+            const hayMultiplesIndicadores = indicadoresEnItems.size > 1;
+
+            if (hayMultiplesIndicadores) {
+                for (let i = 0; i < value.descuentosORecargos.length; i++) {
+                    const d = value.descuentosORecargos[i];
+                    if (d.tipoValor === '$') {
+                        return helpers.error('any.custom', {
+                            message: `descuentosORecargos[${i}]: cuando hay ítems con distintos indicadores de facturación, tipoValor debe ser "%" (porcentaje), no "$"`
+                        });
+                    }
+                }
+            }
+        }
+
         return value;
     })
     .messages({
@@ -1532,5 +1734,8 @@ module.exports = {
     infoAdicionalExtrasSchema,
     totalesExtrasSchema,
     otraMonedaSchema,
-    subtotalSchema
+    // DT32 — Subtotales
+    subtotalSchema,
+    // DT33 — Descuentos o recargos globales
+    descuentoORecargoSchema
 };

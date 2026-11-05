@@ -22,6 +22,7 @@ const JobRun = require('./jobRun.model');
 const Province = require('./province.model');
 const Municipality = require('./municipality.model');
 const InvoiceSubtotal = require('./invoiceSubtotal.model');
+const InvoiceDiscountCharge = require('./invoiceDiscountCharge.model');
 
 // ============================================================
 // Company (1) ─── (N) Subscription
@@ -348,6 +349,22 @@ InvoiceSubtotal.belongsTo(Invoice, {
     as: 'invoice'
 });
 
+// ============================================================
+// Invoice (1) ─── (N) InvoiceDiscountCharge
+// ============================================================
+// DT33 — Invoice hasMany InvoiceDiscountCharge
+// Descuentos y recargos globales por factura (hasta 20)
+Invoice.hasMany(InvoiceDiscountCharge, {
+    foreignKey: 'invoiceId',
+    as: 'descuentosORecargos',
+    onDelete: 'CASCADE',
+    onUpdate: 'CASCADE'
+});
+InvoiceDiscountCharge.belongsTo(Invoice, {
+    foreignKey: 'invoiceId',
+    as: 'invoice'
+});
+
 
 
 // ============================================================
@@ -371,4 +388,5 @@ module.exports = {
     Province,
     Municipality,
     InvoiceSubtotal,
+    InvoiceDiscountCharge,
 };

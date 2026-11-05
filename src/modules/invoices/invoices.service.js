@@ -14,6 +14,7 @@ const {
     Invoice,
     InvoiceLine,
     InvoiceSubtotal,
+    InvoiceDiscountCharge,
     CompanyLogo,
     AuditLog
 } = require('../../models');
@@ -348,6 +349,246 @@ function calculateInvoiceTotals(lines) {
         itbis,
         total: round(total)
     };
+}
+
+
+// ============================================================
+// DT33 — Helpers: descuentos y recargos GLOBALES
+// ============================================================
+
+/**
+ * Redondeo monetario a 2 decimales con "half up".
+ *
+ * Usa Number.EPSILON para evitar el bug clásico de floats:
+ *   1.005 → sin EPSILON da 1.00 (incorrecto), con EPSILON da 1.01 (correcto).
+ *
+ * Uso: TODO cálculo monetario del service pasa por aquí antes de guardar en BD
+ * o de emitir en el XML. Nunca devolvemos floats "sucios" al modelo.
+ */
+function roundMoney(n) {
+    return Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ * Redondeo de porcentaje a 2 decimales (semánticamente distinto de roundMoney,
+ * pero misma aritmética).
+ */
+function roundPercent(n) {
+    return Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ * Calcula el `monto` de un descuento/recargo cuando tipoValor = '%'.
+ *
+ * Base según indicadorFacturacion:
+ *   1 → itbis1Base (18%)
+ *   2 → itbis2Base (16%)
+ *   3 → itbis3Base (0% gravado, exportación)
+ *   4 → exemptAmount
+ *
+ * @param {Object} descuento - { indicadorFacturacion, valor, ... }
+ * @param {Object} invoiceTotals - resultado de calculateInvoiceTotals
+ * @returns {number} monto redondeado a 2 decimales
+ * @throws {AppError} si indicadorFacturacion no es 1/2/3/4
+ */
+function calculateMontoForPercent(descuento, invoiceTotals) {
+    const ind = Number(descuento.indicadorFacturacion);
+    const valor = Number(descuento.valor);
+
+    if (!Number.isFinite(valor) || valor <= 0 || valor > 100) {
+        throw new AppError(
+            `Valor de descuento/recargo inválido: ${descuento.valor}. Debe ser > 0 y <= 100.`,
+            400,
+            'INVALID_DESCUENTO_VALOR'
+        );
+    }
+
+    let base;
+    if (ind === 1) base = Number(invoiceTotals.itbis1Base || 0);
+    else if (ind === 2) base = Number(invoiceTotals.itbis2Base || 0);
+    else if (ind === 3) base = Number(invoiceTotals.itbis3Base || 0);
+    else if (ind === 4) base = Number(invoiceTotals.exemptAmount || 0);
+    else throw new AppError(
+        `indicadorFacturacion=${ind} no soportado para descuento/recargo con tipoValor='%'. Debe ser 1, 2, 3 o 4.`,
+        400,
+        'INVALID_INDICADOR_FACTURACION'
+    );
+
+    return roundMoney(base * (valor / 100));
+}
+
+/**
+ * Aplica los descuentos/recargos globales a los totales de la factura.
+ *
+ * Reglas del PDF DGII v1.0 — Sección D:
+ *
+ *   1. Descuento (D) RESTA de la base según indicadorFacturacion.
+ *   2. Recargo (R) SUMA a la base según indicadorFacturacion.
+ *   3. Si indicadorNorma1007 = 1 (solo aplica a D):
+ *      - NO se resta de la base gravada (itbisXBase / exemptAmount).
+ *      - SÍ se resta del total (MontoTotal / ValorPagar).
+ *   4. Se recalculan ITBIS por tasa sobre las nuevas bases.
+ *   5. Se recalculan montoGravado, subtotal y total.
+ *
+ * @param {Object} invoiceTotals - resultado de calculateInvoiceTotals (preliminar)
+ * @param {Array} descuentos - array de descuentos ya con `monto` calculado
+ * @returns {Object} copia de invoiceTotals con los ajustes aplicados
+ */
+function applyDescuentosToTotals(invoiceTotals, descuentos) {
+    // Sin descuentos → no tocar nada (devolver el mismo objeto)
+    if (!Array.isArray(descuentos) || descuentos.length === 0) {
+        return invoiceTotals;
+    }
+
+    // Copia defensiva: no mutamos el original
+    const t = { ...invoiceTotals };
+
+    // Acumuladores por base (en valor absoluto)
+    let deltaItbis1Base = 0;
+    let deltaItbis2Base = 0;
+    let deltaItbis3Base = 0;
+    let deltaExempt = 0;
+
+    for (const d of descuentos) {
+        const ind = Number(d.indicadorFacturacion);
+        const monto = roundMoney(d.monto);
+        // D resta, R suma
+        const signo = d.tipoAjuste === 'D' ? -1 : 1;
+        const montoSigned = signo * monto;
+
+        // Regla IndicadorNorma1007 (solo aplica a descuentos):
+        // si está en 1, NO se resta de la base gravada.
+        // El descuento normativo solo afecta al ValorPagar (que no calculamos
+        // en esta fase — queda como deuda para DT34).
+        const isDescuento = d.tipoAjuste === 'D';
+        const skipBase = isDescuento && Number(d.indicadorNorma1007) === 1;
+
+        if (ind === 1) {
+            if (!skipBase) deltaItbis1Base += montoSigned;
+        } else if (ind === 2) {
+            if (!skipBase) deltaItbis2Base += montoSigned;
+        } else if (ind === 3) {
+            if (!skipBase) deltaItbis3Base += montoSigned;
+        } else if (ind === 4) {
+            if (!skipBase) deltaExempt += montoSigned;
+        } else {
+            // No debería llegar aquí (validado en Joi y en calculateMontoForPercent)
+            throw new AppError(
+                `indicadorFacturacion=${ind} inválido al aplicar descuentos`,
+                400,
+                'INVALID_INDICADOR_FACTURACION'
+            );
+        }
+    }
+
+    // Aplicar deltas a las bases
+    t.itbis1Base = roundMoney(Number(t.itbis1Base || 0) + deltaItbis1Base);
+    t.itbis2Base = roundMoney(Number(t.itbis2Base || 0) + deltaItbis2Base);
+    t.itbis3Base = roundMoney(Number(t.itbis3Base || 0) + deltaItbis3Base);
+    t.exemptAmount = roundMoney(Number(t.exemptAmount || 0) + deltaExempt);
+
+    // Recalcular ITBIS sobre las nuevas bases (tasa fija por indicador)
+    t.itbis1Amount = roundMoney(t.itbis1Base * 0.18);
+    t.itbis2Amount = roundMoney(t.itbis2Base * 0.16);
+    t.itbis3Amount = roundMoney(t.itbis3Base * 0.00);
+    t.itbis = roundMoney(t.itbis1Amount + t.itbis2Amount + t.itbis3Amount);
+
+    // montoGravado = suma de bases gravadas (1, 2, 3)
+    t.montoGravado = roundMoney(t.itbis1Base + t.itbis2Base + t.itbis3Base);
+
+    // subtotal = suma de bases (gravadas + exentas)
+    t.subtotal = roundMoney(t.montoGravado + t.exemptAmount);
+
+    // total = bases + ITBIS recalculados
+    // (NO usamos invoiceTotals.total + delta porque el ITBIS pudo cambiar)
+    t.total = roundMoney(t.montoGravado + t.exemptAmount + t.itbis);
+
+    return t;
+}
+
+
+/**
+ * Calcula el ValorPagar cuando hay descuentos con indicadorNorma1007 = 1.
+ *
+ * Regla del PDF DGII:
+ *   - Los descuentos con indicadorNorma1007 = 1 NO restan del MontoTotal
+ *     (ni de la base gravada, ni del ITBIS).
+ *   - Pero SÍ restan del ValorPagar.
+ *
+ * Fórmula:
+ *   ValorPagar = MontoTotal - Σ(descuentos con indicadorNorma1007 = 1)
+ *
+ * Nota: solo aplica a descuentos (tipoAjuste = 'D'). Los recargos (R) no
+ * llevan indicadorNorma1007 (validado en Joi).
+ *
+ * @param {number} montoTotal - MontoTotal ya calculado (con o sin descuentos normales)
+ * @param {Array} descuentos - array de descuentos ya resueltos (con monto)
+ * @returns {number|null} ValorPagar redondeado, o null si no aplica
+ */
+function calculateValorPagarNorma1007(montoTotal, descuentos) {
+    if (!Array.isArray(descuentos) || descuentos.length === 0) {
+        return null;
+    }
+
+    // Filtrar solo descuentos (D) con indicadorNorma1007 = 1
+    const descuentosNorma1007 = descuentos.filter(d =>
+        d.tipoAjuste === 'D' &&
+        Number(d.indicadorNorma1007) === 1
+    );
+
+    if (descuentosNorma1007.length === 0) {
+        return null;
+    }
+
+    const totalDescuentosNorma1007 = descuentosNorma1007.reduce(
+        (sum, d) => sum + roundMoney(d.monto),
+        0
+    );
+
+    return roundMoney(Number(montoTotal) - totalDescuentosNorma1007);
+}
+
+/**
+ * Resuelve el `monto` final de un descuento/recargo antes de guardarlo:
+ *
+ *   - tipoValor = '$' → usa el monto del body (el cliente decidió).
+ *   - tipoValor = '%' → el service lo calcula (ignora el monto del body si vino).
+ *
+ * Devuelve una copia del objeto descuento con el monto ya resuelto.
+ */
+function resolveDescuentoMonto(descuento, invoiceTotals) {
+    const resolved = { ...descuento };
+
+    if (descuento.tipoValor === '$') {
+        // El cliente manda el monto; lo redondeamos por seguridad
+        resolved.monto = roundMoney(Number(descuento.monto || 0));
+    } else if (descuento.tipoValor === '%') {
+        // El service calcula el monto a partir de la base real
+        resolved.monto = calculateMontoForPercent(descuento, invoiceTotals);
+    } else {
+        throw new AppError(
+            `tipoValor inválido: ${descuento.tipoValor}. Debe ser '%' o '$'.`,
+            400,
+            'INVALID_TIPO_VALOR'
+        );
+    }
+
+    return resolved;
+}
+
+/**
+ * Prepara el array de descuentos para guardar:
+ *   1. Calcula el monto de cada uno (con las bases preliminares).
+ *   2. Devuelve el array con montos resueltos.
+ *
+ * IMPORTANTE: se debe llamar ANTES de aplicar los descuentos a los totales,
+ * porque necesitamos las bases preliminares para calcular los montos.
+ */
+function prepareDescuentos(descuentos, invoiceTotals) {
+    if (!Array.isArray(descuentos) || descuentos.length === 0) {
+        return [];
+    }
+    return descuentos.map(d => resolveDescuentoMonto(d, invoiceTotals));
 }
 
 // ------------------------------------------------------------
@@ -792,6 +1033,8 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
         montoTotalOtraMoneda,
         // DT32 — Subtotales
         subtotales,
+        // DT33 — Descuentos o Recargos globales
+        descuentosORecargos,
     } = data;
 
     const isNota = type === '33' || type === '34';
@@ -852,8 +1095,24 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
             };
         });
 
-        // 4.4. Totales factura
-        const invoiceTotals = calculateInvoiceTotals(calculatedLines);
+        // 4.4. Totales PRELIMINARES (sin descuentos globales)
+        const invoiceTotalsPrelim = calculateInvoiceTotals(calculatedLines);
+
+        // ============================================================
+        // DT33 — Descuentos y recargos GLOBALES
+        // Orden:
+        //   1. Resolver el monto de cada descuento (usa bases preliminares).
+        //   2. Aplicar descuentos a los totales (recalcula ITBIS, total, etc.).
+        // ============================================================
+        const descuentosResueltos = prepareDescuentos(
+            descuentosORecargos,
+            invoiceTotalsPrelim
+        );
+
+        const invoiceTotals = applyDescuentosToTotals(
+            invoiceTotalsPrelim,
+            descuentosResueltos
+        );
 
         // 🔥 Defensa en profundidad (opcional) — el schema Joi ya lo valida
         if (type === '32' && invoiceTotals.total >= 250000 && !receiverRnc) {
@@ -890,8 +1149,7 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
             finalExemptAmount = invoiceTotals.exemptAmount;
         }
 
-
-        // 4.7. Crear factura
+        // 4.7. Crear factura (con totales FINALES — ya con descuentos aplicados)
         const invoice = await Invoice.create({
             companyId,
             sequenceId: sequence.id,
@@ -989,7 +1247,10 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
             montoPeriodo: montoPeriodo ?? null,
             saldoAnterior: saldoAnterior ?? null,
             montoAvancePago: montoAvancePago ?? null,
-            valorPagar: valorPagar ?? null,
+            valorPagar: valorPagar ?? calculateValorPagarNorma1007(
+                invoiceTotals.total,
+                descuentosResueltos
+            ),
             totalItbisPercepcion: totalItbisPercepcion ?? null,
             totalIsrPercepcion: totalIsrPercepcion ?? null,
 
@@ -1093,6 +1354,26 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
             );
         }
 
+        // 4.8.2. DT33 — Crear descuentos/recargos globales
+        let descuentosCreados = [];
+        if (descuentosResueltos.length > 0) {
+            descuentosCreados = await InvoiceDiscountCharge.bulkCreate(
+                descuentosResueltos.map((d) => ({
+                    invoiceId: invoice.id,
+                    numeroLinea: d.numeroLinea,
+                    tipoAjuste: d.tipoAjuste,
+                    indicadorNorma1007: d.indicadorNorma1007 ?? null,
+                    descripcion: d.descripcion || null,
+                    tipoValor: d.tipoValor,
+                    valor: d.tipoValor === '%' ? d.valor : null,
+                    monto: d.monto,
+                    montoOtraMoneda: d.montoOtraMoneda ?? null,
+                    indicadorFacturacion: d.indicadorFacturacion
+                })),
+                { transaction: t, returning: true }
+            );
+        }
+
 
         // 4.8.5. 🔥 Generar y persistir XML
         // No rompemos la factura si el XML falla: xml_content queda null
@@ -1145,7 +1426,12 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
                     tipoIngresos: invoice.tipoIngresos || null,
                     codigoVendedor: invoice.codigoVendedor || null,
                     tipoMoneda: invoice.tipoMoneda || null,
-                    montoImpuestoAdicional: invoice.montoImpuestoAdicional ?? null
+                    montoImpuestoAdicional: invoice.montoImpuestoAdicional ?? null,
+                    // DT33 — descuentos/recargos globales
+                    descuentosCount: descuentosCreados.length,
+                    descuentosTotal: descuentosCreados.reduce(
+                        (sum, d) => sum + Number(d.monto || 0), 0
+                    )
                 },
                 ip: reqInfo.ip || null,
                 userAgent: reqInfo.userAgent || null
@@ -1176,6 +1462,12 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
                 as: 'subtotales',
                 separate: true,
                 order: [['numeroSubtotal', 'ASC']]
+            },
+            {
+                model: InvoiceDiscountCharge,
+                as: 'descuentosORecargos',
+                separate: true,
+                order: [['numeroLinea', 'ASC']]
             }
         ]
     });
@@ -1405,8 +1697,25 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
         codigoVendedor: invoice.codigoVendedor,
         terminoPago: invoice.terminoPago,
         tipoMoneda: invoice.tipoMoneda,
-        tipoCambio: invoice.tipoCambio
+        tipoCambio: invoice.tipoCambio,
+        descuentosCount: null,
+        descuentosTotal: null
     };
+
+    // DT33 — Cargar descuentos actuales para el `before` del audit
+    try {
+        const currentDescuentos = await InvoiceDiscountCharge.findAll({
+            where: { invoiceId: invoice.id }
+        });
+        before.descuentosCount = currentDescuentos.length;
+        before.descuentosTotal = roundMoney(
+            currentDescuentos.reduce((sum, d) => sum + Number(d.monto || 0), 0)
+        );
+    } catch (err) {
+        // No romper si falla la lectura de descuentos
+        console.error('[updateMyInvoice] Failed to load current descuentos for audit:', err.message);
+    }
+
 
     // 4. Procesar en transacción
     const result = await sequelize.transaction(async (t) => {
@@ -1545,6 +1854,16 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
             }
         }
 
+        // ============================================================
+        // DT33 — Descuentos/recargos globales
+        // Estrategia:
+        //   - Si vienen items: recalculamos líneas (como antes) y
+        //     recalculamos o reemplazamos los descuentos según el caso.
+        //   - Si NO vienen items pero SÍ descuentos: recalculamos
+        //     totales con las líneas actuales de BD.
+        //   - Si no vienen ni items ni descuentos: no tocamos nada.
+        // ============================================================
+
         // 4.2. Si se envían items, reemplazar TODAS las líneas
         if (updates.items !== undefined) {
             const calculatedLines = updates.items.map((item, index) => {
@@ -1558,7 +1877,52 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
                 };
             });
 
-            const invoiceTotals = calculateInvoiceTotals(calculatedLines);
+            // Totales preliminares (sin descuentos)
+            const invoiceTotalsPrelim = calculateInvoiceTotals(calculatedLines);
+
+            // Resolver descuentos: si vienen del body, se usan; si no,
+            // se cargan los existentes de BD y se recalculan sus montos.
+            let descuentosResueltos = [];
+            let reemplazarDescuentos = false;
+
+            if (updates.descuentosORecargos !== undefined) {
+                // El cliente mandó descuentos nuevos → reemplazar todos
+                reemplazarDescuentos = true;
+                descuentosResueltos = prepareDescuentos(
+                    updates.descuentosORecargos,
+                    invoiceTotalsPrelim
+                );
+            } else {
+                // No mandó descuentos → recalcular los existentes con nuevas bases
+                const existentes = await InvoiceDiscountCharge.findAll({
+                    where: { invoiceId: invoice.id },
+                    order: [['numeroLinea', 'ASC']],
+                    transaction: t
+                });
+                descuentosResueltos = existentes.map(d => {
+                    const raw = typeof d.toJSON === 'function' ? d.toJSON() : d;
+                    return resolveDescuentoMonto(
+                        {
+                            numeroLinea: raw.numeroLinea,
+                            tipoAjuste: raw.tipoAjuste,
+                            indicadorNorma1007: raw.indicadorNorma1007,
+                            descripcion: raw.descripcion,
+                            tipoValor: raw.tipoValor,
+                            valor: raw.valor,
+                            monto: raw.monto,
+                            montoOtraMoneda: raw.montoOtraMoneda,
+                            indicadorFacturacion: raw.indicadorFacturacion
+                        },
+                        invoiceTotalsPrelim
+                    );
+                });
+            }
+
+            // Aplicar descuentos a los totales
+            const invoiceTotals = applyDescuentosToTotals(
+                invoiceTotalsPrelim,
+                descuentosResueltos
+            );
 
             updateData.subtotal = invoiceTotals.subtotal;
             updateData.itbis = invoiceTotals.itbis;
@@ -1571,6 +1935,17 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
             updateData.itbis2Base = invoiceTotals.itbis2Base;
             updateData.itbis2Amount = invoiceTotals.itbis2Amount;
             updateData.exemptAmount = invoiceTotals.exemptAmount || null;
+
+            // DT33 — ValorPagar: respetar el body, o calcular Norma1007
+            // (solo si el cliente NO lo mandó explícitamente).
+            if (updates.valorPagar === undefined) {
+                updateData.valorPagar = calculateValorPagarNorma1007(
+                    invoiceTotals.total,
+                    descuentosResueltos
+                );
+            }
+
+            // Reemplazar líneas
             await InvoiceLine.destroy({
                 where: { invoiceId: invoice.id },
                 transaction: t
@@ -1622,6 +1997,139 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
                 })),
                 { transaction: t }
             );
+
+            // Reemplazar o actualizar descuentos
+            if (reemplazarDescuentos) {
+                // El cliente mandó descuentos nuevos: destroy + bulkCreate
+                await InvoiceDiscountCharge.destroy({
+                    where: { invoiceId: invoice.id },
+                    transaction: t
+                });
+            }
+
+            if (descuentosResueltos.length > 0) {
+                if (reemplazarDescuentos) {
+                    await InvoiceDiscountCharge.bulkCreate(
+                        descuentosResueltos.map(d => ({
+                            invoiceId: invoice.id,
+                            numeroLinea: d.numeroLinea,
+                            tipoAjuste: d.tipoAjuste,
+                            indicadorNorma1007: d.indicadorNorma1007 ?? null,
+                            descripcion: d.descripcion || null,
+                            tipoValor: d.tipoValor,
+                            valor: d.tipoValor === '%' ? d.valor : null,
+                            monto: d.monto,
+                            montoOtraMoneda: d.montoOtraMoneda ?? null,
+                            indicadorFacturacion: d.indicadorFacturacion
+                        })),
+                        { transaction: t }
+                    );
+                } else {
+                    // Recalcular monto de descuentos existentes (solo %)
+                    for (const d of descuentosResueltos) {
+                        await InvoiceDiscountCharge.update(
+                            { monto: d.monto },
+                            {
+                                where: {
+                                    invoiceId: invoice.id,
+                                    numeroLinea: d.numeroLinea
+                                },
+                                transaction: t
+                            }
+                        );
+                    }
+                }
+            } else if (reemplazarDescuentos) {
+                // El cliente mandó descuentosORecargos = [] (vacío) → borrar todos
+                // (ya se hizo el destroy arriba)
+            }
+        }
+
+        // Caso B: NO vienen items, pero SÍ descuentos → recalcular totales
+        // con las líneas actuales de BD.
+        if (updates.items === undefined && updates.descuentosORecargos !== undefined) {
+            // Cargar líneas actuales de BD
+            const currentLines = await InvoiceLine.findAll({
+                where: { invoiceId: invoice.id },
+                order: [['lineNumber', 'ASC']],
+                transaction: t
+            });
+
+            if (currentLines.length > 0) {
+                // Convertir a la estructura que calculateInvoiceTotals espera
+                const calculatedLines = currentLines.map(l => {
+                    const raw = typeof l.toJSON === 'function' ? l.toJSON() : l;
+                    return {
+                        quantity: Number(raw.quantity),
+                        unitPrice: Number(raw.unitPrice),
+                        discount: Number(raw.discount || 0),
+                        recargo: Number(raw.recargo || 0),
+                        itbisRate: Number(raw.itbisRate),
+                        itbisAmount: Number(raw.itbisAmount),
+                        indicadorFacturacion: Number(raw.indicadorFacturacion),
+                        lineBase: roundMoney(
+                            Number(raw.quantity) * Number(raw.unitPrice)
+                            - Number(raw.discount || 0)
+                            + Number(raw.recargo || 0)
+                        ),
+                        total: Number(raw.total)
+                    };
+                });
+
+                const invoiceTotalsPrelim = calculateInvoiceTotals(calculatedLines);
+
+                const descuentosResueltos = prepareDescuentos(
+                    updates.descuentosORecargos,
+                    invoiceTotalsPrelim
+                );
+
+                const invoiceTotals = applyDescuentosToTotals(
+                    invoiceTotalsPrelim,
+                    descuentosResueltos
+                );
+
+                updateData.subtotal = invoiceTotals.subtotal;
+                updateData.itbis = invoiceTotals.itbis;
+                updateData.total = invoiceTotals.total;
+                updateData.montoGravado = invoiceTotals.montoGravado;
+                updateData.itbis1Base = invoiceTotals.itbis1Base;
+                updateData.itbis1Amount = invoiceTotals.itbis1Amount;
+                updateData.itbis2Base = invoiceTotals.itbis2Base;
+                updateData.itbis2Amount = invoiceTotals.itbis2Amount;
+                updateData.exemptAmount = invoiceTotals.exemptAmount || null;
+
+                // DT33 — ValorPagar: respetar el body, o calcular Norma1007
+                if (updates.valorPagar === undefined) {
+                    updateData.valorPagar = calculateValorPagarNorma1007(
+                        invoiceTotals.total,
+                        descuentosResueltos
+                    );
+                }
+
+                // Reemplazar descuentos
+                await InvoiceDiscountCharge.destroy({
+                    where: { invoiceId: invoice.id },
+                    transaction: t
+                });
+
+                if (descuentosResueltos.length > 0) {
+                    await InvoiceDiscountCharge.bulkCreate(
+                        descuentosResueltos.map(d => ({
+                            invoiceId: invoice.id,
+                            numeroLinea: d.numeroLinea,
+                            tipoAjuste: d.tipoAjuste,
+                            indicadorNorma1007: d.indicadorNorma1007 ?? null,
+                            descripcion: d.descripcion || null,
+                            tipoValor: d.tipoValor,
+                            valor: d.tipoValor === '%' ? d.valor : null,
+                            monto: d.monto,
+                            montoOtraMoneda: d.montoOtraMoneda ?? null,
+                            indicadorFacturacion: d.indicadorFacturacion
+                        })),
+                        { transaction: t }
+                    );
+                }
+            }
         }
 
         // 🔥 NUEVO: campos editables de Notas (33/34)
@@ -1653,6 +2161,7 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
             updateData.indicadorNotaCredito = diffDays > 30 ? 1 : 0;
         }
 
+
         // 4.3. Actualizar la factura
         await invoice.update(updateData, { transaction: t });
 
@@ -1669,7 +2178,25 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
 
 
         // 4.4. Audit log
+        // 4.4. Audit log (enriquecido con snapshot de descuentos)
         try {
+            // Snapshot de descuentos actuales (post-update) para el `after`
+            const descuentosAfter = await InvoiceDiscountCharge.findAll({
+                where: { invoiceId: invoice.id },
+                transaction: t
+            });
+            const descuentosAfterCount = descuentosAfter.length;
+            const descuentosAfterTotal = roundMoney(
+                descuentosAfter.reduce((sum, d) => sum + Number(d.monto || 0), 0)
+            );
+
+            const after = {
+                ...updateData,
+                // DT33 — snapshot de descuentos después del update
+                descuentosCount: descuentosAfterCount,
+                descuentosTotal: descuentosAfterTotal
+            };
+
             await AuditLog.create({
                 companyId,
                 userId: reqUser?.id ?? null,
@@ -1677,7 +2204,7 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
                 entity: 'invoice',
                 entityId: invoice.id,
                 before,
-                after: updateData,
+                after,
                 ip: reqInfo.ip || null,
                 userAgent: reqInfo.userAgent || null
             }, { transaction: t });
@@ -1707,6 +2234,12 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
                 as: 'subtotales',
                 separate: true,
                 order: [['numeroSubtotal', 'ASC']]
+            },
+            {
+                model: InvoiceDiscountCharge,
+                as: 'descuentosORecargos',
+                separate: true,
+                order: [['numeroLinea', 'ASC']]
             }
         ]
     });
@@ -1967,6 +2500,12 @@ async function getInvoiceById(invoiceId) {
                 as: 'subtotales',
                 separate: true,
                 order: [['numeroSubtotal', 'ASC']]
+            },
+            {
+                model: InvoiceDiscountCharge,
+                as: 'descuentosORecargos',
+                separate: true,
+                order: [['numeroLinea', 'ASC']]
             }
         ]
     });
@@ -2023,6 +2562,18 @@ async function getMyInvoicePDF(companyId, invoiceId, format = 'a4') {
                     required: false,
                     attributes: ['id', 'purpose', 'secureUrl', 'format', 'width', 'height']
                 }]
+            },
+            {
+                model: InvoiceSubtotal,
+                as: 'subtotales',
+                separate: true,
+                order: [['numeroSubtotal', 'ASC']]
+            },
+            {
+                model: InvoiceDiscountCharge,
+                as: 'descuentosORecargos',
+                separate: true,
+                order: [['numeroLinea', 'ASC']]
             }
         ]
     });
