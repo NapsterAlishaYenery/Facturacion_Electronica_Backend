@@ -288,8 +288,138 @@ function calculateLineTotals(item) {
         pesoNetoMineria: item.pesoNetoMineria ?? null,
         tipoAfiliacion: item.tipoAfiliacion ?? null,
         liquidacion: item.liquidacion ?? null,
+        // DT32 — Subtotal informativo: a qué grupo pertenece esta línea
+        subtotalId: item.subtotalId ?? null,
     };
 }
+
+
+// ============================================================
+// DT32 — Helpers: subtotales informativos (<Subtotales> del XML)
+//
+// El cliente solo manda la metadata de los grupos (numeroSubtotal,
+// descripcion, orden) y marca cada línea con `subtotalId`.
+// El SERVICE calcula los montos sumando las líneas del grupo.
+// ============================================================
+
+/**
+ * Redondeo monetario a 2 decimales con "half up" (mismo criterio
+ * que roundMoney de DT33 — se redefine aquí por orden de carga
+ * del módulo, pero es idéntico).
+ */
+function roundMoney2(n) {
+    return Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ * Calcula los subtotales a partir de las líneas ya calculadas.
+ *
+ * @param {Array} subtotalesInput - [{ numeroSubtotal, descripcion, orden }]
+ * @param {Array} calculatedLines - líneas ya pasadas por calculateLineTotals
+ *                                  (deben tener `subtotalId` y `lineBase`,
+ *                                  `itbisAmount`, `indicadorFacturacion`, `total`)
+ * @returns {Array} subtotales con montos calculados, listos para bulkCreate
+ *
+ * Reglas:
+ *   - Cada subtotal agrupa las líneas con `subtotalId === numeroSubtotal`.
+ *   - Si un subtotal no tiene líneas, devuelve error (Joi ya lo valida,
+ *     pero defendemos en profundidad).
+ *   - `lineas` = cantidad de líneas del grupo (no array).
+ *   - `subTotalImpuestoAdicional` = 0 por ahora (impuestos adicionales
+ *     por línea solo declaran código, no monto — ver ADDITIONAL_TAXES
+ *     cuando se implemente el cálculo de ISC).
+ */
+function calculateSubtotalsFromLines(subtotalesInput, calculatedLines) {
+    if (!Array.isArray(subtotalesInput) || subtotalesInput.length === 0) {
+        return [];
+    }
+
+    const lines = Array.isArray(calculatedLines) ? calculatedLines : [];
+
+    return subtotalesInput.map((st) => {
+        const numero = Number(st.numeroSubtotal);
+        const lineasDelGrupo = lines.filter(
+            (l) => l.subtotalId !== null
+                && l.subtotalId !== undefined
+                && Number(l.subtotalId) === numero
+        );
+
+        let montoGravadoI1 = 0;
+        let montoGravadoI2 = 0;
+        let montoGravadoI3 = 0;
+        let subTotalItbis1 = 0;
+        let subTotalItbis2 = 0;
+        let subTotalItbis3 = 0;
+        let subTotalExento = 0;
+        let montoSubTotal = 0;
+
+        for (const line of lineasDelGrupo) {
+            const ind = Number(line.indicadorFacturacion);
+            const base = Number(line.lineBase || 0);
+            const itbis = Number(line.itbisAmount || 0);
+
+            if (ind === 1) {
+                montoGravadoI1 += base;
+                subTotalItbis1 += itbis;
+            } else if (ind === 2) {
+                montoGravadoI2 += base;
+                subTotalItbis2 += itbis;
+            } else if (ind === 3) {
+                montoGravadoI3 += base;
+                subTotalItbis3 += itbis;
+            } else if (ind === 4) {
+                subTotalExento += base;
+            }
+            // ind === 0 (No Facturable) no suma a bases, solo al total
+
+            montoSubTotal += Number(line.total || 0);
+        }
+
+        const montoGravadoTotal = montoGravadoI1 + montoGravadoI2 + montoGravadoI3;
+        const subTotalItbis = subTotalItbis1 + subTotalItbis2 + subTotalItbis3;
+
+        return {
+            numeroSubtotal: numero,
+            descripcion: st.descripcion || null,
+            orden: st.orden ?? null,
+            lineas: lineasDelGrupo.length,
+            montoGravadoTotal: roundMoney2(montoGravadoTotal),
+            montoGravadoI1: roundMoney2(montoGravadoI1),
+            montoGravadoI2: roundMoney2(montoGravadoI2),
+            montoGravadoI3: roundMoney2(montoGravadoI3),
+            subTotalItbis: roundMoney2(subTotalItbis),
+            subTotalItbis1: roundMoney2(subTotalItbis1),
+            subTotalItbis2: roundMoney2(subTotalItbis2),
+            subTotalItbis3: roundMoney2(subTotalItbis3),
+            subTotalImpuestoAdicional: 0, // ver nota arriba
+            subTotalExento: roundMoney2(subTotalExento),
+            montoSubTotal: roundMoney2(montoSubTotal)
+        };
+    });
+}
+
+/**
+ * Valida que la suma de subtotales cuadre con el total de la factura.
+ * Lanza AppError si no cuadra (tolerancia 1 centavo por redondeo).
+ */
+function assertSubtotalsMatchInvoiceTotal(subtotalesCalculados, invoiceTotal) {
+    if (!Array.isArray(subtotalesCalculados) || subtotalesCalculados.length === 0) {
+        return;
+    }
+    const sumaSubtotales = subtotalesCalculados.reduce(
+        (s, st) => s + Number(st.montoSubTotal || 0),
+        0
+    );
+    const totalFactura = Number(invoiceTotal || 0);
+    if (Math.abs(roundMoney2(sumaSubtotales) - roundMoney2(totalFactura)) > 0.01) {
+        throw new AppError(
+            `Los subtotales (${roundMoney2(sumaSubtotales)}) no cuadran con el total de la factura (${roundMoney2(totalFactura)}). Cada línea debe estar asignada a exactamente un subtotal.`,
+            409,
+            'SUBTOTALS_MISMATCH'
+        );
+    }
+}
+
 
 
 // ------------------------------------------------------------
@@ -1320,6 +1450,9 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
                 indicadorFacturacion: line.indicadorFacturacion,
                 total: line.total,
 
+                // DT32 — a qué grupo de subtotal pertenece esta línea
+                subtotalId: line.subtotalId,
+
                 // Retención por línea (41, 47)
                 retencionIndicador: line.retencion?.indicador ?? null,
                 montoItbisRetenido: line.retencion?.montoItbisRetenido ?? null,
@@ -1329,26 +1462,40 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
         );
 
         // 4.8.1. DT32 — Crear subtotales
+        // El cliente solo mandó metadata (numeroSubtotal, descripcion, orden).
+        // Los montos se calculan aquí desde las líneas ya calculadas.
         let subtotalesCreados = [];
         if (Array.isArray(subtotales) && subtotales.length > 0) {
+            // 1. Calcular montos desde las líneas (que ya tienen subtotalId)
+            const subtotalesCalculados = calculateSubtotalsFromLines(
+                subtotales,
+                calculatedLines
+            );
+
+            // 2. Validar que cuadren con el total PRELIMINAR de la factura
+            //    (pre-descuentos globales, porque los subtotales agrupan líneas
+            //    y las líneas no llevan descuentos globales aplicados).
+            assertSubtotalsMatchInvoiceTotal(subtotalesCalculados, invoiceTotalsPrelim.total);
+
+            // 3. Persistir
             subtotalesCreados = await InvoiceSubtotal.bulkCreate(
-                subtotales.map((st) => ({
+                subtotalesCalculados.map((st) => ({
                     invoiceId: invoice.id,
                     numeroSubtotal: st.numeroSubtotal,
-                    descripcion: st.descripcion || null,
-                    orden: st.orden ?? null,
-                    montoGravadoTotal: st.montoGravadoTotal ?? 0,
-                    montoGravadoI1: st.montoGravadoI1 ?? 0,
-                    montoGravadoI2: st.montoGravadoI2 ?? 0,
-                    montoGravadoI3: st.montoGravadoI3 ?? 0,
-                    subTotalItbis: st.subTotalItbis ?? 0,
-                    subTotalItbis1: st.subTotalItbis1 ?? 0,
-                    subTotalItbis2: st.subTotalItbis2 ?? 0,
-                    subTotalItbis3: st.subTotalItbis3 ?? 0,
-                    subTotalImpuestoAdicional: st.subTotalImpuestoAdicional ?? 0,
-                    subTotalExento: st.subTotalExento ?? 0,
-                    montoSubTotal: st.montoSubTotal ?? 0,
-                    lineas: st.lineas ?? null
+                    descripcion: st.descripcion,
+                    orden: st.orden,
+                    montoGravadoTotal: st.montoGravadoTotal,
+                    montoGravadoI1: st.montoGravadoI1,
+                    montoGravadoI2: st.montoGravadoI2,
+                    montoGravadoI3: st.montoGravadoI3,
+                    subTotalItbis: st.subTotalItbis,
+                    subTotalItbis1: st.subTotalItbis1,
+                    subTotalItbis2: st.subTotalItbis2,
+                    subTotalItbis3: st.subTotalItbis3,
+                    subTotalImpuestoAdicional: st.subTotalImpuestoAdicional,
+                    subTotalExento: st.subTotalExento,
+                    montoSubTotal: st.montoSubTotal,
+                    lineas: st.lineas
                 })),
                 { transaction: t, returning: true }
             );
@@ -1822,32 +1969,110 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
         if (updates.impuestosAdicionalesOtraMoneda !== undefined) updateData.impuestosAdicionalesOtraMoneda = updates.impuestosAdicionalesOtraMoneda || null;
         if (updates.montoTotalOtraMoneda !== undefined) updateData.montoTotalOtraMoneda = updates.montoTotalOtraMoneda ?? null;
 
-        // DT32 — Si se envían subtotales, reemplazar todos
-        if (updates.subtotales !== undefined) {
+        // ============================================================
+        // DT32 — Subtotales (update)
+        //
+        // Estrategia (espejo de DT33 descuentos):
+        //   - Si vienen `items`: se recalculan las líneas, y los
+        //     subtotales se recalculan desde esas líneas.
+        //     (Se hace más abajo, después de reemplazar las líneas,
+        //     porque necesitamos `calculatedLines`.)
+        //   - Si NO vienen `items` pero SÍ `subtotales`: se recalculan
+        //     los subtotales desde las líneas actuales de BD.
+        //   - Si no vienen ni `items` ni `subtotales`: no se toca nada.
+        //
+        // Por eso aquí SOLO manejamos el caso "solo subtotales sin items".
+        // El caso "items + subtotales" se maneja dentro del bloque de items.
+        // ============================================================
+        if (updates.items === undefined && updates.subtotales !== undefined) {
+            // Cargar líneas actuales de BD
+            const currentLines = await InvoiceLine.findAll({
+                where: { invoiceId: invoice.id },
+                order: [['lineNumber', 'ASC']],
+                transaction: t
+            });
+
+            // Reconstruir la estructura de "calculatedLines" desde BD
+            const calculatedLinesFromDb = currentLines.map((l) => {
+                const raw = typeof l.toJSON === 'function' ? l.toJSON() : l;
+                return {
+                    lineNumber: Number(raw.lineNumber),
+                    itemCode: raw.itemCode,
+                    itemName: raw.itemName,
+                    description: raw.description,
+                    indicadorBienoServicio: raw.indicadorBienoServicio,
+                    unidadMedida: raw.unidadMedida,
+                    recargo: raw.recargo,
+                    cantidadReferencia: raw.cantidadReferencia,
+                    unidadReferencia: raw.unidadReferencia,
+                    gradosAlcohol: raw.gradosAlcohol,
+                    precioUnitarioReferencia: raw.precioUnitarioReferencia,
+                    fechaElaboracion: raw.fechaElaboracion,
+                    fechaVencimientoItem: raw.fechaVencimientoItem,
+                    additionalCodes: raw.additionalCodes,
+                    subcantidades: raw.subcantidades,
+                    subDescuentos: raw.subDescuentos,
+                    subRecargos: raw.subRecargos,
+                    impuestosAdicionales: raw.impuestosAdicionales,
+                    pesoNetoKilogramo: raw.pesoNetoKilogramo,
+                    pesoNetoMineria: raw.pesoNetoMineria,
+                    tipoAfiliacion: raw.tipoAfiliacion,
+                    liquidacion: raw.liquidacion,
+                    quantity: Number(raw.quantity),
+                    unitPrice: Number(raw.unitPrice),
+                    discount: Number(raw.discount || 0),
+                    itbisRate: Number(raw.itbisRate),
+                    itbisAmount: Number(raw.itbisAmount),
+                    indicadorFacturacion: Number(raw.indicadorFacturacion),
+                    lineBase: roundMoney(
+                        Number(raw.quantity) * Number(raw.unitPrice)
+                        - Number(raw.discount || 0)
+                        + Number(raw.recargo || 0)
+                    ),
+                    total: Number(raw.total),
+                    subtotalId: raw.subtotalId
+                };
+            });
+
+            // Reemplazar subtotales: destroy + calcular + bulkCreate
             await InvoiceSubtotal.destroy({
                 where: { invoiceId: invoice.id },
                 transaction: t
             });
 
             if (Array.isArray(updates.subtotales) && updates.subtotales.length > 0) {
+                const subtotalesCalculados = calculateSubtotalsFromLines(
+                    updates.subtotales,
+                    calculatedLinesFromDb
+                );
+
+                // Validar contra el total preliminar (líneas actuales de BD)
+                const invoiceTotalsPrelimFromDb = calculateInvoiceTotals(
+                    calculatedLinesFromDb
+                );
+                assertSubtotalsMatchInvoiceTotal(
+                    subtotalesCalculados,
+                    invoiceTotalsPrelimFromDb.total
+                );
+
                 await InvoiceSubtotal.bulkCreate(
-                    updates.subtotales.map((st) => ({
+                    subtotalesCalculados.map((st) => ({
                         invoiceId: invoice.id,
                         numeroSubtotal: st.numeroSubtotal,
-                        descripcion: st.descripcion || null,
-                        orden: st.orden ?? null,
-                        montoGravadoTotal: st.montoGravadoTotal ?? 0,
-                        montoGravadoI1: st.montoGravadoI1 ?? 0,
-                        montoGravadoI2: st.montoGravadoI2 ?? 0,
-                        montoGravadoI3: st.montoGravadoI3 ?? 0,
-                        subTotalItbis: st.subTotalItbis ?? 0,
-                        subTotalItbis1: st.subTotalItbis1 ?? 0,
-                        subTotalItbis2: st.subTotalItbis2 ?? 0,
-                        subTotalItbis3: st.subTotalItbis3 ?? 0,
-                        subTotalImpuestoAdicional: st.subTotalImpuestoAdicional ?? 0,
-                        subTotalExento: st.subTotalExento ?? 0,
-                        montoSubTotal: st.montoSubTotal ?? 0,
-                        lineas: st.lineas ?? null
+                        descripcion: st.descripcion,
+                        orden: st.orden,
+                        montoGravadoTotal: st.montoGravadoTotal,
+                        montoGravadoI1: st.montoGravadoI1,
+                        montoGravadoI2: st.montoGravadoI2,
+                        montoGravadoI3: st.montoGravadoI3,
+                        subTotalItbis: st.subTotalItbis,
+                        subTotalItbis1: st.subTotalItbis1,
+                        subTotalItbis2: st.subTotalItbis2,
+                        subTotalItbis3: st.subTotalItbis3,
+                        subTotalImpuestoAdicional: st.subTotalImpuestoAdicional,
+                        subTotalExento: st.subTotalExento,
+                        montoSubTotal: st.montoSubTotal,
+                        lineas: st.lineas
                     })),
                     { transaction: t }
                 );
@@ -1990,6 +2215,9 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
                     indicadorFacturacion: line.indicadorFacturacion,
                     total: line.total,
 
+                    // DT32 — a qué grupo de subtotal pertenece esta línea
+                    subtotalId: line.subtotalId,
+
                     // Retención por línea (41, 47)
                     retencionIndicador: line.retencion?.indicador ?? null,
                     montoItbisRetenido: line.retencion?.montoItbisRetenido ?? null,
@@ -2043,7 +2271,113 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
                 // El cliente mandó descuentosORecargos = [] (vacío) → borrar todos
                 // (ya se hizo el destroy arriba)
             }
+            // ============================================================
+            // DT32 — Subtotales cuando vienen items
+            //
+            // Si el cliente mandó `subtotales`, se reemplazan todos.
+            // Si NO mandó `subtotales`, se recalculan los existentes
+            // desde las nuevas líneas (para mantener consistencia de montos).
+            // ============================================================
+            if (updates.subtotales !== undefined) {
+                // El cliente mandó subtotales nuevos → destroy + bulkCreate
+                await InvoiceSubtotal.destroy({
+                    where: { invoiceId: invoice.id },
+                    transaction: t
+                });
+
+                if (Array.isArray(updates.subtotales) && updates.subtotales.length > 0) {
+                    const subtotalesCalculados = calculateSubtotalsFromLines(
+                        updates.subtotales,
+                        calculatedLines
+                    );
+
+                    assertSubtotalsMatchInvoiceTotal(
+                        subtotalesCalculados,
+                        invoiceTotalsPrelim.total
+                    );
+
+                    await InvoiceSubtotal.bulkCreate(
+                        subtotalesCalculados.map((st) => ({
+                            invoiceId: invoice.id,
+                            numeroSubtotal: st.numeroSubtotal,
+                            descripcion: st.descripcion,
+                            orden: st.orden,
+                            montoGravadoTotal: st.montoGravadoTotal,
+                            montoGravadoI1: st.montoGravadoI1,
+                            montoGravadoI2: st.montoGravadoI2,
+                            montoGravadoI3: st.montoGravadoI3,
+                            subTotalItbis: st.subTotalItbis,
+                            subTotalItbis1: st.subTotalItbis1,
+                            subTotalItbis2: st.subTotalItbis2,
+                            subTotalItbis3: st.subTotalItbis3,
+                            subTotalImpuestoAdicional: st.subTotalImpuestoAdicional,
+                            subTotalExento: st.subTotalExento,
+                            montoSubTotal: st.montoSubTotal,
+                            lineas: st.lineas
+                        })),
+                        { transaction: t }
+                    );
+                }
+            } else {
+                // No mandó subtotales: recalcular los existentes desde las nuevas líneas
+                const existentes = await InvoiceSubtotal.findAll({
+                    where: { invoiceId: invoice.id },
+                    order: [['numeroSubtotal', 'ASC']],
+                    transaction: t
+                });
+
+                if (existentes.length > 0) {
+                    const inputExistentes = existentes.map((s) => {
+                        const raw = typeof s.toJSON === 'function' ? s.toJSON() : s;
+                        return {
+                            numeroSubtotal: Number(raw.numeroSubtotal),
+                            descripcion: raw.descripcion,
+                            orden: raw.orden
+                        };
+                    });
+
+                    const subtotalesCalculados = calculateSubtotalsFromLines(
+                        inputExistentes,
+                        calculatedLines
+                    );
+
+                    assertSubtotalsMatchInvoiceTotal(
+                        subtotalesCalculados,
+                        invoiceTotalsPrelim.total
+                    );
+
+                    // Actualizar montos de los existentes (lineas y montos)
+                    for (const st of subtotalesCalculados) {
+                        await InvoiceSubtotal.update(
+                            {
+                                montoGravadoTotal: st.montoGravadoTotal,
+                                montoGravadoI1: st.montoGravadoI1,
+                                montoGravadoI2: st.montoGravadoI2,
+                                montoGravadoI3: st.montoGravadoI3,
+                                subTotalItbis: st.subTotalItbis,
+                                subTotalItbis1: st.subTotalItbis1,
+                                subTotalItbis2: st.subTotalItbis2,
+                                subTotalItbis3: st.subTotalItbis3,
+                                subTotalImpuestoAdicional: st.subTotalImpuestoAdicional,
+                                subTotalExento: st.subTotalExento,
+                                montoSubTotal: st.montoSubTotal,
+                                lineas: st.lineas
+                            },
+                            {
+                                where: {
+                                    invoiceId: invoice.id,
+                                    numeroSubtotal: st.numeroSubtotal
+                                },
+                                transaction: t
+                            }
+                        );
+                    }
+                }
+            }
         }
+
+
+
 
         // Caso B: NO vienen items, pero SÍ descuentos → recalcular totales
         // con las líneas actuales de BD.
@@ -2695,7 +3029,10 @@ module.exports = {
         buildInvoiceResponse,
         mapTransporteFields,
         mapInfoAdicionalFields,
-        resolveModifiedInvoice
+        resolveModifiedInvoice,
+        // DT32 — subtotales
+        calculateSubtotalsFromLines,
+        assertSubtotalsMatchInvoiceTotal
     }
 };
 

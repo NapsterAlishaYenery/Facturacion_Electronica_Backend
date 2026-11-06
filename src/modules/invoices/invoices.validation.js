@@ -186,6 +186,17 @@ const itemSchema = Joi.object({
     tipoAfiliacion: Joi.number().integer().valid(1, 2).optional().allow(null),
     liquidacion: Joi.number().integer().valid(1, 2).optional().allow(null),
 
+    // ---------- DT32 — Subtotal informativo (<Subtotales> del XML) ----------
+    // El cliente marca esta línea como perteneciente al subtotal N.
+    // NULL/undefined = la línea no entra en ningún subtotal (válido).
+    // El service calcula los montos del subtotal sumando las líneas
+    // que comparten el mismo subtotalId.
+    subtotalId: Joi.number().integer().min(1).max(20).optional().allow(null)
+        .messages({
+            'number.min': 'subtotalId must be between 1 and 20',
+            'number.max': 'subtotalId must be between 1 and 20'
+        }),
+
     // ---------- ITBIS ----------
     indicadorFacturacion: Joi.number().integer().valid(0, 1, 2, 3, 4).optional()
         .messages({ 'any.only': 'indicadorFacturacion must be 0-4' }),
@@ -206,6 +217,19 @@ const itemSchema = Joi.object({
 
 // ============================================================
 // DT32 — Sub-schema: Subtotales
+//
+// El cliente SOLO manda el agrupamiento:
+//   - numeroSubtotal: secuencial 1-20
+//   - descripcion:    texto libre (ej: "Bebidas")
+//   - orden:          opcional, para ordenar
+//
+// El agrupamiento real se hace por `items[].subtotalId`:
+// cada línea con subtotalId=N pertenece al subtotal N.
+//
+// Los montos (montoGravadoTotal, subTotalItbis, montoSubTotal, etc.)
+// los calcula el SERVICE sumando las líneas del grupo. NUNCA se
+// aceptan del cliente. `.unknown(false)` rechaza cualquier monto
+// que el cliente intente mandar.
 // ============================================================
 const subtotalSchema = Joi.object({
     numeroSubtotal: Joi.number().integer().min(1).max(20).required()
@@ -216,23 +240,11 @@ const subtotalSchema = Joi.object({
         }),
     descripcion: Joi.string().max(40).optional().allow(null, '')
         .messages({ 'string.max': 'DescripcionSubtotal cannot exceed 40 characters' }),
-    orden: Joi.number().integer().min(1).optional().allow(null),
-
-    montoGravadoTotal: Joi.number().min(0).default(0),
-    montoGravadoI1: Joi.number().min(0).default(0),
-    montoGravadoI2: Joi.number().min(0).default(0),
-    montoGravadoI3: Joi.number().min(0).default(0),
-
-    subTotalItbis: Joi.number().min(0).default(0),
-    subTotalItbis1: Joi.number().min(0).default(0),
-    subTotalItbis2: Joi.number().min(0).default(0),
-    subTotalItbis3: Joi.number().min(0).default(0),
-
-    subTotalImpuestoAdicional: Joi.number().min(0).default(0),
-    subTotalExento: Joi.number().min(0).default(0),
-    montoSubTotal: Joi.number().min(0).default(0),
-    lineas: Joi.number().integer().min(0).optional().allow(null)
-});
+    orden: Joi.number().integer().min(1).optional().allow(null)
+}).unknown(false)
+    .messages({
+        'object.unknown': 'subtotales[] solo acepta numeroSubtotal, descripcion y orden. Los montos los calcula el sistema a partir de items[].subtotalId.'
+    });
 
 // ============================================================
 // DT33 — Sub-schema: Descuentos o Recargos globales (hasta 20)
@@ -1254,12 +1266,49 @@ const createInvoiceSchema = Joi.object({
 
         // DT32 — numeroSubtotal único dentro del array
         if (value.subtotales && value.subtotales.length > 0) {
+            // (a) numeroSubtotal único
             const numeros = value.subtotales.map(s => s.numeroSubtotal);
-            const unicos = new Set(numeros);
-            if (unicos.size !== numeros.length) {
+            if (new Set(numeros).size !== numeros.length) {
                 return helpers.error('any.custom', {
                     message: 'subtotales: numeroSubtotal debe ser único dentro del array'
                 });
+            }
+
+            // (b) Cada subtotalId usado en items debe existir en subtotales[]
+            const subtotalIdsDeclarados = new Set(numeros);
+            const subtotalIdsUsados = new Set();
+
+            for (let i = 0; i < value.items.length; i++) {
+                const sid = value.items[i].subtotalId;
+                if (sid !== undefined && sid !== null) {
+                    if (!subtotalIdsDeclarados.has(sid)) {
+                        return helpers.error('any.custom', {
+                            message: `Item ${i + 1}: subtotalId=${sid} no está declarado en subtotales[]. Agrega { numeroSubtotal: ${sid} } o quita el subtotalId de la línea.`
+                        });
+                    }
+                    subtotalIdsUsados.add(sid);
+                }
+            }
+
+            // (c) Cada subtotal declarado debe tener al menos una línea
+            for (const n of numeros) {
+                if (!subtotalIdsUsados.has(n)) {
+                    return helpers.error('any.custom', {
+                        message: `subtotales: numeroSubtotal=${n} no tiene ninguna línea asignada. Asigna al menos un item con subtotalId=${n}.`
+                    });
+                }
+            }
+        }
+
+        // (d) Si algún item tiene subtotalId pero no se mandó subtotales[]
+        if (!value.subtotales || value.subtotales.length === 0) {
+            for (let i = 0; i < value.items.length; i++) {
+                const sid = value.items[i].subtotalId;
+                if (sid !== undefined && sid !== null) {
+                    return helpers.error('any.custom', {
+                        message: `Item ${i + 1}: tiene subtotalId=${sid} pero no se envió el array subtotales[]. Si quieres subtotales, declara los grupos; si no, quita el subtotalId de las líneas.`
+                    });
+                }
             }
         }
 
@@ -1628,17 +1677,48 @@ const updateInvoiceSchema = Joi.object({
             });
         }
 
-        // DT32 — numeroSubtotal único dentro del array
+        // ============================================================
+        // DT32 — Validaciones de subtotales (update)
+        //
+        // En update, `items` puede no venir en el body (se usan los
+        // de BD). Por eso aquí SOLO validamos:
+        //   - numeroSubtotal único
+        //   - Coherencia subtotalId ↔ subtotales si AMBOS vienen
+        //
+        // La validación de "cada subtotal tiene líneas" y "cada
+        // subtotalId existe" se completa en el SERVICE, que sí
+        // conoce las líneas finales (vengan del body o de BD).
+        // ============================================================
         if (value.subtotales && value.subtotales.length > 0) {
             const numeros = value.subtotales.map(s => s.numeroSubtotal);
-            const unicos = new Set(numeros);
-            if (unicos.size !== numeros.length) {
+            if (new Set(numeros).size !== numeros.length) {
                 return helpers.error('any.custom', {
                     message: 'subtotales: numeroSubtotal debe ser único dentro del array'
                 });
             }
+
+            // Si también vienen items, validar subtotalIds huérfanos
+            if (value.items) {
+                const subtotalIdsDeclarados = new Set(numeros);
+                for (let i = 0; i < value.items.length; i++) {
+                    const sid = value.items[i].subtotalId;
+                    if (sid !== undefined && sid !== null && !subtotalIdsDeclarados.has(sid)) {
+                        return helpers.error('any.custom', {
+                            message: `Item ${i + 1}: subtotalId=${sid} no está declarado en subtotales[]`
+                        });
+                    }
+                }
+            }
         }
 
+        // Si algún item tiene subtotalId pero no se manda subtotales[],
+        // es válido en update (los subtotales existentes se conservan o
+        // el service recalcula). Solo validamos si el cliente intenta
+        // usar un subtotalId sin declararlo Y sin que existan subtotales
+        // previos — eso lo resuelve el service.
+
+
+        
         // ============================================================
         // DT33 — Validaciones cruzadas de descuentos/recargos globales
         // (mismas que en create, pero sin poder validar contra el

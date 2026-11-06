@@ -480,6 +480,23 @@ const InvoiceLine = sequelize.define('InvoiceLine', {
     },
 
     // ============================================================
+    // DT32 — Subtotal informativo (<Subtotales> del XML)
+    // ============================================================
+    // Número del subtotal (1-20) al que pertenece esta línea.
+    // NULL = la línea no entra en ningún subtotal (válido).
+    // El cliente lo manda por línea; el service calcula los montos
+    // del subtotal sumando todas las líneas con el mismo subtotalId.
+    subtotalId: {
+        type: DataTypes.SMALLINT,
+        allowNull: true,
+        field: 'subtotal_id',
+        validate: {
+            min: { args: [1], msg: 'subtotalId must be between 1 and 20' },
+            max: { args: [20], msg: 'subtotalId must be between 1 and 20' }
+        }
+    },
+
+    // ============================================================
     // TOTAL DE LA LÍNEA
     // ============================================================
     total: {
