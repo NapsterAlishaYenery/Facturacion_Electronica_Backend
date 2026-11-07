@@ -16,6 +16,7 @@ const {
     InvoiceSubtotal,
     InvoiceDiscountCharge,
     CompanyLogo,
+    RfceDocument,
     AuditLog
 } = require('../../models');
 const { AppError } = require('../../shared/middlewares/error.middleware');
@@ -312,7 +313,10 @@ function buildInvoiceResponse(invoice, options = {}) {
         isDebitNote: type === '33',
         isCreditNote: type === '34',
         hasModificationReference: isNota && !!data.modifiedNcf,
-        canEditReference: false   // los campos de referencia nunca se editan
+        canEditReference: false,
+        // DT39 — flag para el front
+        isRfce: data.type === '32' && Number(data.total) < 250000,
+        hasRfceDocument: !!data.rfce,
     };
 
     // lineCount solo si se pasa explícitamente (viene de un COUNT)
@@ -1694,6 +1698,16 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
             console.error('[createMyInvoice] XML generation failed:', xmlErr.message);
         }
 
+        // 4.8.6. 🔥 DT39 — Generar RFCE si aplica (type=32 y total < 250K)
+        // No rompemos la factura si falla: rfce_documents queda sin fila
+        // y se puede regenerar con updateMyInvoice o un endpoint manual.
+        try {
+            const { generateAndSaveRFCE } = require('../documents/xml/xml-integrator');
+            await generateAndSaveRFCE(invoice.id, t);
+        } catch (rfceErr) {
+            console.error('[createMyInvoice] RFCE generation failed:', rfceErr.message);
+        }
+
         // 4.9. Incrementar contador — SOLO si aplica
         //      (el system owner no consume límite de plan)
         if (!skipLimitCheck && subscription) {
@@ -1777,6 +1791,11 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
                 as: 'descuentosORecargos',
                 separate: true,
                 order: [['numeroLinea', 'ASC']]
+            },
+            {
+                model: RfceDocument,
+                as: 'rfce',
+                required: false
             }
         ]
     });
@@ -1787,6 +1806,17 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
         const { saveXMLToDisk } = require('../documents/storage/xml-storage');
         saveXMLToDisk(fullInvoice, fullInvoice.xmlContent).catch(err => {
             console.error('[createMyInvoice] saveXMLToDisk failed:', err.message);
+        });
+    }
+
+    // 6.1. 🔥 DT39 — Guardar RFCE en disco si aplica (fire-and-forget)
+    if (fullInvoice.rfce && fullInvoice.rfce.xmlContent) {
+        const { saveXMLToDisk } = require('../documents/storage/xml-storage');
+        saveXMLToDisk(
+            { ...fullInvoice.toJSON(), ncf: `${fullInvoice.ncf}-RFCE` },
+            fullInvoice.rfce.xmlContent
+        ).catch(err => {
+            console.error('[createMyInvoice] saveXMLToDisk (RFCE) failed:', err.message);
         });
     }
 
@@ -2735,6 +2765,19 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
         }
 
 
+        // 4.3.6. 🔥 DT39 — Regenerar RFCE si aplica (y si sigue siendo draft)
+        if (invoice.status === 'draft'
+            && invoice.type === '32'
+            && Number(invoice.total) < 250000) {
+            try {
+                const { generateAndSaveRFCE } = require('../documents/xml/xml-integrator');
+                await generateAndSaveRFCE(invoice.id, t);
+            } catch (rfceErr) {
+                console.error('[updateMyInvoice] RFCE regen failed:', rfceErr.message);
+            }
+        }
+
+
         // 4.4. Audit log
         // 4.4. Audit log (enriquecido con snapshot de descuentos)
         try {
@@ -2798,6 +2841,11 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
                 as: 'descuentosORecargos',
                 separate: true,
                 order: [['numeroLinea', 'ASC']]
+            },
+            {
+                model: RfceDocument,
+                as: 'rfce',
+                required: false
             }
         ]
     });

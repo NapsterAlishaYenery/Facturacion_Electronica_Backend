@@ -23,6 +23,7 @@ const Province = require('./province.model');
 const Municipality = require('./municipality.model');
 const InvoiceSubtotal = require('./invoiceSubtotal.model');
 const InvoiceDiscountCharge = require('./invoiceDiscountCharge.model');
+const RfceDocument = require('./RfceDocument');
 
 // ============================================================
 // Company (1) ─── (N) Subscription
@@ -365,6 +366,22 @@ InvoiceDiscountCharge.belongsTo(Invoice, {
     as: 'invoice'
 });
 
+// ============================================================
+// Invoice (1) ─── (1) RfceDocument
+// ============================================================
+// DT39 — Invoice ↔ RfceDocument
+// Solo para type=32 con total < 250,000
+Invoice.hasOne(RfceDocument, {
+    as: 'rfce',
+    foreignKey: 'invoiceId',
+    onDelete: 'CASCADE'
+});
+
+RfceDocument.belongsTo(Invoice, {
+    as: 'invoice',
+    foreignKey: 'invoiceId'
+});
+
 
 
 // ============================================================
@@ -389,4 +406,5 @@ module.exports = {
     Municipality,
     InvoiceSubtotal,
     InvoiceDiscountCharge,
+    RfceDocument,
 };

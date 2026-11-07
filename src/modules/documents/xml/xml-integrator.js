@@ -33,7 +33,8 @@ const {
     Sequence,
     Company,
     InvoiceSubtotal,
-    InvoiceDiscountCharge
+    InvoiceDiscountCharge,
+    RfceDocument
 } = require('../../../models');
 
 const { AppError } = require('../../../shared/middlewares/error.middleware');
@@ -657,6 +658,84 @@ async function generateAndSaveInvoiceXML(invoiceId, transaction = null) {
     return { invoice, xmlContent, invoiceData };
 }
 
+
+
+// ============================================================
+// DT39 — Generar y persistir el RFCE
+// ============================================================
+/**
+ * Genera el RFCE para un invoice tipo 32 < 250,000.
+ *
+ * - Si el invoice NO cumple la condición (type != 32 o total >= 250K),
+ *   no hace nada y retorna null.
+ * - Si cumple, genera el XML del RFCE con codigoSeguridad='000000'
+ *   (placeholder hasta que el e-CF 32 se firme) y lo persiste en
+ *   `rfce_documents`.
+ * - Si ya existía un RFCE para este invoice, se actualiza el XML
+ *   y se respeta el status (no se degrada 'signed' → 'draft').
+ *
+ * @param {string} invoiceId
+ * @param {Transaction} transaction
+ * @returns {Promise<RfceDocument|null>}
+ */
+async function generateAndSaveRFCE(invoiceId, transaction = null) {
+    const invoice = await Invoice.findByPk(invoiceId, {
+        include: [
+            { model: InvoiceLine, as: 'lines', separate: true, order: [['lineNumber', 'ASC']] },
+            { model: Sequence, as: 'sequence' },
+            { model: Company, as: 'company' }
+        ],
+        transaction
+    });
+
+    if (!invoice) {
+        throw new AppError('Invoice not found', 404, 'INVOICE_NOT_FOUND');
+    }
+
+    // Condición: type=32 y total < 250,000
+    const totalNum = Number(invoice.total);
+    const isRFCE = String(invoice.type) === '32' && totalNum < 250000;
+
+    if (!isRFCE) {
+        return null;
+    }
+
+    // Construir invoiceData con el mismo helper que el e-CF
+    const invoiceData = buildInvoiceDataForXML(
+        invoice,
+        invoice.lines,
+        invoice.company,
+        invoice.sequence
+    );
+
+    // Generar el XML del RFCE con placeholder de código de seguridad
+    const { buildRFCE } = require('../../invoices/ecf/xml-generator');
+    const rfceXml = buildRFCE(invoiceData, '000000');
+
+    // Upsert: si ya existe el RFCE, actualizar; si no, crear
+    const [rfce, created] = await RfceDocument.findOrCreate({
+        where: { invoiceId: invoice.id },
+        defaults: {
+            invoiceId: invoice.id,
+            xmlContent: rfceXml,
+            codigoSeguridad: '000000',
+            status: 'draft'
+        },
+        transaction
+    });
+
+    if (!created) {
+        // Ya existía → actualizar el XML y el código
+        // No degradar status: si estaba 'signed', 'sent', etc., se respeta.
+        await rfce.update({
+            xmlContent: rfceXml,
+            codigoSeguridad: '000000'
+        }, { transaction });
+    }
+
+    return rfce;
+}
+
 // ============================================================
 // EXPORTS
 // ============================================================
@@ -665,6 +744,7 @@ module.exports = {
     buildInvoiceDataForXML,
     generateXMLForType,
     generateAndSaveInvoiceXML,
+    generateAndSaveRFCE,
     loadFullInvoice,
     // Helpers exportados para testing
     _helpers: {

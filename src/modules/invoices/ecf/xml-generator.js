@@ -1436,31 +1436,32 @@ function generateECF47(invoiceData) { return buildECFBody(invoiceData, { type: '
 // ============================================================
 // 5. GENERADOR DE RFCE (Resumen de Factura de Consumo < 250K)
 // ============================================================
-// Estructura según:
-//   - RFCE 32 v.1.0.xsd (DGII)
-//   - Formato de Resumen Factura de Consumo Electrónica v1.0 (DGII)
-//
-// IMPORTANTE:
-//   - Recibe los datos de UNA SOLA factura tipo 32 (monto < 250K).
-//   - NO es un resumen consolidado de varias facturas.
-//   - El XML resultante debe validar contra el XSD oficial.
-// ============================================================
-
 /**
- * Construye el XML del RFCE (Resumen de Factura de Consumo Electrónica < 250K)
+ * DT39 — Construye el XML del RFCE (Resumen de Factura de Consumo < 250K)
  * a partir de los datos de UNA factura tipo 32.
  *
+ * IMPORTANTE:
+ *   - Recibe `invoiceData` con los MISMOS nombres de campo que usa
+ *     `buildECFBody` (formasPago, montoImpuestoAdicional, impuestosAdicionales).
+ *     Esto permite reusar el mismo `buildInvoiceDataForXML` sin duplicar lógica.
+ *   - El `codigoSeguridad` es opcional y por defecto '000000' (placeholder).
+ *     El código real se calcula después de firmar el e-CF 32 completo.
+ *   - NO emite <Signature>. Eso lo hace el firmador (módulo de firma
+ *     post-MVP o la herramienta web de DGII).
+ *   - NO emite <Comprador> si no hay datos (el XSD del RFCE no lo exige
+ *     cuando está vacío; a diferencia del e-CF 32 completo que sí lo exige).
+ *
  * @param {object} invoiceData - datos de UNA factura tipo 32 (< 250K)
- * @param {string} codigoSeguridad - 6 primeros chars del hash de la firma del e-CF 32
+ * @param {string} codigoSeguridad - 6 chars del SignatureValue del e-CF 32 (default '000000')
  * @returns {string} XML del RFCE listo para firmar y enviar
  */
-function buildRFCE(invoiceData, codigoSeguridad) {
+function buildRFCE(invoiceData, codigoSeguridad = '000000') {
     const {
         // IdDoc
         ncf,
         tipoIngresos = '01',
         tipoPago = 1,
-        paymentMethods = [],   // [{ method: 1..8, amount: number }, ...] (máx 7)
+        formasPago = [],
 
         // Emisor
         issuerRnc,
@@ -1477,8 +1478,8 @@ function buildRFCE(invoiceData, codigoSeguridad) {
         itbis2Base, itbis2Amount,
         itbis3Base,
         exemptAmount,
-        additionalTaxesAmount,   // MontoImpuestoAdicional (opcional, > 0)
-        additionalTaxes = [],    // [{ code, iscEspecifico, iscAdvalorem, otros }] (máx 20)
+        montoImpuestoAdicional,
+        impuestosAdicionales = [],
         total,
         montoNoFacturable,
         montoPeriodo,
@@ -1513,24 +1514,24 @@ function buildRFCE(invoiceData, codigoSeguridad) {
     const totalITBIS = amount18 + amount16;
 
     // --- TablaFormasPago (opcional, hasta 7) ---
-    const tablaFormasPagoXml = paymentMethods.length > 0
+    const tablaFormasPagoXml = Array.isArray(formasPago) && formasPago.length > 0
         ? `
       <TablaFormasPago>
-        ${paymentMethods.slice(0, 7).map(pm => `
+        ${formasPago.slice(0, 7).map(pm => `
         <FormaDePago>
-          <FormaPago>${Number(pm.method)}</FormaPago>
-          <MontoPago>${fmtMoney(pm.amount)}</MontoPago>
+          <FormaPago>${Number(pm.formaPago ?? pm.method)}</FormaPago>
+          <MontoPago>${fmtMoney(pm.montoPago ?? pm.amount)}</MontoPago>
         </FormaDePago>`).join('')}
       </TablaFormasPago>`
         : '';
 
     // --- ImpuestosAdicionales (opcional, hasta 20) ---
-    const impuestosAdicionalesXml = additionalTaxes.length > 0
+    const impuestosAdicionalesXml = Array.isArray(impuestosAdicionales) && impuestosAdicionales.length > 0
         ? `
       <ImpuestosAdicionales>
-        ${additionalTaxes.slice(0, 20).map(t => `
+        ${impuestosAdicionales.slice(0, 20).map(t => `
         <ImpuestoAdicional>
-          <TipoImpuesto>${esc(String(t.code))}</TipoImpuesto>
+          <TipoImpuesto>${esc(String(t.codigo ?? t.code))}</TipoImpuesto>
           ${Number(t.iscEspecifico) > 0 ? `<MontoImpuestoSelectivoConsumoEspecifico>${fmtMoney(t.iscEspecifico)}</MontoImpuestoSelectivoConsumoEspecifico>` : ''}
           ${Number(t.iscAdvalorem) > 0 ? `<MontoImpuestoSelectivoConsumoAdvalorem>${fmtMoney(t.iscAdvalorem)}</MontoImpuestoSelectivoConsumoAdvalorem>` : ''}
           ${Number(t.otros) > 0 ? `<OtrosImpuestosAdicionales>${fmtMoney(t.otros)}</OtrosImpuestosAdicionales>` : ''}
@@ -1538,15 +1539,18 @@ function buildRFCE(invoiceData, codigoSeguridad) {
       </ImpuestosAdicionales>`
         : '';
 
-    // --- Comprador (bloque opcional pero el XSD lo exige como elemento) ---
-    // El XSD declara <Comprador> sin minOccurs, por defecto es required,
-    // pero todos sus hijos son opcionales. Por eso lo emitimos vacío si no hay datos.
-    const compradorXml = `
+    // --- Comprador (opcional: solo si hay al menos 1 dato) ---
+    // El XSD del RFCE no exige <Comprador> cuando está vacío.
+    const hasCompradorData = !!(receiverRnc || receiverIdentificadorExtranjero || receiverName);
+
+    const compradorXml = hasCompradorData
+        ? `
     <Comprador>
       ${receiverRnc ? `<RNCComprador>${esc(receiverRnc)}</RNCComprador>` : ''}
       ${receiverIdentificadorExtranjero ? `<IdentificadorExtranjero>${esc(receiverIdentificadorExtranjero)}</IdentificadorExtranjero>` : ''}
       ${receiverName ? `<RazonSocialComprador>${esc(receiverName)}</RazonSocialComprador>` : ''}
-    </Comprador>`;
+    </Comprador>`
+        : '';
 
     // --- XML final ---
     let xml = `<?xml version="1.0" encoding="utf-8"?>
@@ -1573,7 +1577,7 @@ function buildRFCE(invoiceData, codigoSeguridad) {
       ${totalITBIS > 0 ? `<TotalITBIS>${fmtMoney(totalITBIS)}</TotalITBIS>` : ''}
       ${amount18 > 0 ? `<TotalITBIS1>${fmtMoney(amount18)}</TotalITBIS1>` : ''}
       ${amount16 > 0 ? `<TotalITBIS2>${fmtMoney(amount16)}</TotalITBIS2>` : ''}
-      ${additionalTaxesAmount > 0 ? `<MontoImpuestoAdicional>${fmtMoney(additionalTaxesAmount)}</MontoImpuestoAdicional>` : ''}${impuestosAdicionalesXml}
+      ${montoImpuestoAdicional > 0 ? `<MontoImpuestoAdicional>${fmtMoney(montoImpuestoAdicional)}</MontoImpuestoAdicional>` : ''}${impuestosAdicionalesXml}
       <MontoTotal>${fmtMoney(total)}</MontoTotal>
       ${montoNoFacturable !== undefined && montoNoFacturable !== null ? `<MontoNoFacturable>${fmtMoney(montoNoFacturable)}</MontoNoFacturable>` : ''}
       ${montoPeriodo !== undefined && montoPeriodo !== null ? `<MontoPeriodo>${fmtMoney(montoPeriodo)}</MontoPeriodo>` : ''}
