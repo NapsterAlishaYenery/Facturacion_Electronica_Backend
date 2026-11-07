@@ -515,6 +515,31 @@ const createInvoiceSchema = Joi.object({
         }),
 
     // --- Notas de Débito/Crédito (33/34) ---
+    // ============================================================
+    // DT35 — Sección F: <InformacionReferencia>
+    //
+    // Matriz de obligatoriedad (PDF DGII v1.0):
+    //   Área:           2 2 1 1 2 2 2 2 2 2   (33/34 obligatorio)
+    //   NCFModificado:  2 2 1 1 2 2 2 2 2 2   (obligatorio si el bloque se emite)
+    //   RNCOtro:        2 2 2 2 2 2 2 2 2 2   (condicional)
+    //   FechaNCF:       2 2 1 1 2 2 2 2 2 2   (obligatorio si el bloque se emite)
+    //   CodigoMod:      2 2 1 1 2 2 2 2 2 2   (obligatorio si el bloque se emite)
+    //   RazonMod:       0 0 3 3 0 0 0 0 0 0   (solo 33/34, opcional)
+    //
+    // Reglas de negocio:
+    //   - 33/34: bloque SIEMPRE obligatorio. NCFModificado, FechaNCFModificado
+    //     y CodigoModificacion son obligatorios. RazonModificacion opcional.
+    //   - Resto de tipos: bloque CONDICIONAL. Si el usuario manda modifiedNcf,
+    //     el bloque se emite completo con NCFModificado + FechaNCFModificado +
+    //     CodigoModificacion obligatorios.
+    //   - CodigoModificacion permitido por tipo:
+    //       31 → 4, 5
+    //       32 → 4
+    //       33 → 1, 2, 3, 4
+    //       34 → 1, 2, 3, 4
+    //       41, 43, 44, 45, 46, 47 → 4
+    // ============================================================
+
     modifiedNcf: Joi.when('type', {
         is: Joi.valid('33', '34'),
         then: Joi.string().min(11).max(19).required()
@@ -523,35 +548,50 @@ const createInvoiceSchema = Joi.object({
                 'string.min': 'NCFModificado must be at least 11 characters',
                 'string.max': 'NCFModificado cannot exceed 19 characters'
             }),
-        otherwise: Joi.forbidden()
+        otherwise: Joi.string().min(11).max(19).optional().allow(null, '')
+            .messages({
+                'string.min': 'NCFModificado must be at least 11 characters',
+                'string.max': 'NCFModificado cannot exceed 19 characters'
+            })
     }),
+
     modifiedNcfIssuerRnc: Joi.when('type', {
         is: Joi.valid('33', '34'),
-        then: Joi.string().max(15).optional().allow(null, ''),
-        otherwise: Joi.forbidden()
+        then: Joi.string().pattern(/^\d{9}$|^\d{11}$/).optional().allow(null, '')
+            .messages({
+                'string.pattern.base': 'RNCOtroContribuyente must be 9 or 11 digits'
+            }),
+        otherwise: Joi.string().pattern(/^\d{9}$|^\d{11}$/).optional().allow(null, '')
+            .messages({
+                'string.pattern.base': 'RNCOtroContribuyente must be 9 or 11 digits'
+            })
     }),
+
     modifiedNcfDate: Joi.when('type', {
         is: Joi.valid('33', '34'),
         then: Joi.date().iso().required()
             .messages({
                 'any.required': 'FechaNCFModificado is required for Notas (33/34)'
             }),
-        otherwise: Joi.forbidden()
+        otherwise: Joi.date().iso().optional().allow(null)
     }),
-    modificationCode: Joi.when('type', {
-        is: Joi.valid('33', '34'),
-        then: Joi.number().integer().min(1).max(5).required()
-            .messages({
-                'any.required': 'CodigoModificacion is required for Notas (33/34)',
-                'number.min': 'CodigoModificacion must be between 1 and 5',
-                'number.max': 'CodigoModificacion must be between 1 and 5'
-            }),
-        otherwise: Joi.forbidden()
-    }),
+
+    modificationCode: Joi.number().integer().optional().allow(null)
+        .messages({
+            'number.base': 'CodigoModificacion must be a number',
+            'number.integer': 'CodigoModificacion must be an integer'
+        }),
+
     modificationReason: Joi.when('type', {
         is: Joi.valid('33', '34'),
-        then: Joi.string().max(90).optional().allow(null, ''),
+        then: Joi.string().max(90).optional().allow(null, '')
+            .messages({
+                'string.max': 'RazonModificacion cannot exceed 90 characters'
+            }),
         otherwise: Joi.forbidden()
+            .messages({
+                'any.unknown': 'RazonModificacion only applies to Notas (33/34)'
+            })
     }),
 
     // --- Nota de Crédito (34) ---
@@ -1116,6 +1156,154 @@ const createInvoiceSchema = Joi.object({
         }
 
         // ============================================================
+        // DT35 — Sección F: <InformacionReferencia>
+        // Validaciones cruzadas de los 5 campos de referencia
+        // ============================================================
+
+        // 1. Matriz de CodigoModificacion permitido por tipo
+        //    31 → 4, 5
+        //    32 → 4
+        //    33 → 1, 2, 3, 4
+        //    34 → 1, 2, 3, 4
+        //    41, 43, 44, 45, 46, 47 → 4
+        const CODIGOS_PERMITIDOS_POR_TIPO = {
+            '31': [4, 5],
+            '32': [4],
+            '33': [1, 2, 3, 4],
+            '34': [1, 2, 3, 4],
+            '41': [4],
+            '43': [4],
+            '44': [4],
+            '45': [4],
+            '46': [4],
+            '47': [4]
+        };
+
+        // 2. Validar CodigoModificacion contra el tipo
+        if (value.modificationCode !== undefined && value.modificationCode !== null) {
+            const permitidos = CODIGOS_PERMITIDOS_POR_TIPO[String(value.type)] || [];
+            const code = Number(value.modificationCode);
+
+            if (permitidos.length === 0) {
+                return helpers.error('any.custom', {
+                    message: `Tipo ${value.type}: CodigoModificacion no aplica a este tipo de e-CF`
+                });
+            }
+            if (!permitidos.includes(code)) {
+                return helpers.error('any.custom', {
+                    message: `Tipo ${value.type}: CodigoModificacion=${code} no permitido. Valores permitidos: [${permitidos.join(', ')}]. ` +
+                        `Recuerda: 1, 2, 3 solo aplican a Notas (33/34); 5 solo aplica a FC Fiscal (31).`
+                });
+            }
+        }
+
+        // 3. En 33/34: NCFModificado, FechaNCFModificado y CodigoModificacion
+        //    son OBLIGATORIOS (el bloque entero es obligatorio)
+        if (value.type === '33' || value.type === '34') {
+            if (!value.modifiedNcf) {
+                return helpers.error('any.custom', {
+                    message: `Tipo ${value.type}: NCFModificado es obligatorio (el bloque <InformacionReferencia> es obligatorio en Notas)`
+                });
+            }
+            if (!value.modifiedNcfDate) {
+                return helpers.error('any.custom', {
+                    message: `Tipo ${value.type}: FechaNCFModificado es obligatoria (el bloque <InformacionReferencia> es obligatorio en Notas)`
+                });
+            }
+            if (value.modificationCode === undefined || value.modificationCode === null) {
+                return helpers.error('any.custom', {
+                    message: `Tipo ${value.type}: CodigoModificacion es obligatorio (el bloque <InformacionReferencia> es obligatorio en Notas)`
+                });
+            }
+        }
+
+        // 4. En el resto de tipos: si viene modifiedNcf, el bloque se emite
+        //    y NCFModificado + FechaNCFModificado + CodigoModificacion son
+        //    obligatorios. Si no viene modifiedNcf, el bloque NO se emite y
+        //    los otros 4 campos deben estar vacíos (consistencia).
+        if (value.type !== '33' && value.type !== '34') {
+            const tieneNcfModificado = value.modifiedNcf !== undefined
+                && value.modifiedNcf !== null
+                && String(value.modifiedNcf).trim() !== '';
+
+            if (tieneNcfModificado) {
+                // El bloque se va a emitir → todos los obligatorios internos deben venir
+                if (!value.modifiedNcfDate) {
+                    return helpers.error('any.custom', {
+                        message: `Tipo ${value.type}: si envías NCFModificado, FechaNCFModificado es obligatoria (el bloque <InformacionReferencia> se emitirá)`
+                    });
+                }
+                if (value.modificationCode === undefined || value.modificationCode === null) {
+                    return helpers.error('any.custom', {
+                        message: `Tipo ${value.type}: si envías NCFModificado, CodigoModificacion es obligatorio (el bloque <InformacionReferencia> se emitirá)`
+                    });
+                }
+            } else {
+                // No hay NCFModificado → el bloque no se emite → el resto debe estar vacío
+                if (value.modificationCode !== undefined && value.modificationCode !== null) {
+                    return helpers.error('any.custom', {
+                        message: `Tipo ${value.type}: CodigoModificacion solo aplica si envías NCFModificado (el bloque <InformacionReferencia> requiere NCFModificado)`
+                    });
+                }
+                if (value.modifiedNcfDate) {
+                    return helpers.error('any.custom', {
+                        message: `Tipo ${value.type}: FechaNCFModificado solo aplica si envías NCFModificado`
+                    });
+                }
+                if (value.modifiedNcfIssuerRnc) {
+                    return helpers.error('any.custom', {
+                        message: `Tipo ${value.type}: RNCOtroContribuyente solo aplica si envías NCFModificado`
+                    });
+                }
+            }
+        }
+
+        // 5. RNCOtroContribuyente: si viene, no puede ser igual al company.rnc
+        //    (la validación contra company.rnc va en el service porque Joi no
+        //    conoce el companyId; aquí solo validamos formato, que ya está en
+        //    el schema). Deuda: registrar en audit si es distinto.
+        //
+        // 6. CodigoModificacion=4 (Reemplazo contingencia): el NCF modificado
+        //    debe ser de papel (11 o 19 chars, empezando con A o B) o debe
+        //    existir en BD (validación de tipo equivalente va en el service).
+        //    Aquí solo validamos el formato del NCF de papel.
+        if (Number(value.modificationCode) === 4 && value.modifiedNcf) {
+            const ncf = String(value.modifiedNcf).trim();
+            const esElectronico = ncf.length === 13 && /^E/.test(ncf);
+            const esPapel = (ncf.length === 11 || ncf.length === 19)
+                && /^[AB]/.test(ncf);
+
+            console.log('[DT35-DEBUG bloque 6]', {
+                type: value.type,
+                modificationCode: value.modificationCode,
+                modifiedNcf: value.modifiedNcf,
+                ncfLength: ncf.length,
+                esElectronico,
+                esPapel,
+                debeFallar: !esElectronico && !esPapel
+            });
+
+            if (!esElectronico && !esPapel) {
+                return helpers.error('any.custom', {
+                    message: `CodigoModificacion=4: NCFModificado debe ser electrónico (13 chars, empieza con E) o de papel (11 o 19 chars, empieza con A o B). Recibido: "${ncf}"`
+                });
+            }
+        }
+
+        // 7. CodigoModificacion=5 (Referencia FC): solo tipo 31 y el NCF
+        //    modificado debe ser de tipo 32 (validación de tipo real va en el
+        //    service porque requiere lookup en BD). Aquí solo validamos que
+        //    sea electrónico (13 chars, empieza con E).
+        if (Number(value.modificationCode) === 5 && value.modifiedNcf) {
+            const ncf = String(value.modifiedNcf).trim();
+            if (ncf.length !== 13 || !/^E/.test(ncf)) {
+                return helpers.error('any.custom', {
+                    message: `CodigoModificacion=5: NCFModificado debe ser un e-NCF de 13 caracteres que empiece con E. Recibido: "${ncf}"`
+                });
+            }
+        }
+
+        // ============================================================
         // DT31 — Validaciones cruzadas del <Item>
         // ============================================================
 
@@ -1436,15 +1624,25 @@ const updateInvoiceSchema = Joi.object({
             'array.max': 'Invoice cannot have more than 100 items'
         }),
 
-    // Campos editables de Notas (33/34)
-    modificationCode: Joi.number().integer().min(1).max(5).optional()
+    // ============================================================
+    // DT35 — Campos editables de <InformacionReferencia>
+    //
+    // En update SOLO se permiten editar:
+    //   - modificationCode  (con validación de tipo real en el service)
+    //   - modificationReason (solo 33/34; validación de tipo real en el service)
+    //
+    // NCFModificado, FechaNCFModificado y RNCOtroContribuyente NO son
+    // editables (identifican el comprobante original; cambiarlos
+    // invalidaría la nota). Se prohíben explícitamente abajo.
+    // ============================================================
+    modificationCode: Joi.number().integer().optional().allow(null)
         .messages({
-            'number.min': 'CodigoModificacion must be between 1 and 5',
-            'number.max': 'CodigoModificacion must be between 1 and 5'
+            'number.base': 'CodigoModificacion must be a number',
+            'number.integer': 'CodigoModificacion must be an integer'
         }),
     modificationReason: Joi.string().max(90).optional().allow(null, '')
         .messages({
-            'string.max': 'Modification reason cannot exceed 90 characters'
+            'string.max': 'RazonModificacion cannot exceed 90 characters'
         }),
 
     // ============================================================
@@ -1522,12 +1720,19 @@ const updateInvoiceSchema = Joi.object({
     impuestosAdicionalesOtraMoneda: otraMonedaSchema.extract('impuestosAdicionalesOtraMoneda'),
     montoTotalOtraMoneda: otraMonedaSchema.extract('montoTotalOtraMoneda'),
 
-    // Campos NO editables nunca
-    modifiedNcf: Joi.forbidden().messages({ 'any.unknown': 'NCFModificado cannot be changed after creation' }),
-    modifiedNcfIssuerRnc: Joi.forbidden().messages({ 'any.unknown': 'RNCOtroContribuyente cannot be changed after creation' }),
-    modifiedNcfDate: Joi.forbidden().messages({ 'any.unknown': 'FechaNCFModificado cannot be changed after creation' }),
-    indicadorNotaCredito: Joi.forbidden().messages({ 'any.unknown': 'IndicadorNotaCredito cannot be changed after creation' }),
-
+    // Campos NO editables nunca (identifican el comprobante original)
+    modifiedNcf: Joi.forbidden().messages({
+        'any.unknown': 'NCFModificado cannot be changed after creation (it identifies the original invoice)'
+    }),
+    modifiedNcfIssuerRnc: Joi.forbidden().messages({
+        'any.unknown': 'RNCOtroContribuyente cannot be changed after creation (it identifies the original issuer)'
+    }),
+    modifiedNcfDate: Joi.forbidden().messages({
+        'any.unknown': 'FechaNCFModificado cannot be changed after creation (it identifies the original invoice)'
+    }),
+    indicadorNotaCredito: Joi.forbidden().messages({
+        'any.unknown': 'IndicadorNotaCredito cannot be changed after creation (it depends on the original invoice date)'
+    }),
     // Campos de tipo / extranjero / transporte: NO editables
     type: Joi.forbidden(),
     receiverIdentificadorExtranjero: Joi.forbidden(),
@@ -1656,6 +1861,27 @@ const updateInvoiceSchema = Joi.object({
         }
 
         // ============================================================
+        // DT35 — Validaciones de <InformacionReferencia> en update
+        //
+        // En update NO viene `type` en el body (es inmutable), así que
+        // aquí solo validamos:
+        //   - Si viene modificationCode, debe ser 1-5 (rango global).
+        //   - Si viene modificationReason, no puede superar 90 chars
+        //     (ya validado en el schema).
+        //
+        // La validación de "qué código aplica al tipo real" va en el
+        // service (updateMyInvoice), que sí conoce invoice.type.
+        // ============================================================
+        if (value.modificationCode !== undefined && value.modificationCode !== null) {
+            const code = Number(value.modificationCode);
+            if (!Number.isInteger(code) || code < 1 || code > 5) {
+                return helpers.error('any.custom', {
+                    message: `CodigoModificacion debe ser un entero entre 1 y 5. Recibido: ${value.modificationCode}`
+                });
+            }
+        }
+
+        // ============================================================
         // DT30 — Validaciones cruzadas de coherencia
         // ============================================================
 
@@ -1718,7 +1944,7 @@ const updateInvoiceSchema = Joi.object({
         // previos — eso lo resuelve el service.
 
 
-        
+
         // ============================================================
         // DT33 — Validaciones cruzadas de descuentos/recargos globales
         // (mismas que en create, pero sin poder validar contra el

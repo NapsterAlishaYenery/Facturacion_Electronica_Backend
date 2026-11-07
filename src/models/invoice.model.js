@@ -90,7 +90,18 @@ const Invoice = sequelize.define('Invoice', {
         allowNull: true,
         field: 'indicador_nota_credito',
         validate: {
-            isIn: { args: [[0, 1]], msg: 'IndicadorNotaCredito must be 0 or 1' }
+            isIn: { args: [[0, 1]], msg: 'IndicadorNotaCredito must be 0 or 1' },
+            // DT35: IndicadorNotaCredito solo aplica a Nota de Crédito (34).
+            // En 33 es 0 (no aplica) y en el resto de tipos tampoco.
+            isOnlyForType34(value) {
+                if (value === null || value === undefined) return;
+                const type = String(this.type || '');
+                if (type !== '34') {
+                    throw new Error(
+                        `IndicadorNotaCredito solo aplica a Nota de Crédito (34). Tipo actual: ${type}.`
+                    );
+                }
+            }
         }
     },
     indicadorEnvioDiferido: {
@@ -858,20 +869,72 @@ const Invoice = sequelize.define('Invoice', {
     },
 
     // ============================================================
-    // SECCIÓN 6 — INFORMACIÓN DE REFERENCIA (33/34)
+    // DT35 — Sección F: <InformacionReferencia>
+    //
+    // Matriz de obligatoriedad (PDF DGII v1.0):
+    //   Área:           2 2 1 1 2 2 2 2 2 2  (33/34 obligatorio, resto condicional)
+    //   NCFModificado:  2 2 1 1 2 2 2 2 2 2
+    //   RNCOtro:        2 2 2 2 2 2 2 2 2 2  (condicional siempre)
+    //   FechaNCF:       2 2 1 1 2 2 2 2 2 2
+    //   CodigoMod:      2 2 1 1 2 2 2 2 2 2
+    //   RazonMod:       0 0 3 3 0 0 0 0 0 0  (solo 33/34, opcional)
+    //
+    // Matriz de CodigoModificacion permitido por tipo:
+    //   31 → 4, 5
+    //   32 → 4
+    //   33 → 1, 2, 3, 4
+    //   34 → 1, 2, 3, 4
+    //   41, 43, 44, 45, 46, 47 → 4
+    //
+    // El service ya valida contra la factura original (lookup en BD).
+    // Estos validadores son defensa en profundidad: solo validan
+    // coherencia entre campos de la propia fila.
     // ============================================================
     modifiedNcf: {
         type: DataTypes.STRING(20),
         allowNull: true,
         field: 'modified_ncf',
         validate: {
-            len: { args: [11, 19], msg: 'Modified NCF must be between 11 and 19 characters' }
+            len: { args: [11, 19], msg: 'Modified NCF must be between 11 and 19 characters' },
+            // Coherencia con type + modificationCode:
+            // el bloque <InformacionReferencia> solo se emite en 33/34,
+            // en 31 con code=5, o en cualquier tipo con code=4.
+            isValidForTypeAndCode(value) {
+                if (value === null || value === undefined) return;
+
+                const type = String(this.type || '');
+                const code = this.modificationCode !== undefined && this.modificationCode !== null
+                    ? Number(this.modificationCode)
+                    : null;
+
+                const isNota = type === '33' || type === '34';
+                const is31Code5 = type === '31' && code === 5;
+                const isContingency = code === 4;
+
+                if (!isNota && !is31Code5 && !isContingency) {
+                    throw new Error(
+                        `NCFModificado no aplica al tipo ${type} con CodigoModificacion=${code}. ` +
+                        `Solo se permite en Notas (33/34), FC 31 con code=5, o cualquier tipo con code=4.`
+                    );
+                }
+            }
         }
     },
     modifiedNcfIssuerRnc: {
         type: DataTypes.STRING(15),
         allowNull: true,
-        field: 'modified_ncf_issuer_rnc'
+        field: 'modified_ncf_issuer_rnc',
+        validate: {
+            // El PDF dice "9 u 11 NUM". Validamos el formato.
+            // La justificación (RNC dado de baja) va al service.
+            isValidFormat(value) {
+                if (value === null || value === undefined) return;
+                const s = String(value).trim();
+                if (!/^\d{9}$|^\d{11}$/.test(s)) {
+                    throw new Error('RNCOtroContribuyente must be 9 or 11 digits');
+                }
+            }
+        }
     },
     modifiedNcfDate: {
         type: DataTypes.DATE,
@@ -883,8 +946,53 @@ const Invoice = sequelize.define('Invoice', {
         allowNull: true,
         field: 'modification_code',
         validate: {
-            min: { args: [1], msg: 'Modification code must be between 1 and 5' },
-            max: { args: [5], msg: 'Modification code must be between 1 and 5' }
+            // Matriz de códigos permitidos por tipo.
+            // El Joi del schema ya lo valida en create/update, pero el
+            // modelo es la última línea de defensa si alguien llama
+            // Invoice.create/update directo.
+            isValidForType(value) {
+                if (value === null || value === undefined) return;
+
+                const code = Number(value);
+                if (!Number.isInteger(code) || code < 1 || code > 5) {
+                    throw new Error('Modification code must be an integer between 1 and 5');
+                }
+
+                const type = String(this.type || '');
+                const CODIGOS_PERMITIDOS_POR_TIPO = {
+                    '31': [4, 5],
+                    '32': [4],
+                    '33': [1, 2, 3, 4],
+                    '34': [1, 2, 3, 4],
+                    '41': [4],
+                    '43': [4],
+                    '44': [4],
+                    '45': [4],
+                    '46': [4],
+                    '47': [4]
+                };
+
+                const permitidos = CODIGOS_PERMITIDOS_POR_TIPO[type] || [];
+                if (!permitidos.includes(code)) {
+                    throw new Error(
+                        `CodigoModificacion=${code} no permitido para tipo ${type}. ` +
+                        `Valores permitidos: [${permitidos.join(', ')}]. ` +
+                        `Recuerda: 1, 2, 3 solo aplican a Notas (33/34); 5 solo aplica a FC Fiscal (31).`
+                    );
+                }
+            },
+            // Coherencia: si hay modificationCode, debe haber modifiedNcf
+            // (excepto si es code=4 reemplazando un NCF de papel que aún
+            // no está en BD — pero el usuario igual debe mandar el NCF de papel).
+            requiresModifiedNcf(value) {
+                if (value === null || value === undefined) return;
+                if (!this.modifiedNcf) {
+                    throw new Error(
+                        'CodigoModificacion requires NCFModificado. ' +
+                        'Si envías CodigoModificacion, debes enviar NCFModificado (el bloque <InformacionReferencia> se emitirá).'
+                    );
+                }
+            }
         }
     },
     modificationReason: {
@@ -892,7 +1000,17 @@ const Invoice = sequelize.define('Invoice', {
         allowNull: true,
         field: 'modification_reason',
         validate: {
-            len: { args: [0, 90], msg: 'Modification reason cannot exceed 90 characters' }
+            len: { args: [0, 90], msg: 'Modification reason cannot exceed 90 characters' },
+            // RazonModificacion solo aplica a 33/34 (PDF: 0 0 3 3 0 0 0 0 0 0)
+            isOnlyForNotas(value) {
+                if (value === null || value === undefined) return;
+                const type = String(this.type || '');
+                if (type !== '33' && type !== '34') {
+                    throw new Error(
+                        `RazonModificacion solo aplica a Notas (33/34). Tipo actual: ${type}.`
+                    );
+                }
+            }
         }
     },
 

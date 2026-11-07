@@ -174,8 +174,13 @@ function validateForType(invoiceData, profile) {
         if (profile.comprador.razonSocialRequired && !invoiceData.receiverName) {
             throw new Error(`Tipo ${code}: Razón Social Comprador es obligatoria`);
         }
-        // 46/47: si no hay RNC, debe haber IdentificadorExtranjero
-        if (profile.comprador.hasIdentificadorExtranjero && !invoiceData.receiverRnc && !invoiceData.receiverIdentificadorExtranjero) {
+        // 46/47: si no hay RNC, debe haber IdentificadorExtranjero.
+        // IMPORTANTE: este chequeo solo aplica a 46 y 47 (comprador extranjero
+        // obligatorio). En el resto de tipos (32, 33, 34, 41, 44, 45), el
+        // comprador puede estar vacío o incompleto si el monto es bajo.
+        if (['46', '47'].includes(String(code))
+            && !invoiceData.receiverRnc
+            && !invoiceData.receiverIdentificadorExtranjero) {
             throw new Error(`Tipo ${code}: debe tener RNC Comprador o Identificador Extranjero`);
         }
     }
@@ -200,11 +205,109 @@ function validateForType(invoiceData, profile) {
         }
     }
 
-    // ------- Notas 33/34 -------
-    if (profile.taxRules.isNota) {
-        if (!invoiceData.modifiedNcf) throw new Error(`Tipo ${code}: NCFModificado es obligatorio`);
-        if (!invoiceData.modifiedNcfDate) throw new Error(`Tipo ${code}: FechaNCFModificado es obligatoria`);
-        if (!invoiceData.modificationCode) throw new Error(`Tipo ${code}: CodigoModificacion es obligatorio`);
+    // ============================================================
+    // DT35 — Sección F: <InformacionReferencia>
+    //
+    // Reglas (PDF DGII v1.0):
+    //   - 33/34: bloque SIEMPRE obligatorio. NCFModificado,
+    //     FechaNCFModificado y CodigoModificacion obligatorios.
+    //   - 31 con code=5 (Referencia FC): NCFModificado,
+    //     FechaNCFModificado y CodigoModificacion obligatorios.
+    //   - Cualquier tipo con code=4 (Reemplazo contingencia):
+    //     NCFModificado, FechaNCFModificado y CodigoModificacion
+    //     obligatorios si el bloque se emite.
+    //   - Resto de combinaciones: el bloque no se emite.
+    //   - CodigoModificacion permitido por tipo:
+    //       31 → 4, 5
+    //       32 → 4
+    //       33 → 1, 2, 3, 4
+    //       34 → 1, 2, 3, 4
+    //       41, 43, 44, 45, 46, 47 → 4
+    //   - RazonModificacion: solo 33/34 (opcional).
+    // ============================================================
+
+    const _code = invoiceData.modificationCode !== undefined && invoiceData.modificationCode !== null
+        ? Number(invoiceData.modificationCode)
+        : null;
+
+    const _isNota = profile.taxRules.isNota; // 33 o 34
+    const _is31Code5 = String(code) === '31' && _code === 5;
+    const _isContingency = _code === 4;
+
+    // 1. Matriz de codigos permitidos por tipo
+    const CODIGOS_PERMITIDOS_POR_TIPO = {
+        '31': [4, 5],
+        '32': [4],
+        '33': [1, 2, 3, 4],
+        '34': [1, 2, 3, 4],
+        '41': [4],
+        '43': [4],
+        '44': [4],
+        '45': [4],
+        '46': [4],
+        '47': [4]
+    };
+
+    if (_code !== null) {
+        const permitidos = CODIGOS_PERMITIDOS_POR_TIPO[String(code)] || [];
+        if (!permitidos.includes(_code)) {
+            throw new Error(
+                `Tipo ${code}: CodigoModificacion=${_code} no permitido. ` +
+                `Valores permitidos: [${permitidos.join(', ')}]. ` +
+                `Recuerda: 1, 2, 3 solo aplican a Notas (33/34); 5 solo aplica a FC Fiscal (31).`
+            );
+        }
+    }
+
+    // 2. 33/34: bloque completo obligatorio
+    if (_isNota) {
+        if (!invoiceData.modifiedNcf) {
+            throw new Error(`Tipo ${code}: NCFModificado es obligatorio (bloque <InformacionReferencia> obligatorio en Notas)`);
+        }
+        if (!invoiceData.modifiedNcfDate) {
+            throw new Error(`Tipo ${code}: FechaNCFModificado es obligatoria (bloque <InformacionReferencia> obligatorio en Notas)`);
+        }
+        if (_code === null) {
+            throw new Error(`Tipo ${code}: CodigoModificacion es obligatorio (bloque <InformacionReferencia> obligatorio en Notas)`);
+        }
+    }
+
+    // 3. 31 con code=5: bloque completo obligatorio
+    if (_is31Code5) {
+        if (!invoiceData.modifiedNcf) {
+            throw new Error(`Tipo ${code}: CodigoModificacion=5 requiere NCFModificado (bloque <InformacionReferencia> obligatorio)`);
+        }
+        if (!invoiceData.modifiedNcfDate) {
+            throw new Error(`Tipo ${code}: CodigoModificacion=5 requiere FechaNCFModificado (bloque <InformacionReferencia> obligatorio)`);
+        }
+    }
+
+    // 4. Cualquier tipo con code=4: si el bloque se emite, todos los obligatorios internos
+    if (_isContingency && !_isNota) {
+        // code=4 puede o no emitir el bloque (si es papel y no hay NCF, no se emite).
+        // Pero si el usuario mandó modifiedNcf, el bloque se emite completo.
+        const tieneNcf = invoiceData.modifiedNcf !== undefined
+            && invoiceData.modifiedNcf !== null
+            && String(invoiceData.modifiedNcf).trim() !== '';
+
+        if (tieneNcf) {
+            if (!invoiceData.modifiedNcfDate) {
+                throw new Error(`Tipo ${code}: CodigoModificacion=4 con NCFModificado requiere FechaNCFModificado`);
+            }
+        }
+    }
+
+    // 5. RazonModificacion: solo 33/34
+    if (!_isNota && invoiceData.modificationReason) {
+        throw new Error(`Tipo ${code}: RazonModificacion solo aplica a Notas (33/34)`);
+    }
+
+    // 6. IndicadorNotaCredito: solo 34 (ya validado por profile.idDoc, pero
+    //    reforzamos: si viene en otro tipo, error).
+    if (!profile.idDoc.hasIndicadorNotaCredito
+        && invoiceData.indicadorNotaCredito !== undefined
+        && invoiceData.indicadorNotaCredito !== null) {
+        throw new Error(`Tipo ${code}: IndicadorNotaCredito solo aplica a Nota de Crédito (34)`);
     }
 
     // ------- Retención obligatoria (41 y 47) -------
@@ -851,6 +954,9 @@ function buildItems(computed, profile, invoiceData) {
         const recargo = Number(line.recargo || 0);
 
         // ✅ FIX: MontoItem=0 para tipo 34 con corrección de texto (CodigoModificacion=2)
+        // Regla del PDF: cuando CodigoModificacion=2 (Corrige Texto del
+        // Comprobante Fiscal modificado), el MontoItem debe ser 0 porque
+        // no hay cambio de monto, solo de texto.
         let montoItem = (quantity * unitPrice) - discount + recargo;
         if (profile.taxRules.isNota && Number(invoiceData.modificationCode) === 2) {
             montoItem = 0;
@@ -1175,25 +1281,97 @@ function buildPaginacion(invoiceData, profile) {
     </Paginacion>`;
 }
 
+/**
+ * DT35 — Sección F: <InformacionReferencia>
+ *
+ * Reglas de emisión (PDF DGII v1.0):
+ *   - 33/34: SIEMPRE se emite el bloque. NCFModificado,
+ *     FechaNCFModificado y CodigoModificacion obligatorios.
+ *     RNCOtroContribuyente condicional. RazonModificacion opcional.
+ *   - 31 con code=5: SIEMPRE se emite (referencia a FC 32).
+ *   - Cualquier tipo con code=4 y modifiedNcf: se emite
+ *     (reemplazo de contingencia).
+ *   - Resto de combinaciones: NO se emite.
+ *
+ * RNCOtroContribuyente: solo se emite si viene y es distinto
+ * al RNC del emisor actual (el service ya validó la justificación
+ * de RNC dado de baja).
+ */
 function buildInformacionReferencia(invoiceData, profile) {
     if (!profile.informacionReferencia.present) return '';
 
-    const { modifiedNcf, modifiedNcfIssuerRnc, modifiedNcfDate, modificationCode, modificationReason } = invoiceData;
+    const {
+        modifiedNcf,
+        modifiedNcfIssuerRnc,
+        modifiedNcfDate,
+        modificationCode,
+        modificationReason,
+        issuerRnc,
+    } = invoiceData;
 
-    if (!modifiedNcf) {
-        if (profile.informacionReferencia.required) {
-            throw new Error(`Tipo ${profile.code}: InformacionReferencia.NCFModificado es obligatorio`);
-        }
+    const code = String(profile.code);
+    const _code = modificationCode !== undefined && modificationCode !== null
+        ? Number(modificationCode)
+        : null;
+
+    // 1. Determinar si el bloque DEBE emitirse
+    const isNota = profile.taxRules.isNota; // 33 o 34
+    const is31Code5 = code === '31' && _code === 5;
+    const isContingency = _code === 4;
+    const tieneNcf = modifiedNcf !== undefined
+        && modifiedNcf !== null
+        && String(modifiedNcf).trim() !== '';
+
+    const mustEmit =
+        isNota ||
+        is31Code5 ||
+        (isContingency && tieneNcf);
+
+    // 2. Si no debe emitirse, retornar vacío
+    if (!mustEmit) {
         return '';
     }
+
+    // 3. Defensa en profundidad: si DEBE emitirse y falta NCFModificado, error
+    if (!tieneNcf) {
+        throw new Error(
+            `Tipo ${code}: InformacionReferencia.NCFModificado es obligatorio cuando el bloque debe emitirse`
+        );
+    }
+
+    // 4. Defensa en profundidad: FechaNCFModificado y CodigoModificacion obligatorios
+    if (!modifiedNcfDate) {
+        throw new Error(`Tipo ${code}: FechaNCFModificado es obligatoria cuando el bloque se emite`);
+    }
+    if (_code === null) {
+        throw new Error(`Tipo ${code}: CodigoModificacion es obligatorio cuando el bloque se emite`);
+    }
+
+    // 5. RNCOtroContribuyente: solo si viene y es distinto al RNC del emisor
+    //    (si es igual, no se debe emitir el campo; el PDF dice que aplica
+    //    cuando NO coincide).
+    let rncOtroXml = '';
+    if (modifiedNcfIssuerRnc) {
+        const rncOtroStr = String(modifiedNcfIssuerRnc).trim();
+        const issuerRncStr = issuerRnc ? String(issuerRnc).trim() : '';
+        if (rncOtroStr !== '' && rncOtroStr !== issuerRncStr) {
+            rncOtroXml = `<RNCOtroContribuyente>${esc(rncOtroStr)}</RNCOtroContribuyente>`;
+        }
+        // Si es igual al emisor, NO se emite (el PDF dice que solo aplica cuando difiere).
+    }
+
+    // 6. RazonModificacion: solo 33/34 y opcional
+    const razonModXml = (isNota && modificationReason)
+        ? `<RazonModificacion>${esc(modificationReason)}</RazonModificacion>`
+        : '';
 
     return `
     <InformacionReferencia>
       <NCFModificado>${esc(modifiedNcf)}</NCFModificado>
-      ${modifiedNcfIssuerRnc ? `<RNCOtroContribuyente>${esc(modifiedNcfIssuerRnc)}</RNCOtroContribuyente>` : ''}
+      ${rncOtroXml}
       <FechaNCFModificado>${fmtDate(modifiedNcfDate)}</FechaNCFModificado>
-      <CodigoModificacion>${modificationCode}</CodigoModificacion>
-      ${(profile.informacionReferencia.hasRazonModificacion && modificationReason) ? `<RazonModificacion>${esc(modificationReason)}</RazonModificacion>` : ''}
+      <CodigoModificacion>${_code}</CodigoModificacion>
+      ${razonModXml}
     </InformacionReferencia>`;
 }
 
