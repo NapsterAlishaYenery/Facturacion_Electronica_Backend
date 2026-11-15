@@ -1,9 +1,14 @@
+// Params
 const { invoiceIdParamsSchema } = require('./params/invoiceId.params');
+
+// Query
 const { listInvoicesQuerySchema } = require('./query/listInvoices.query');
 const { listAllInvoicesQuerySchema } = require('./query/listAllInvoices.query');
 const { downloadPDFQuerySchema } = require('./query/downloadPDF.query');
 const { downloadXMLQuerySchema } = require('./query/downloadXML.query');
 const { downloadRFCEQuerySchema } = require('./query/downloadRFCE.query');
+
+// Schemas reutilizables
 const { itemSchema } = require('./schemas/item.schema');
 const { subtotalSchema } = require('./schemas/subtotal.schema');
 const { descuentoORecargoSchema } = require('./schemas/descuentoRecargo.schema');
@@ -15,9 +20,15 @@ const { compradorExtrasSchema } = require('./schemas/compradorExtras.schema');
 const { totalesExtrasSchema } = require('./schemas/totalesExtras.schema');
 const { otraMonedaSchema } = require('./schemas/otraMoneda.schema');
 
+// Create / Update (ya con .custom() inyectado)
+const { createInvoiceSchema } = require('./create');
+const { updateInvoiceSchema } = require('./update');
+
 module.exports = {
     invoiceIdParamsSchema,
     listInvoicesQuerySchema,
+    createInvoiceSchema,
+    updateInvoiceSchema,
     listAllInvoicesQuerySchema,
     downloadPDFQuerySchema,
     downloadXMLQuerySchema,
