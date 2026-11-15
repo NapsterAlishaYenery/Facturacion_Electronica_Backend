@@ -23,63 +23,12 @@ const fs = require('fs');
 const path = require('path');
 const forge = require('node-forge');
 const cryptoUtil = require('../../shared/utils/crypto');
-
-
-// ------------------------------------------------------------
-// Helpers del módulo (solo para certificados)
-// ------------------------------------------------------------
-
-// Normaliza RNC quitando todo lo que no sea dígito
-function normalizeRnc(value) {
-    if (!value) return null;
-    const digits = String(value).replace(/\D/g, '');
-    return digits.length > 0 ? digits : null;
-}
-
-// Extrae el RNC del certificado X.509 con 3 estrategias
-function extractRncFromCert(cert) {
-    // Estrategia 1: serialNumber (el más común en Viafirma)
-    const serial = normalizeRnc(cert.serialNumber);
-    if (serial && (serial.length === 9 || serial.length === 11)) {
-        return serial;
-    }
-
-    // Estrategia 2: commonName (regex sobre el CN)
-    const cnAttr = cert.subject.getField('CN');
-    if (cnAttr && cnAttr.value) {
-        // Buscar 9 u 11 dígitos seguidos (ignorando guiones)
-        const cnDigits = normalizeRnc(cnAttr.value);
-        if (cnDigits && (cnDigits.length === 9 || cnDigits.length === 11)) {
-            return cnDigits;
-        }
-    }
-
-    // Estrategia 3: subjectAltName (raro pero posible)
-    const sanExt = cert.getExtension('subjectAltName');
-    if (sanExt && Array.isArray(sanExt.altNames)) {
-        for (const alt of sanExt.altNames) {
-            if (alt.value) {
-                const altDigits = normalizeRnc(alt.value);
-                if (altDigits && (altDigits.length === 9 || altDigits.length === 11)) {
-                    return altDigits;
-                }
-            }
-        }
-    }
-
-    return null;
-}
-
-// Extrae el certificado X.509 de un PKCS#12 abierto
-function extractCertFromP12(p12Asn1) {
-    const certBags = p12Asn1.getBags({ bagType: forge.pki.oids.certBag });
-    const bag = certBags[forge.pki.oids.certBag];
-    if (!bag || !bag[0] || !bag[0].cert) {
-        return null;
-    }
-    return bag[0].cert;
-}
-
+const {
+    extractAllCertsFromP12,
+    extractRncFromCert,
+    pickOwnerCert,
+    normalizeRnc
+} = require('../../shared/utils/certificate.util');
 
 
 //LISTA DE METODO DE ENDPOINDS
@@ -214,6 +163,7 @@ async function updateMyCompany(companyId, updates, reqUser, reqInfo = {}) {
         phone: company.phone,
         address: company.address,
         economicActivity: company.economicActivity,
+        economicActivityDescription: company.economicActivityDescription,
         provinceDgiiCode: company.provinceDgiiCode,
         municipalityDgiiCode: company.municipalityDgiiCode,
         sucursal: company.sucursal,
@@ -229,6 +179,7 @@ async function updateMyCompany(companyId, updates, reqUser, reqInfo = {}) {
         'phone',
         'address',
         'economicActivity',
+        'economicActivityDescription',
         'provinceDgiiCode',
         'municipalityDgiiCode',
         'sucursal',
@@ -472,6 +423,7 @@ async function updateCompanyById(companyId, updates, reqUser, reqInfo = {}) {
         phone: company.phone,
         address: company.address,
         economicActivity: company.economicActivity,
+        economicActivityDescription: company.economicActivityDescription,
         dgiiEnvironment: company.dgiiEnvironment,
         isActive: company.isActive,
         provinceDgiiCode: company.provinceDgiiCode,
@@ -484,6 +436,7 @@ async function updateCompanyById(companyId, updates, reqUser, reqInfo = {}) {
     // 3. Filtrar campos permitidos (doble protección)
     const allowedFields = [
         'name', 'tradeName', 'email', 'phone', 'address', 'economicActivity',
+        'economicActivityDescription',
         'dgiiEnvironment', 'isActive', 'provinceDgiiCode', 'municipalityDgiiCode',
         'sucursal', 'website', 'additionalPhones'
     ];
@@ -638,6 +591,8 @@ async function deleteCompany(companyId, reqUser, reqInfo = {}) {
         name: company.name,
         tradeName: company.tradeName,
         email: company.email,
+        economicActivity: company.economicActivity,
+        economicActivityDescription: company.economicActivityDescription,
         isActive: company.isActive,
         dgiiEnvironment: company.dgiiEnvironment,
         provinceDgiiCode: company.provinceDgiiCode,
@@ -750,9 +705,9 @@ async function uploadCertificate(companyId, fileBuffer, password, reqUser, reqIn
         );
     }
 
-    // 3. Extraer el certificado X.509
-    const cert = extractCertFromP12(p12Asn1);
-    if (!cert) {
+    // 3. Extraer TODOS los certificados del .p12 (puede haber cadena)
+    const allCerts = extractAllCertsFromP12(p12Asn1);
+    if (allCerts.length === 0) {
         throw new AppError(
             'No X.509 certificate found in the .p12 file',
             400,
@@ -760,15 +715,27 @@ async function uploadCertificate(companyId, fileBuffer, password, reqUser, reqIn
         );
     }
 
-    // 4. Extraer RNC
-    const certRnc = extractRncFromCert(cert);
-    if (!certRnc) {
+    // 3b. Elegir el del titular (no el CA intermedio/raíz)
+    const expectedRnc = normalizeRnc(company.rnc);
+    const cert = pickOwnerCert(allCerts, expectedRnc);
+    if (!cert) {
+        throw new AppError(
+            'Could not identify the owner certificate in the .p12 chain',
+            400,
+            'CERTIFICATE_NO_OWNER'
+        );
+    }
+
+    // 4. Extraer RNC del certificado del titular
+    const rncResult = extractRncFromCert(cert);
+    if (!rncResult) {
         throw new AppError(
             'Could not extract RNC from certificate. Expected 9 or 11 digits in serialNumber, CN or subjectAltName.',
             400,
             'CERTIFICATE_RNC_NOT_FOUND'
         );
     }
+    const certRnc = rncResult.rnc;   // ← extraer el string
 
     // 5. Comparar RNC con el de la empresa (normalizado)
     const companyRnc = normalizeRnc(company.rnc);

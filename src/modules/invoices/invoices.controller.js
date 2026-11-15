@@ -188,6 +188,53 @@ const getMyInvoiceXML = catchAsync(async (req, res) => {
 });
 
 
+// ------------------------------------------------------------
+// GET /api/invoices/me/:id/xml/rfce?type=unsigned|signed
+// ------------------------------------------------------------
+const getMyInvoiceRFCEXML = catchAsync(async (req, res) => {
+    const type = req.validated.query.type || 'unsigned';
+
+    const result = await invoicesService.getMyInvoiceRFCEXML(
+        req.user.companyId,
+        req.params.id,
+        type
+    );
+
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${result.ncf}-RFCE${result.type === 'signed' ? '.signed' : ''}.xml"`
+    );
+    res.setHeader('Content-Length', Buffer.byteLength(result.xml, 'utf8'));
+
+    res.send(result.xml);
+});
+
+
+// ------------------------------------------------------------
+// Firmar una factura (company_admin)
+// POST /api/invoices/me/:id/sign
+// ------------------------------------------------------------
+const signMyInvoice = catchAsync(async (req, res) => {
+    const reqInfo = {
+        ip: req.ip,
+        userAgent: req.get('user-agent')
+    };
+
+    const result = await invoicesService.signMyInvoice(
+        req.user.companyId,
+        req.params.id,
+        req.user,
+        reqInfo
+    );
+
+    res.json({
+        success: true,
+        message: 'Invoice signed successfully',
+        data: result
+    });
+});
+
 module.exports = {
     listMyInvoices,
     getMyInvoiceById,
@@ -197,6 +244,8 @@ module.exports = {
     listAllInvoices,
     getInvoiceById,
     getMyInvoicePDF,
-    getMyInvoiceXML
+    getMyInvoiceXML,
+    getMyInvoiceRFCEXML,
+    signMyInvoice
 };
 

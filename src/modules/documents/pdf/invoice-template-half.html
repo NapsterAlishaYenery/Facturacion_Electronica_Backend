@@ -183,6 +183,22 @@
         margin-top: 3px;
         line-height: 1.3;
     }
+    .draft-watermark {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    font-size: 9pt;
+    font-weight: bold;
+    color: #b71c1c;
+    background: #ffebee;
+    border: 1px dashed #b71c1c;
+    border-radius: 4px;
+    padding: 4px;
+    line-height: 1.3;
+}
 </style>
     </head>
     <body>
@@ -358,7 +374,12 @@
 
             <div class="qr-section">
                 <div class="qr-block">
-                    <img src="{{qrDataUrl}}" alt="QR Code">
+                    {{#if hasQR}}
+                    <img src="{{qrDataUrl}}" alt="QR DGII">
+                    {{else}}
+                    <div class="draft-watermark">BORRADOR<br>SIN VALIDEZ
+                        FISCAL</div>
+                    {{/if}}
                 </div>
                 <div class="security-block">
                     <div><strong>Consulte la validez en:</strong>

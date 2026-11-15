@@ -1,4 +1,6 @@
 // Dependencias principales y middleware de seguridad
+// server.js — PRIMERA línea, antes de cualquier require
+process.env.TZ = 'UTC';
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -27,6 +29,7 @@ const apiKeysRoutes = require('./modules/api-key/api-keys.routes');
 const statsRoutes = require('./modules/stats/stats.routes');
 const autdiRoutes = require('./modules/audit/audit.routes')
 const jobRoutes = require('./modules/jobs/jobs.routes')
+const locationRoutes = require('./modules/locations/locations.routes')
 
 // Imports (middlewares)
 const apiKeyLimiter = require('./shared/middlewares/apiKeyRateLimit.middleware');
@@ -91,6 +94,7 @@ app.use('/api/api-keys', apiKeysRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/audit-logs', autdiRoutes);
 app.use('/api/jobs', jobRoutes);
+app.use('/api/locations', locationRoutes );
 
 
 // Middleware global de errores

@@ -169,11 +169,14 @@ async function createMembershipInvoice({
         issuedAt: new Date(),
         items: [{
             itemCode: plan.code,
+            itemName: description.slice(0, 80),   // ← FIX #1 (obligatorio, max 80)
             description,
             quantity: 1,
             unitPrice: Number(amount),
             discount: 0,
-            itbisRate
+            itbisRate,
+            indicadorFacturacion: 4,              // ← FIX #3 (opcional pero explícito: Exento)
+            indicadorBienoServicio: 2             // ← FIX #2 (Servicio, no Bien)
         }]
     };
 

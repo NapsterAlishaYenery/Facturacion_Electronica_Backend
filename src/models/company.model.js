@@ -52,9 +52,30 @@ const Company = sequelize.define('Company', {
         allowNull: true
     },
     economicActivity: {
+        // Código numérico DGII (1-6 dígitos). Se envía en <ActividadEconomica> del XML.
+        type: DataTypes.STRING(6),
+        allowNull: true,
+        field: 'economic_activity',
+        validate: {
+            isValidCode(value) {
+                if (value === null || value === undefined || value === '') return;
+                if (!/^\d{1,6}$/.test(String(value))) {
+                    throw new Error('economicActivity must be 1-6 digits (DGII code)');
+                }
+            }
+        }
+    },
+    economicActivityDescription: {
+        // Nombre legible de la actividad. SOLO para el front, NO va al XML.
         type: DataTypes.STRING(200),
         allowNull: true,
-        field: 'economic_activity'
+        field: 'economic_activity_description',
+        validate: {
+            len: {
+                args: [0, 200],
+                msg: 'economicActivityDescription cannot exceed 200 characters'
+            }
+        }
     },
     certificatePath: {
         type: DataTypes.STRING(300),

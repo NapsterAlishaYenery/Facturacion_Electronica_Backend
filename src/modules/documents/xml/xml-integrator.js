@@ -378,7 +378,7 @@ function buildInvoiceDataForXML(invoice, lines, company, sequence = null) {
         indicadorServicioTodoIncluido: toNumberOrNull(inv.indicadorServicioTodoIncluido),
 
         tipoIngresos: inv.tipoIngresos || '01',
-        tipoPago: toNumberOrNull(inv.tipoPago) ?? 1,
+        tipoPago: toNumberOrNull(inv.tipoPago),
         fechaLimitePago: toDateOrNull(inv.fechaLimitePago),
         terminoPago: inv.terminoPago || null,
         formasPago: normalizeFormasPago(inv.formasPago),
@@ -435,9 +435,9 @@ function buildInvoiceDataForXML(invoice, lines, company, sequence = null) {
         informacionAdicionalComprador: inv.informacionAdicionalComprador || null,
 
         // ============ Totales ============
-        subtotal: Number(inv.subtotal),
-        itbis: Number(inv.itbis),
-        total: Number(inv.total),
+        subtotal: Number(inv.subtotal || 0),
+        itbis: Number(inv.itbis || 0),
+        total: Number(inv.total || 0),
         montoGravado: Number(inv.montoGravado || 0),
         itbis1Base: Number(inv.itbis1Base || 0),
         itbis1Amount: Number(inv.itbis1Amount || 0),
@@ -456,10 +456,10 @@ function buildInvoiceDataForXML(invoice, lines, company, sequence = null) {
         montoAvancePago: toNumberOrNull(inv.montoAvancePago),
         valorPagar: toNumberOrNull(inv.valorPagar),
 
-        totalItbisRetenido: Number(inv.totalItbisRetenido || 0),
-        totalIsrRetencion: Number(inv.totalIsrRetencion || 0),
-        totalItbisPercepcion: Number(inv.totalItbisPercepcion || 0),
-        totalIsrPercepcion: Number(inv.totalIsrPercepcion || 0),
+        totalItbisRetenido: toNumberOrNull(inv.totalItbisRetenido),
+        totalIsrRetencion: toNumberOrNull(inv.totalIsrRetencion),
+        totalItbisPercepcion: toNumberOrNull(inv.totalItbisPercepcion),
+        totalIsrPercepcion: toNumberOrNull(inv.totalIsrPercepcion),
 
         // ============ Otra moneda (encabezado) ============
         tipoMoneda: inv.tipoMoneda || null,
@@ -678,7 +678,7 @@ async function generateAndSaveInvoiceXML(invoiceId, transaction = null) {
  * @param {Transaction} transaction
  * @returns {Promise<RfceDocument|null>}
  */
-async function generateAndSaveRFCE(invoiceId, transaction = null) {
+async function generateAndSaveRFCE(invoiceId, codigoSeguridad = '000000', transaction = null) {
     const invoice = await Invoice.findByPk(invoiceId, {
         include: [
             { model: InvoiceLine, as: 'lines', separate: true, order: [['lineNumber', 'ASC']] },
@@ -700,6 +700,15 @@ async function generateAndSaveRFCE(invoiceId, transaction = null) {
         return null;
     }
 
+    // Validar formato del código (6 chars)
+    if (!codigoSeguridad || String(codigoSeguridad).length !== 6) {
+        throw new AppError(
+            `Invalid codigoSeguridad: must be exactly 6 chars. Got: "${codigoSeguridad}"`,
+            500,
+            'INVALID_CODIGO_SEGURIDAD'
+        );
+    }
+
     // Construir invoiceData con el mismo helper que el e-CF
     const invoiceData = buildInvoiceDataForXML(
         invoice,
@@ -710,7 +719,7 @@ async function generateAndSaveRFCE(invoiceId, transaction = null) {
 
     // Generar el XML del RFCE con placeholder de código de seguridad
     const { buildRFCE } = require('../../invoices/ecf/xml-generator');
-    const rfceXml = buildRFCE(invoiceData, '000000');
+    const rfceXml = buildRFCE(invoiceData, codigoSeguridad);
 
     // Upsert: si ya existe el RFCE, actualizar; si no, crear
     const [rfce, created] = await RfceDocument.findOrCreate({
@@ -718,7 +727,7 @@ async function generateAndSaveRFCE(invoiceId, transaction = null) {
         defaults: {
             invoiceId: invoice.id,
             xmlContent: rfceXml,
-            codigoSeguridad: '000000',
+            codigoSeguridad,
             status: 'draft'
         },
         transaction
@@ -729,7 +738,7 @@ async function generateAndSaveRFCE(invoiceId, transaction = null) {
         // No degradar status: si estaba 'signed', 'sent', etc., se respeta.
         await rfce.update({
             xmlContent: rfceXml,
-            codigoSeguridad: '000000'
+            codigoSeguridad,
         }, { transaction });
     }
 

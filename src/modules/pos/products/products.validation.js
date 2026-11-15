@@ -78,7 +78,7 @@ function applyCrossFieldRules(value, helpers) {
 // ============================================================
 const createProductSchema = Joi.object({
     // --- Identificación ---
-    name: Joi.string().min(2).max(200).required()
+    name: Joi.string().min(2).max(80).required()
         .messages({
             'any.required': 'Product name is required',
             'string.min': 'Product name must be at least 2 characters',

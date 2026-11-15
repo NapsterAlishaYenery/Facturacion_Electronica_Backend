@@ -208,6 +208,18 @@
         margin-top: 3mm;
         text-transform: uppercase;
     }
+    .draft-watermark-ticket {
+    display: inline-block;
+    font-size: 7pt;
+    font-weight: bold;
+    color: #b71c1c;
+    background: #ffebee;
+    border: 1px dashed #b71c1c;
+    padding: 2mm 3mm;
+    border-radius: 2mm;
+    text-align: center;
+    margin: 2mm 0;
+}
 </style>
     </head>
     <body>
@@ -407,7 +419,12 @@
 
         <!-- ==================== QR + SEGURIDAD ==================== -->
         <div class="qr-section">
-            <img src="{{qrDataUrl}}" alt="QR Code">
+            {{#if hasQR}}
+            <img src="{{qrDataUrl}}" alt="QR DGII">
+            {{else}}
+            <div class="draft-watermark-ticket">BORRADOR — SIN VALIDEZ
+                FISCAL</div>
+            {{/if}}
             {{#if securityCode}}
             <div class="security-code">{{securityCode}}</div>
             {{/if}}

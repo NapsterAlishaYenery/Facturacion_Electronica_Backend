@@ -22,7 +22,9 @@ const {
     updateInvoiceSchema,
     listAllInvoicesQuerySchema,
     downloadPDFQuerySchema,
-    downloadXMLQuerySchema
+    downloadXMLQuerySchema,
+    downloadRFCEQuerySchema,
+    invoiceIdParamsSchema
 } = require('./invoices.validation');
 
 // Controlador
@@ -63,6 +65,22 @@ router.post('/me',
     invoicesController.createMyInvoice
 );
 
+// ============================================================
+// Acciones sobre una factura específica (/me/:id/...)
+// IMPORTANTE: las rutas más específicas van ANTES que /me/:id
+// ============================================================
+
+// Firmar una factura (solo drafts)
+router.post(
+    '/me/:id/sign',
+    authMiddleware,
+    roleMiddleware('company_admin'),
+    writeLimiter,
+    validate(invoiceIdParamsSchema, 'params'),
+    invoicesController.signMyInvoice
+);
+
+
 // GET /api/invoices/me/:id/pdf?format=a4|ticket|half — Descargar PDF
 router.get('/me/:id/pdf',
     authMiddleware,
@@ -80,6 +98,17 @@ router.get('/me/:id/xml',
     validate(downloadXMLQuerySchema, 'query'),
     invoicesController.getMyInvoiceXML
 );
+
+// GET /api/invoices/me/:id/xml/rfce?type=unsigned|signed — Descargar XML del RFCE
+router.get('/me/:id/xml/rfce',
+    authMiddleware,
+    roleMiddleware('company_admin'),
+    readLimiter,
+    validate(downloadRFCEQuerySchema, 'query'),
+    invoicesController.getMyInvoiceRFCEXML
+);
+
+
 
 // GET /api/invoices/me/:id — Ver una específica
 router.get('/me/:id',

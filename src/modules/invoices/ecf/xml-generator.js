@@ -21,22 +21,32 @@ function formatPhone(phone) {
 function fmtDate(date) {
     if (!date) return '';
     const d = new Date(date);
-    const day = String(d.getUTCDate()).padStart(2, '0');
-    const month = String(d.getUTCMonth() + 1).padStart(2, '0');
-    const year = d.getUTCFullYear();
-    return `${day}-${month}-${year}`;
+    // Formatear en zona RD, NO en UTC
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Santo_Domingo',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    }).formatToParts(d);
+    const get = (t) => parts.find(p => p.type === t)?.value || '00';
+    return `${get('day')}-${get('month')}-${get('year')}`;
 }
 
 function fmtDateTime(date) {
     if (!date) return '';
     const d = new Date(date);
-    const day = String(d.getUTCDate()).padStart(2, '0');
-    const month = String(d.getUTCMonth() + 1).padStart(2, '0');
-    const year = d.getUTCFullYear();
-    const hours = String(d.getUTCHours()).padStart(2, '0');
-    const minutes = String(d.getUTCMinutes()).padStart(2, '0');
-    const seconds = String(d.getUTCSeconds()).padStart(2, '0');
-    return `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Santo_Domingo',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    }).formatToParts(d);
+    const get = (t) => parts.find(p => p.type === t)?.value || '00';
+    return `${get('day')}-${get('month')}-${get('year')} ${get('hour')}:${get('minute')}:${get('second')}`;
 }
 
 function fmtMoney(num) {
@@ -120,16 +130,25 @@ function removeEmptyTags(xml) {
 
 function buildQRCodeData(invoiceData) {
     const { issuerRnc, ncf, receiverRnc, total, issuedAt, type, signedAt, securityCode } = invoiceData;
+
+    // Coerción defensiva: type puede llegar como número desde algún call site
+    const typeStr = String(type);
     const totalNumber = Number(total) || 0;
-    const isFC = type === '32' && totalNumber < 250000;
+    const isFC = typeStr === '32' && totalNumber < 250000;
     const formattedTotal = totalNumber.toFixed(2);
+
+    // Si falta la firma, el QR no es válido: devolver null para que
+    // el caller (pdf-generator) decida no renderizarlo.
+    if (!signedAt || !securityCode) {
+        return null;
+    }
 
     if (isFC) {
         const params = [
             `RncEmisor=${encodeURIComponent(issuerRnc)}`,
             `ENCF=${encodeURIComponent(ncf)}`,
             `MontoTotal=${encodeURIComponent(formattedTotal)}`,
-            `CodigoSeguridad=${encodeURIComponent(securityCode || '')}`
+            `CodigoSeguridad=${encodeURIComponent(securityCode)}`
         ].join('&');
         return `https://fc.dgii.gov.do/ecf/ConsultaTimbreFC?${params}`;
     }
@@ -141,7 +160,7 @@ function buildQRCodeData(invoiceData) {
         `FechaEmision=${encodeURIComponent(fmtDate(issuedAt))}`,
         `MontoTotal=${encodeURIComponent(formattedTotal)}`,
         `FechaFirma=${encodeURIComponent(fmtDateTime(signedAt))}`,
-        `CodigoSeguridad=${encodeURIComponent(securityCode || '')}`
+        `CodigoSeguridad=${encodeURIComponent(securityCode)}`
     ].join('&');
     return `https://ecf.dgii.gov.do/ecf/ConsultaTimbre?${params}`;
 }
@@ -353,10 +372,18 @@ function validateForType(invoiceData, profile) {
 
 /**
  * Cálculo de totales en base a las líneas + datos del invoice.
+ *
+ * REGLA FISCAL:
+ *   - El indicador de las líneas define qué totales aparecen.
+ *   - Si hay al menos una línea con indicador 1 (18%), se emite
+ *     MontoGravadoTotal, MontoGravadoI1, ITBIS1, TotalITBIS, TotalITBIS1,
+ *     aunque los montos sean 0 (ej. corrección de texto).
+ *   - Si NO hay líneas con indicador 1, no se emite nada de esa tasa.
+ *   - Lo mismo para indicadores 2, 3 y 4.
  */
 function computeTotals(invoiceData) {
     const {
-        subtotal, itbis, total, lines = [],
+        total, lines = [],
         montoGravado,
         itbis1Base, itbis1Amount,
         itbis2Base, itbis2Amount,
@@ -365,21 +392,39 @@ function computeTotals(invoiceData) {
         montoImpuestoAdicional: montoImpuestoAdicionalRaw,
     } = invoiceData;
 
-    const base18 = Number(itbis1Base ?? subtotal ?? 0);
-    const amount18 = Number(itbis1Amount ?? itbis ?? 0);
-    const base16 = Number(itbis2Base || 0);
-    const amount16 = Number(itbis2Amount || 0);
-    const base0 = Number(itbis3Base || 0);
-    const amount0 = Number(itbis3Amount || 0);
-    const exempt = Number(exemptAmount || 0);
+    const toNum = (v) => (v === null || v === undefined || v === '') ? null : Number(v);
 
-    const montoGravadoTotal = montoGravado !== undefined
-        ? Number(montoGravado)
-        : (base18 + base16 + base0);
+    const base18 = toNum(itbis1Base);
+    const amount18 = toNum(itbis1Amount);
+    const base16 = toNum(itbis2Base);
+    const amount16 = toNum(itbis2Amount);
+    const base0 = toNum(itbis3Base);
+    const amount0 = toNum(itbis3Amount);
+    const exempt = toNum(exemptAmount) ?? 0;
 
-    const totalITBIS = amount18 + amount16 + amount0;
+    // ── Detectar qué indicadores existen en las líneas ──
+    const hayIndicador1 = lines.some(l => Number(l.indicadorFacturacion) === 1);
+    const hayIndicador2 = lines.some(l => Number(l.indicadorFacturacion) === 2);
+    const hayIndicador3 = lines.some(l => Number(l.indicadorFacturacion) === 3);
+    const hayIndicador4 = lines.some(l => Number(l.indicadorFacturacion) === 4);
+    const hayGravado = hayIndicador1 || hayIndicador2 || hayIndicador3;
 
-    // Monto impuesto adicional: si no viene, calcular desde líneas
+    // ── montoGravadoTotal ──
+    // Se emite si hay al menos un indicador gravado (1, 2, 3), aunque sea 0.
+    let montoGravadoTotal = null;
+    if (hayGravado) {
+        montoGravadoTotal = (base18 || 0) + (base16 || 0) + (base0 || 0);
+    } else if (montoGravado !== null && montoGravado !== undefined && Number(montoGravado) > 0) {
+        // fallback: montoGravado explícito sin indicadores detectados (raro)
+        montoGravadoTotal = Number(montoGravado);
+    }
+
+    // ── totalITBIS ──
+    // Se emite si hay al menos un indicador gravado (1, 2, 3), aunque sea 0.
+    const totalITBISSafe = (amount18 || 0) + (amount16 || 0) + (amount0 || 0);
+    const totalITBIS = hayGravado ? totalITBISSafe : null;
+
+    // ── Monto impuesto adicional ──
     let montoImpuestoAdicional = Number(montoImpuestoAdicionalRaw || 0);
     if (!montoImpuestoAdicional && Array.isArray(invoiceData.impuestosAdicionales)) {
         for (const it of invoiceData.impuestosAdicionales) {
@@ -392,7 +437,9 @@ function computeTotals(invoiceData) {
         base16, amount16,
         base0, amount0,
         exempt,
-        montoGravadoTotal, totalITBIS,
+        hayIndicador1, hayIndicador2, hayIndicador3, hayIndicador4, hayGravado,
+        montoGravadoTotal,
+        totalITBIS,
         total: Number(total || 0),
         montoImpuestoAdicional,
         lines,
@@ -404,7 +451,7 @@ function computeTotals(invoiceData) {
 // ------------------------------------------------------------
 function buildIdDoc(invoiceData, profile) {
     const {
-        ncf, sequenceExpiresAt, tipoPago = 1,
+        ncf, sequenceExpiresAt, tipoPago,
         fechaLimitePago, terminoPago, formasPago = [],
         indicadorNotaCredito,
         indicadorEnvioDiferido, indicadorMontoGravado, indicadorServicioTodoIncluido,
@@ -437,9 +484,30 @@ function buildIdDoc(invoiceData, profile) {
         ? `<TipoIngresos>${esc(tipoIngresos || profile.idDoc.tipoIngresosDefault || '01')}</TipoIngresos>`
         : '';
 
-    const tipoPagoXml = profile.idDoc.hasTipoPago
-        ? `<TipoPago>${Number(tipoPago ?? profile.idDoc.tipoPagoDefault ?? 1)}</TipoPago>`
-        : '';
+    // TipoPago: obligatoriedad según el PDF DGII:
+    //   31 → 1 (obligatorio)
+    //   32 → 1 (obligatorio)
+    //   33 → 1 (obligatorio)
+    //   34 → 1 (obligatorio)
+    //   41 → 1 (obligatorio)
+    //   43 → 3 (opcional)
+    //   44 → 1 (obligatorio)
+    //   45 → 1 (obligatorio)
+    //   46 → 1 (obligatorio)
+    //   47 → 3 (opcional)
+    //
+    // El profile ya refleja esta matriz en hasTipoPago.
+    // Si el tipo es obligatorio y el cliente no manda tipoPago,
+    // aplicamos el default (1 = Contado). Si es opcional y no viene,
+    // NO se emite.
+    const tipoPagoObligatorio = profile.idDoc.hasTipoPago
+        && !['43', '47'].includes(String(profile.code));
+
+    const tipoPagoXml = (profile.idDoc.hasTipoPago && tipoPago !== undefined && tipoPago !== null)
+        ? `<TipoPago>${Number(tipoPago)}</TipoPago>`
+        : (tipoPagoObligatorio
+            ? `<TipoPago>${Number(profile.idDoc.tipoPagoDefault ?? 1)}</TipoPago>`
+            : '');
 
     const fechaLimitePagoXml = (profile.idDoc.hasFechaLimitePago && fechaLimitePago)
         ? `<FechaLimitePago>${fmtDate(fechaLimitePago)}</FechaLimitePago>`
@@ -489,10 +557,10 @@ function buildIdDoc(invoiceData, profile) {
       <TipoeCF>${profile.code}</TipoeCF>
       <eNCF>${esc(ncf)}</eNCF>
       ${indicadorNotaCreditoXml}
+      ${fechaVencimientoSecuenciaXml}
       ${indicadorEnvioDiferidoXml}
       ${indicadorMontoGravadoXml}
       ${indicadorServicioTodoIncluidoXml}
-      ${fechaVencimientoSecuenciaXml}
       ${tipoIngresosXml}
       ${tipoPagoXml}
       ${fechaLimitePagoXml}
@@ -548,7 +616,7 @@ function buildEmisor(invoiceData, profile) {
         if (validPhones.length > 0) {
             telefonosXml = `
       <TablaTelefonoEmisor>
-        ${validPhones.map(p => `<TelefonoEmisor>${esc(p)}</TelefonoEmisor>`).join('')}
+        ${validPhones.map(p => `<TelefonoEmisor>${esc(p)}</TelefonoEmisor>`).join('\n        ')}
       </TablaTelefonoEmisor>`;
         }
     }
@@ -693,7 +761,7 @@ function buildComprador(invoiceData, profile) {
         : '';
 
     const infoAdicionalXml = (profile.comprador.hasInformacionAdicionalComprador && informacionAdicionalComprador)
-        ? `<Informacionadicionalcomprador>${esc(informacionAdicionalComprador)}</Informacionadicionalcomprador>`
+        ? `<InformacionAdicionalComprador>${esc(informacionAdicionalComprador)}</InformacionAdicionalComprador>`
         : '';
 
     return `
@@ -731,10 +799,14 @@ function buildInformacionesAdicionales(invoiceData, profile) {
     if (profile.informacionesAdicionales.hasNumeroReferencia && info.numeroReferencia) fields.push(`<NumeroReferencia>${esc(info.numeroReferencia)}</NumeroReferencia>`);
     if (profile.informacionesAdicionales.hasNombrePuertoEmbarque && info.nombrePuertoEmbarque) fields.push(`<NombrePuertoEmbarque>${esc(info.nombrePuertoEmbarque)}</NombrePuertoEmbarque>`);
     if (profile.informacionesAdicionales.hasCondicionesEntrega && info.condicionesEntrega) fields.push(`<CondicionesEntrega>${esc(info.condicionesEntrega)}</CondicionesEntrega>`);
-    if (profile.informacionesAdicionales.hasTotalFob && info.totalFob != null) fields.push(`<TotalFob>${fmtMoney(info.totalFob)}</TotalFob>`);
-    if (profile.informacionesAdicionales.hasSeguro && info.seguro != null) fields.push(`<Seguro>${fmtMoney(info.seguro)}</Seguro>`);
-    if (profile.informacionesAdicionales.hasFlete && info.flete != null) fields.push(`<Flete>${fmtMoney(info.flete)}</Flete>`);
-    if (profile.informacionesAdicionales.hasOtrosGastos && info.otrosGastos != null) fields.push(`<OtrosGastos>${fmtMoney(info.otrosGastos)}</OtrosGastos>`);
+
+    // Los siguientes campos son Decimal18D1or2ValidationTypeMayorCero
+    // (minExclusive=0). Si viene 0, el XSD rechaza. Por eso filtramos > 0.
+    if (profile.informacionesAdicionales.hasTotalFob && info.totalFob != null && Number(info.totalFob) > 0) fields.push(`<TotalFob>${fmtMoney(info.totalFob)}</TotalFob>`);
+    if (profile.informacionesAdicionales.hasSeguro && info.seguro != null && Number(info.seguro) > 0) fields.push(`<Seguro>${fmtMoney(info.seguro)}</Seguro>`);
+    if (profile.informacionesAdicionales.hasFlete && info.flete != null && Number(info.flete) > 0) fields.push(`<Flete>${fmtMoney(info.flete)}</Flete>`);
+    if (profile.informacionesAdicionales.hasOtrosGastos && info.otrosGastos != null && Number(info.otrosGastos) > 0) fields.push(`<OtrosGastos>${fmtMoney(info.otrosGastos)}</OtrosGastos>`);
+
     if (profile.informacionesAdicionales.hasTotalCif && info.totalCif != null) fields.push(`<TotalCif>${fmtMoney(info.totalCif)}</TotalCif>`);
     if (profile.informacionesAdicionales.hasRegimenAduanero && info.regimenAduanero) fields.push(`<RegimenAduanero>${esc(info.regimenAduanero)}</RegimenAduanero>`);
     if (profile.informacionesAdicionales.hasNombrePuertoSalida && info.nombrePuertoSalida) fields.push(`<NombrePuertoSalida>${esc(info.nombrePuertoSalida)}</NombrePuertoSalida>`);
@@ -745,7 +817,9 @@ function buildInformacionesAdicionales(invoiceData, profile) {
     if (profile.informacionesAdicionales.hasUnidadPesoNeto && info.unidadPesoNeto) fields.push(`<UnidadPesoNeto>${Number(info.unidadPesoNeto)}</UnidadPesoNeto>`);
     if (profile.informacionesAdicionales.hasCantidadBulto && info.cantidadBulto != null) fields.push(`<CantidadBulto>${fmtMoney(info.cantidadBulto)}</CantidadBulto>`);
     if (profile.informacionesAdicionales.hasUnidadBulto && info.unidadBulto) fields.push(`<UnidadBulto>${Number(info.unidadBulto)}</UnidadBulto>`);
-    if (profile.informacionesAdicionales.hasVolumenBulto && info.volumenBulto != null) fields.push(`<VolumenBulto>${fmtMoney(info.volumenBulto)}</VolumenBulto>`);
+
+    if (profile.informacionesAdicionales.hasVolumenBulto && info.volumenBulto != null && Number(info.volumenBulto) > 0) fields.push(`<VolumenBulto>${fmtMoney(info.volumenBulto)}</VolumenBulto>`);
+
     if (profile.informacionesAdicionales.hasUnidadVolumen && info.unidadVolumen) fields.push(`<UnidadVolumen>${Number(info.unidadVolumen)}</UnidadVolumen>`);
 
     if (fields.length === 0) return '';
@@ -803,31 +877,45 @@ function buildTransporte(invoiceData, profile) {
 function buildTotales(computed, invoiceData, profile) {
     const {
         base18, amount18, base16, amount16, base0, amount0, exempt,
+        hayIndicador1, hayIndicador2, hayIndicador3, hayIndicador4, hayGravado,
         montoGravadoTotal, totalITBIS, total,
     } = computed;
 
     const t = profile.totales;
 
-    // MontoGravadoTotal
-    const montoGravadoTotalXml = t.hasMontoGravadoTotal
-        ? `<MontoGravadoTotal>${fmtMoney(montoGravadoTotal)}</MontoGravadoTotal>` : '';
+    // ── MontoGravadoTotal ──
+    // Se emite si hay al menos un indicador gravado (1, 2, 3), aunque sea 0.
+    const montoGravadoTotalXml = (t.hasMontoGravadoTotal && hayGravado)
+        ? `<MontoGravadoTotal>${fmtMoney(montoGravadoTotal || 0)}</MontoGravadoTotal>` : '';
 
-    const montoGravadoI1Xml = (t.hasMontoGravadoI1 && base18 > 0) ? `<MontoGravadoI1>${fmtMoney(base18)}</MontoGravadoI1>` : '';
-    const montoGravadoI2Xml = (t.hasMontoGravadoI2 && base16 > 0) ? `<MontoGravadoI2>${fmtMoney(base16)}</MontoGravadoI2>` : '';
-    const montoGravadoI3Xml = (t.hasMontoGravadoI3 && base0 > 0) ? `<MontoGravadoI3>${fmtMoney(base0)}</MontoGravadoI3>` : '';
-    const montoExentoXml = (t.hasMontoExento && exempt > 0) ? `<MontoExento>${fmtMoney(exempt)}</MontoExento>` : '';
+    // ── MontoGravadoI1/I2/I3 por indicador ──
+    const montoGravadoI1Xml = (t.hasMontoGravadoI1 && hayIndicador1)
+        ? `<MontoGravadoI1>${fmtMoney(base18 || 0)}</MontoGravadoI1>` : '';
+    const montoGravadoI2Xml = (t.hasMontoGravadoI2 && hayIndicador2)
+        ? `<MontoGravadoI2>${fmtMoney(base16 || 0)}</MontoGravadoI2>` : '';
+    const montoGravadoI3Xml = (t.hasMontoGravadoI3 && hayIndicador3)
+        ? `<MontoGravadoI3>${fmtMoney(base0 || 0)}</MontoGravadoI3>` : '';
 
-    const itbis1Xml = (t.hasITBIS1 && base18 > 0) ? `<ITBIS1>18</ITBIS1>` : '';
-    const itbis2Xml = (t.hasITBIS2 && base16 > 0) ? `<ITBIS2>16</ITBIS2>` : '';
-    const itbis3Xml = (t.hasITBIS3 && base0 > 0) ? `<ITBIS3>0</ITBIS3>` : '';
+    // ── MontoExento ──
+    const montoExentoXml = (t.hasMontoExento && hayIndicador4)
+        ? `<MontoExento>${fmtMoney(exempt)}</MontoExento>` : '';
 
-    const totalITBISXml = t.hasTotalITBIS ? `<TotalITBIS>${fmtMoney(totalITBIS)}</TotalITBIS>` : '';
-    const totalITBIS1Xml = (t.hasTotalITBIS1 && amount18 > 0) ? `<TotalITBIS1>${fmtMoney(amount18)}</TotalITBIS1>` : '';
-    const totalITBIS2Xml = (t.hasTotalITBIS2 && amount16 > 0) ? `<TotalITBIS2>${fmtMoney(amount16)}</TotalITBIS2>` : '';
+    // ── Tasas ITBIS (1, 2, 3) ──
+    const itbis1Xml = (t.hasITBIS1 && hayIndicador1) ? `<ITBIS1>18</ITBIS1>` : '';
+    const itbis2Xml = (t.hasITBIS2 && hayIndicador2) ? `<ITBIS2>16</ITBIS2>` : '';
+    const itbis3Xml = (t.hasITBIS3 && hayIndicador3) ? `<ITBIS3>0</ITBIS3>` : '';
 
-    const totalITBIS3Xml = (t.hasTotalITBIS3 && base0 > 0)
-        ? `<TotalITBIS3>${fmtMoney(amount0)}</TotalITBIS3>` : '';
+    // ── TotalITBIS ──
+    const totalITBISXml = (t.hasTotalITBIS && hayGravado)
+        ? `<TotalITBIS>${fmtMoney(totalITBIS || 0)}</TotalITBIS>` : '';
+    const totalITBIS1Xml = (t.hasTotalITBIS1 && hayIndicador1)
+        ? `<TotalITBIS1>${fmtMoney(amount18 || 0)}</TotalITBIS1>` : '';
+    const totalITBIS2Xml = (t.hasTotalITBIS2 && hayIndicador2)
+        ? `<TotalITBIS2>${fmtMoney(amount16 || 0)}</TotalITBIS2>` : '';
+    const totalITBIS3Xml = (t.hasTotalITBIS3 && hayIndicador3)
+        ? `<TotalITBIS3>${fmtMoney(amount0 || 0)}</TotalITBIS3>` : '';
 
+    // ── MontoImpuestoAdicional / ImpuestosAdicionales ──
     const montoImpuestoAdicionalXml = (t.hasMontoImpuestoAdicional && computed.montoImpuestoAdicional > 0)
         ? `<MontoImpuestoAdicional>${fmtMoney(computed.montoImpuestoAdicional)}</MontoImpuestoAdicional>` : '';
 
@@ -840,12 +928,14 @@ function buildTotales(computed, invoiceData, profile) {
           ${it.tasa != null ? `<TasaImpuestoAdicional>${Number(it.tasa)}</TasaImpuestoAdicional>` : ''}
           ${it.iscEspecifico != null ? `<MontoImpuestoSelectivoConsumoEspecifico>${fmtMoney(it.iscEspecifico)}</MontoImpuestoSelectivoConsumoEspecifico>` : ''}
           ${it.iscAdvalorem != null ? `<MontoImpuestoSelectivoConsumoAdvalorem>${fmtMoney(it.iscAdvalorem)}</MontoImpuestoSelectivoConsumoAdvalorem>` : ''}
-          ${it.otros != null ? `<OtrosImpuestosAdicionales>${fmtMoney(it.otros)}</OtrosImpuestoAdicionales>` : ''}
+          ${it.otros != null ? `<OtrosImpuestosAdicionales>${fmtMoney(it.otros)}</OtrosImpuestosAdicionales>` : ''}
         </ImpuestoAdicional>`).join('')}
       </ImpuestosAdicionales>` : '';
 
+    // ── MontoTotal (siempre obligatorio) ──
     const montoTotalXml = `<MontoTotal>${fmtMoney(total)}</MontoTotal>`;
 
+    // ── Otros montos opcionales ──
     const montoNoFacturableXml = (t.hasMontoNoFacturable && invoiceData.montoNoFacturable != null)
         ? `<MontoNoFacturable>${fmtMoney(invoiceData.montoNoFacturable)}</MontoNoFacturable>` : '';
     const montoPeriodoXml = (t.hasMontoPeriodo && invoiceData.montoPeriodo != null)
@@ -903,7 +993,12 @@ function buildOtraMoneda(invoiceData, profile) {
     const f = [];
 
     if (o.hasTipoMoneda && invoiceData.tipoMoneda) f.push(`<TipoMoneda>${esc(invoiceData.tipoMoneda)}</TipoMoneda>`);
-    if (o.hasTipoCambio && invoiceData.tipoCambio != null) f.push(`<TipoCambio>${Number(invoiceData.tipoCambio)}</TipoCambio>`);
+
+    // El XSD dice Decimal7D1or4ValidationTypeMayorCero → hasta 4 decimales.
+    // La DGII valida el formato exacto (57.0000, no 57).
+    // Number(57.0000) → 57 pierde los ceros. Por eso usamos toFixed(4).
+    if (o.hasTipoCambio && invoiceData.tipoCambio != null)
+        f.push(`<TipoCambio>${Number(invoiceData.tipoCambio).toFixed(4)}</TipoCambio>`);
 
     if (o.hasMontoGravadoTotalOtraMoneda && invoiceData.montoGravadoTotalOtraMoneda != null) f.push(`<MontoGravadoTotalOtraMoneda>${fmtMoney(invoiceData.montoGravadoTotalOtraMoneda)}</MontoGravadoTotalOtraMoneda>`);
     if (o.hasMontoGravado1OtraMoneda && invoiceData.montoGravado1OtraMoneda != null) f.push(`<MontoGravado1OtraMoneda>${fmtMoney(invoiceData.montoGravado1OtraMoneda)}</MontoGravado1OtraMoneda>`);
@@ -1187,7 +1282,7 @@ function buildItems(computed, profile, invoiceData) {
       ${fechaElabXml}
       ${fechaVencXml}
       ${mineriaXml}
-      <PrecioUnitarioItem>${fmtMoney(unitPrice)}</PrecioUnitarioItem>
+      <PrecioUnitarioItem>${Number(unitPrice).toFixed(4)}</PrecioUnitarioItem>
       ${descuentoXml}
       ${tabSubDescuentoXml}
       ${recargoXml}
@@ -1205,6 +1300,26 @@ function buildSubtotales(invoiceData, profile) {
     const subtotales = invoiceData.subtotales || [];
     if (subtotales.length === 0) return '';
 
+    // ═══════════════════════════════════════════════════════════
+    // Variante SIMPLE (46, 47): solo SubTotalExento, MontoSubTotal, Lineas.
+    // El XSD 47 NO tiene SubTotalMontoGravadoTotal / SubTotaITBIS / etc.
+    // ═══════════════════════════════════════════════════════════
+    if (profile.subtotales.simple) {
+        return `
+    <Subtotales>
+      ${subtotales.map(s => `
+      <Subtotal>
+        <NumeroSubTotal>${s.numeroSubtotal}</NumeroSubTotal>
+        ${s.descripcion ? `<DescripcionSubtotal>${esc(s.descripcion)}</DescripcionSubtotal>` : ''}
+        ${s.orden != null ? `<Orden>${s.orden}</Orden>` : ''}
+        ${s.subTotalExento > 0 ? `<SubTotalExento>${fmtMoney(s.subTotalExento)}</SubTotalExento>` : ''}
+        ${s.montoSubTotal > 0 ? `<MontoSubTotal>${fmtMoney(s.montoSubTotal)}</MontoSubTotal>` : ''}
+        ${s.lineas != null ? `<Lineas>${s.lineas}</Lineas>` : ''}
+      </Subtotal>`).join('')}
+    </Subtotales>`;
+    }
+
+    // Variante full (31, 32, 33, 34, 41, 44, 45)
     return `
     <Subtotales>
       ${subtotales.map(s => `
@@ -1256,6 +1371,25 @@ function buildPaginacion(invoiceData, profile) {
     const paginas = invoiceData.paginas || [];
     if (paginas.length === 0) return '';
 
+    // ═══════════════════════════════════════════════════════════
+    // Variante SIMPLE (46, 47): solo SubtotalExentoPagina y MontoSubtotalPagina.
+    // El XSD 47 NO tiene SubtotalMontoGravadoPagina / SubtotalItbisPagina / etc.
+    // ═══════════════════════════════════════════════════════════
+    if (profile.paginacion.simple) {
+        return `
+    <Paginacion>
+      ${paginas.map(p => `
+      <Pagina>
+        <PaginaNo>${p.paginaNo}</PaginaNo>
+        <NoLineaDesde>${p.noLineaDesde}</NoLineaDesde>
+        <NoLineaHasta>${p.noLineaHasta}</NoLineaHasta>
+        ${p.subtotalExentoPagina > 0 ? `<SubtotalExentoPagina>${fmtMoney(p.subtotalExentoPagina)}</SubtotalExentoPagina>` : ''}
+        <MontoSubtotalPagina>${fmtMoney(p.montoSubtotalPagina)}</MontoSubtotalPagina>
+      </Pagina>`).join('')}
+    </Paginacion>`;
+    }
+
+    // Variante full (31, 32, 33, 34, 41, 44, 45)
     return `
     <Paginacion>
       ${paginas.map(p => `

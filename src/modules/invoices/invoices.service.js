@@ -367,6 +367,40 @@ function calculateLineTotals(item) {
     // Total de la línea = base + ITBIS
     const total = Math.round((lineBase + itbisAmount) * 100) / 100;
 
+    // ============================================================
+    // DT30 — <OtraMonedaDetalle> del <Item>
+    //
+    // Regla: el cliente manda `precioOtraMoneda` y el service calcula
+    // `montoItemOtraMoneda = precioOtraMoneda × quantity
+    //                       - descuentoOtraMoneda
+    //                       + recargoOtraMoneda`.
+    //
+    // Si el cliente manda `montoItemOtraMoneda` explícito, se respeta.
+    // Si NO manda `precioOtraMoneda`, todos quedan null (no se emite
+    // el bloque para esa línea).
+    // ============================================================
+    const precioOtraMoneda = item.precioOtraMoneda != null
+        ? Number(item.precioOtraMoneda)
+        : null;
+    const descuentoOtraMoneda = item.descuentoOtraMoneda != null
+        ? Number(item.descuentoOtraMoneda)
+        : null;
+    const recargoOtraMoneda = item.recargoOtraMoneda != null
+        ? Number(item.recargoOtraMoneda)
+        : null;
+
+    let montoItemOtraMoneda = item.montoItemOtraMoneda != null
+        ? Number(item.montoItemOtraMoneda)
+        : null;
+
+    if (precioOtraMoneda !== null && montoItemOtraMoneda === null) {
+        const montoCalculado =
+            (precioOtraMoneda * quantity)
+            - (descuentoOtraMoneda || 0)
+            + (recargoOtraMoneda || 0);
+        montoItemOtraMoneda = Math.round((montoCalculado + Number.EPSILON) * 100) / 100;
+    }
+
     return {
         // Calculados
         quantity,
@@ -402,6 +436,11 @@ function calculateLineTotals(item) {
         liquidacion: item.liquidacion ?? null,
         // DT32 — Subtotal informativo: a qué grupo pertenece esta línea
         subtotalId: item.subtotalId ?? null,
+        // DT30 — <OtraMonedaDetalle> (4 campos del ítem)
+        precioOtraMoneda,
+        descuentoOtraMoneda,
+        recargoOtraMoneda,
+        montoItemOtraMoneda,
     };
 }
 
@@ -536,63 +575,160 @@ function assertSubtotalsMatchInvoiceTotal(subtotalesCalculados, invoiceTotal) {
 
 // ------------------------------------------------------------
 // Helper: calcular totales de la factura completa
+//
+// DT31-FIX — REGLA DGII (crítica):
+// El ITBIS se calcula sobre la BASE IMPONIBLE TOTAL, no sumando
+// el ITBIS redondeado de cada línea. Sumar los ITBIS por línea
+// acumula errores de redondeo (ej: 5 líneas × 18% puede dar
+// 2679.52 cuando la base total × 0.18 da 2679.53).
+//
+// La DGII valida en recepción:
+//   TotalITBIS1 == round(MontoGravadoI1 × 0.18, 2)
+// Si no coincide, rechaza el comprobante.
+//
+// Por eso:
+//   - itbis1Amount/itbis2Amount/itbis3Amount se calculan SOBRE LAS BASES.
+//   - total = montoGravado + exemptAmount + itbis (NO suma de line.total).
+//
+// Las líneas (invoice_lines) siguen guardando su itbisAmount propio
+// (redondeado a 2 decimales) para mostrarlo en el PDF y en el
+// <MontoItem> del XML. Eso NO se toca aquí.
 // ------------------------------------------------------------
 function calculateInvoiceTotals(lines) {
-    let itbis1Base = 0, itbis1Amount = 0;
-    let itbis2Base = 0, itbis2Amount = 0;
-    let itbis3Base = 0, itbis3Amount = 0;
+    let itbis1Base = 0;
+    let itbis2Base = 0;
+    let itbis3Base = 0;
     let exemptAmount = 0;
-    let total = 0;
 
     for (const line of lines) {
         const ind = Number(line.indicadorFacturacion);
         const base = Number(line.lineBase);
-        const amount = Number(line.itbisAmount);
 
-        if (ind === 1) {
-            itbis1Base += base;
-            itbis1Amount += amount;
-        } else if (ind === 2) {
-            itbis2Base += base;
-            itbis2Amount += amount;
-        } else if (ind === 3) {
-            itbis3Base += base;
-            itbis3Amount += amount;
-        } else if (ind === 4) {
-            exemptAmount += base;
-        }
-        // ind === 0 (No Facturable) → no suma a ninguna base
-
-        total += Number(line.total);
+        if (ind === 1) itbis1Base += base;
+        else if (ind === 2) itbis2Base += base;
+        else if (ind === 3) itbis3Base += base;
+        else if (ind === 4) exemptAmount += base;
     }
 
-    const round = (n) => Math.round(n * 100) / 100;
+    const round = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+
+    const itbis1Amount = round(itbis1Base * 0.18);
+    const itbis2Amount = round(itbis2Base * 0.16);
+    const itbis3Amount = round(itbis3Base * 0.00);
 
     const montoGravado = round(itbis1Base + itbis2Base + itbis3Base);
     const itbis = round(itbis1Amount + itbis2Amount + itbis3Amount);
 
-    // Backward-compat: 'subtotal' sigue existiendo y significa
-    // la suma de TODAS las bases (gravadas + exentas), como antes.
     const subtotal = round(montoGravado + exemptAmount);
+    const total = round(montoGravado + exemptAmount + itbis);
 
+    // BD exige NOT NULL → guardamos 0 (no null).
+    // El mapper (xml-integrator) decide si emitir o no el tag en el XML
+    // basándose en si la base > 0, no en el valor crudo.
     return {
-        // Campos nuevos (correctos fiscalmente)
         montoGravado,
         itbis1Base: round(itbis1Base),
-        itbis1Amount: round(itbis1Amount),
+        itbis1Amount,
         itbis2Base: round(itbis2Base),
-        itbis2Amount: round(itbis2Amount),
+        itbis2Amount,
         itbis3Base: round(itbis3Base),
-        itbis3Amount: round(itbis3Amount),
+        itbis3Amount,
         exemptAmount: round(exemptAmount),
-
-        // Campos heredados (mantener por backward-compat)
         subtotal,
         itbis,
-        total: round(total)
+        total
     };
 }
 
+// ============================================================
+// DT-EXPORT — Cálculo de <OtraMoneda> (encabezado y detalle)
+//
+// Regla DGII (confirmada con el set E460000000007):
+//   - Los montos en otra moneda se calculan DIVIDIENDO el monto
+//     en DOP por el tipo de cambio.
+//   - El precio unitario en otra moneda también se deriva
+//     (unitPrice DOP / tipoCambio).
+//   - Los TOTALES del encabezado se calculan SOBRE LOS TOTALES
+//     DOP (no sumando líneas redondeadas) para evitar acumular
+//     error de redondeo (ej: 2,061.41 vs 2,061.40).
+// ============================================================
+
+function roundMoney4(n) {
+    return Math.round((Number(n) + Number.EPSILON) * 10000) / 10000;
+}
+
+/**
+ * Enriquece cada línea con `precioOtraMoneda` y `montoItemOtraMoneda`
+ * calculados desde DOP / tipoCambio, y devuelve los totales del
+ * encabezado <OtraMoneda> calculados directo sobre los totales DOP.
+ *
+ * @param {Array}  calculatedLines   - líneas ya pasadas por calculateLineTotals
+ *                                     (deben tener `total` y `unitPrice`)
+ * @param {number} tipoCambio
+ * @param {Object} invoiceTotalsDOP  - resultado de calculateInvoiceTotals
+ * @returns {Object} totales para el <OtraMoneda> del encabezado
+ *                   (todos null si no hay tipoCambio)
+ */
+function calculateOtraMonedaTotals(calculatedLines, tipoCambio, invoiceTotalsDOP) {
+    const tc = Number(tipoCambio);
+
+    // Sin tipo de cambio → no hay bloque OtraMoneda
+    if (!tc || tc <= 0) {
+        return {
+            montoGravadoTotalOtraMoneda: null,
+            montoGravado1OtraMoneda: null,
+            montoGravado2OtraMoneda: null,
+            montoGravado3OtraMoneda: null,
+            montoExentoOtraMoneda: null,
+            totalItbisOtraMoneda: null,
+            totalItbis1OtraMoneda: null,
+            totalItbis2OtraMoneda: null,
+            totalItbis3OtraMoneda: null,
+            montoImpuestoAdicionalOtraMoneda: null,
+            montoTotalOtraMoneda: null,
+            impuestosAdicionalesOtraMoneda: null,
+        };
+    }
+
+    const r2 = roundMoney;
+    const r4 = roundMoney4;
+
+    // 1. Enriquecer cada línea con los valores derivados
+    for (const line of calculatedLines) {
+        const montoItemDOP = Number(line.total || 0);
+        const unitPriceDOP = Number(line.unitPrice || 0);
+
+        line.montoItemOtraMoneda = r2(montoItemDOP / tc);
+        line.precioOtraMoneda = r4(unitPriceDOP / tc);
+
+        // Descuento/recargo en otra moneda (si existen en DOP)
+        line.descuentoOtraMoneda = Number(line.discount) > 0
+            ? r2(Number(line.discount) / tc)
+            : null;
+        line.recargoOtraMoneda = Number(line.recargo) > 0
+            ? r2(Number(line.recargo) / tc)
+            : null;
+    }
+
+    // 2. Totales encabezado — directo desde los totales DOP
+    return {
+        montoGravadoTotalOtraMoneda: r2(invoiceTotalsDOP.montoGravado / tc),
+        montoGravado1OtraMoneda: r2(invoiceTotalsDOP.itbis1Base / tc),
+        montoGravado2OtraMoneda: r2(invoiceTotalsDOP.itbis2Base / tc),
+        montoGravado3OtraMoneda: r2(invoiceTotalsDOP.itbis3Base / tc),
+        montoExentoOtraMoneda: r2(invoiceTotalsDOP.exemptAmount / tc),
+        totalItbisOtraMoneda: r2(invoiceTotalsDOP.itbis / tc),
+        totalItbis1OtraMoneda: r2(invoiceTotalsDOP.itbis1Amount / tc),
+        totalItbis2OtraMoneda: r2(invoiceTotalsDOP.itbis2Amount / tc),
+        totalItbis3OtraMoneda: r2(invoiceTotalsDOP.itbis3Amount / tc),
+        montoImpuestoAdicionalOtraMoneda: Number(invoiceTotalsDOP.montoImpuestoAdicional || 0) > 0
+            ? r2(Number(invoiceTotalsDOP.montoImpuestoAdicional) / tc)
+            : null,
+        montoTotalOtraMoneda: r2(invoiceTotalsDOP.total / tc),
+        // Deuda: impuestosAdicionalesOtraMoneda (requiere calcular ISC por línea en USD)
+        impuestosAdicionalesOtraMoneda: null,
+    };
+}
 
 // ============================================================
 // DT33 — Helpers: descuentos y recargos GLOBALES
@@ -1124,6 +1260,11 @@ async function getMyInvoiceById(companyId, invoiceId) {
                 as: 'lines',
                 separate: true,           // ← query separada para poder ordenar
                 order: [['lineNumber', 'ASC']]
+            },
+            {
+                model: RfceDocument,
+                as: 'rfce',
+                required: false
             }
         ]
     });
@@ -1172,13 +1313,6 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
         receiverPais,
         // Exento (43, 44, 47)
         exemptAmount,
-        // ITBIS3 (46)
-        itbis3Base,
-        itbis3Amount,
-        // Retenciones encabezado (41, 47)
-        totalItbisRetenido,
-        totalIsrRetencion,
-        // Transporte (varios)
         transporte,
         // Info adicional (46)
         informacionesAdicionales,
@@ -1259,20 +1393,13 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
         // ============================================================
         // DT30 — OtraMoneda (encabezado)
         // ============================================================
+        // DT-EXPORT: solo tipoMoneda + tipoCambio vienen del body.
+        // Los 12 totales derivados se calculan con
+        // calculateOtraMonedaTotals() y NO vienen del cliente
+        // (el Joi los prohíbe con forbidden()).
+        // ============================================================
         tipoMoneda,
         tipoCambio,
-        montoGravadoTotalOtraMoneda,
-        montoGravado1OtraMoneda,
-        montoGravado2OtraMoneda,
-        montoGravado3OtraMoneda,
-        montoExentoOtraMoneda,
-        totalItbisOtraMoneda,
-        totalItbis1OtraMoneda,
-        totalItbis2OtraMoneda,
-        totalItbis3OtraMoneda,
-        montoImpuestoAdicionalOtraMoneda,
-        impuestosAdicionalesOtraMoneda,
-        montoTotalOtraMoneda,
         // DT32 — Subtotales
         subtotales,
         // DT33 — Descuentos o Recargos globales
@@ -1361,6 +1488,33 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
         const invoiceTotalsPrelim = calculateInvoiceTotals(calculatedLines);
 
         // ============================================================
+        // DT31-FIX — Calcular totales de retención desde las líneas
+        //
+        // Según el PDF DGII v1.0, en tipos 41 y 47:
+        //   TotalITBISRetenido = Σ(items[].retencion.montoItbisRetenido)
+        //   TotalISRRetencion  = Σ(items[].retencion.montoIsrRetenido)
+        //
+        // Estos campos son DERIVADOS: el cliente ya no los manda
+        // (el schema los prohíbe con Joi.forbidden()). El XML los
+        // toma de la BD. Solo aplican a 41 y 47.
+        // ============================================================
+        let finalTotalItbisRetenido = null;
+        let finalTotalIsrRetencion = null;
+
+        if (['41', '47'].includes(type)) {
+            const sumItbisRet = calculatedLines.reduce(
+                (sum, l) => sum + Number(l.retencion?.montoItbisRetenido || 0),
+                0
+            );
+            const sumIsrRet = calculatedLines.reduce(
+                (sum, l) => sum + Number(l.retencion?.montoIsrRetenido || 0),
+                0
+            );
+            finalTotalItbisRetenido = roundMoney(sumItbisRet);
+            finalTotalIsrRetencion = roundMoney(sumIsrRet);
+        }
+
+        // ============================================================
         // DT33 — Descuentos y recargos GLOBALES
         // Orden:
         //   1. Resolver el monto de cada descuento (usa bases preliminares).
@@ -1376,6 +1530,18 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
             descuentosResueltos
         );
 
+        // ============================================================
+        // DT-EXPORT — Calcular <OtraMoneda> (detalle + encabezado)
+        //
+        // Se calcula DESPUÉS de los descuentos globales porque los
+        // montos OtraMoneda se derivan de los totales DOP finales.
+        // ============================================================
+        const otraMonedaTotals = calculateOtraMonedaTotals(
+            calculatedLines,
+            tipoCambio,
+            invoiceTotals
+        );
+
         // 🔥 Defensa en profundidad (opcional) — el schema Joi ya lo valida
         if (type === '32' && invoiceTotals.total >= 250000 && !receiverRnc) {
             throw new AppError(
@@ -1383,6 +1549,65 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
                 409,
                 'DGII_250K_RULE'
             );
+        }
+
+        // DT40-FIX — Validar formas de pago vs total
+        //
+        // REGLA DGII:
+        //   - Tipos 31, 32, 33, 34, 43, 44, 45, 46, 47:
+        //       Σ(montoPago) === MontoTotal
+        //   - Tipo 41 (Comprobante de Compras):
+        //       Σ(montoPago) === MontoTotal − (TotalITBISRetenido + TotalISRRetencion)
+        //
+        // ¿Por qué el 41 es distinto?
+        //   En un 41 el comprador retiene ITBIS e ISR al proveedor,
+        //   y le paga solo el NETO. El set DGII E410000000001 lo confirma:
+        //     MontoTotal        = 11,800.00
+        //     TotalITBISRetenido =  1,800.00
+        //     TotalISRRetencion  =  1,000.00
+        //     MontoPago          =  9,000.00
+        //
+
+
+        // Si el cliente manda formasPago, validamos contra el monto
+        // esperado según el tipo. Si no, no validamos (el bloque es opcional).
+        // ============================================================
+        if (Array.isArray(formasPago) && formasPago.length > 0) {
+            const sumaFormasPago = formasPago.reduce(
+                (sum, fp) => sum + Number(fp.montoPago || 0),
+                0
+            );
+
+            // Monto esperado según el tipo
+            let montoEsperado = Number(invoiceTotals.total);
+
+            if (type === '41') {
+                // En 41: pago neto = total − retenciones (ITBIS + ISR)
+                const totalRetenciones =
+                    Number(finalTotalItbisRetenido || 0) +
+                    Number(finalTotalIsrRetencion || 0);
+                montoEsperado = roundMoney(montoEsperado - totalRetenciones);
+            } else if (type === '47') {
+                // En 47: pago neto = total − TotalISRRetencion
+                // (en 47 no hay retención de ITBIS, solo ISR)
+                const totalRetenciones = Number(finalTotalIsrRetencion || 0);
+                montoEsperado = roundMoney(montoEsperado - totalRetenciones);
+            }
+
+            const diff = Math.abs(sumaFormasPago - montoEsperado);
+            if (diff > 0.01) {
+                const tipoMsg = type === '41'
+                    ? `(MontoTotal ${invoiceTotals.total.toFixed(2)} − retenciones ITBIS+ISR ${(Number(finalTotalItbisRetenido || 0) + Number(finalTotalIsrRetencion || 0)).toFixed(2)} = pago neto ${montoEsperado.toFixed(2)})`
+                    : type === '47'
+                        ? `(MontoTotal ${invoiceTotals.total.toFixed(2)} − retención ISR ${Number(finalTotalIsrRetencion || 0).toFixed(2)} = pago neto ${montoEsperado.toFixed(2)})`
+                        : '';
+                throw new AppError(
+                    `Suma de formas de pago (${sumaFormasPago.toFixed(2)}) no coincide con el monto esperado (${montoEsperado.toFixed(2)}) ${tipoMsg}. ` +
+                    `Diferencia: ${diff.toFixed(2)}. Ajusta los montos de cada forma de pago.`,
+                    409,
+                    'FORMAS_PAGO_MISMATCH'
+                );
+            }
         }
 
         // 4.5. issuedAt
@@ -1473,17 +1698,29 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
             itbis2Base: invoiceTotals.itbis2Base,
             itbis2Amount: invoiceTotals.itbis2Amount,
 
-            // Exento: SIEMPRE derivado de las líneas (no del body)
-            exemptAmount: invoiceTotals.exemptAmount || null,
+            // Exento: derivado de las líneas (fuente de verdad).
+            // DT-EXPORT: usamos finalExemptAmount (calculado más arriba)
+            // en lugar de invoiceTotals.exemptAmount para respetar la
+            // lógica por tipo (43/44/47 aceptan exemptAmount del body).
+            exemptAmount: finalExemptAmount || null,
 
-            // ITBIS3: para tipo 46, se respeta el body; para el resto,
-            // se toma de las líneas (aunque solo 46 lo usa).
-            itbis3Base: type === '46' ? (itbis3Base ?? invoiceTotals.itbis3Base) : (invoiceTotals.itbis3Base || null),
-            itbis3Amount: type === '46' ? (itbis3Amount ?? invoiceTotals.itbis3Amount) : (invoiceTotals.itbis3Amount || null),
+            // ITBIS3: SIEMPRE derivado de las líneas (indicadorFacturacion=3).
+            // DT-EXPORT: el cliente ya NO lo manda (Joi lo prohíbe).
+            //
+            // ⚠️ CHECK constraint `chk_invoices_46_itbis3`:
+            //    (type <> '46') OR (itbis3_base IS NOT NULL AND itbis3_amount IS NOT NULL)
+            // Para tipo 46 exigimos NOT NULL (guardamos 0 si no hay base 0%).
+            // Para el resto de tipos guardamos null (semántica "no aplica").
+            itbis3Base: type === '46'
+                ? invoiceTotals.itbis3Base
+                : (invoiceTotals.itbis3Base || null),
+            itbis3Amount: type === '46'
+                ? invoiceTotals.itbis3Amount
+                : (invoiceTotals.itbis3Amount || null),
 
-            // Retenciones encabezado (41, 47)
-            totalItbisRetenido: totalItbisRetenido ?? null,
-            totalIsrRetencion: totalIsrRetencion ?? null,
+            // Retenciones encabezado (41, 47) — DT31: calculadas desde las líneas
+            totalItbisRetenido: finalTotalItbisRetenido,
+            totalIsrRetencion: finalTotalIsrRetencion,
 
             issuedAt: finalIssuedAt,
 
@@ -1539,34 +1776,36 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
             // ============================================================
             montoImpuestoAdicional: montoImpuestoAdicional ?? null,
             impuestosAdicionales: impuestosAdicionales || null,
+
             montoNoFacturable: montoNoFacturable ?? null,
+            // montoPeriodo es OPCIONAL (obligatoriedad 3) en TODOS los tipos.
+            // Sin default: si el cliente no lo manda, no se emite.
             montoPeriodo: montoPeriodo ?? null,
             saldoAnterior: saldoAnterior ?? null,
             montoAvancePago: montoAvancePago ?? null,
+            // valorPagar es OPCIONAL (obligatoriedad 3) en TODOS los tipos.
+            // PERO: si hay descuentos Norma 10-07, el PDF dice que debe
+            // calcularse automáticamente (regla "c" de la sección ValorPagar).
             valorPagar: valorPagar ?? calculateValorPagarNorma1007(
                 invoiceTotals.total,
                 descuentosResueltos
-            ),
+            ) ?? null,
+
+
             totalItbisPercepcion: totalItbisPercepcion ?? null,
             totalIsrPercepcion: totalIsrPercepcion ?? null,
 
             // ============================================================
             // DT30 — OtraMoneda (encabezado)
+            //
+            // DT-EXPORT: los 12 totales vienen de `otraMonedaTotals`,
+            // calculados por calculateOtraMonedaTotals() desde DOP /
+            // tipoCambio. El cliente NO los manda (Joi los prohíbe).
             // ============================================================
             tipoMoneda: tipoMoneda || null,
             tipoCambio: tipoCambio ?? null,
-            montoGravadoTotalOtraMoneda: montoGravadoTotalOtraMoneda ?? null,
-            montoGravado1OtraMoneda: montoGravado1OtraMoneda ?? null,
-            montoGravado2OtraMoneda: montoGravado2OtraMoneda ?? null,
-            montoGravado3OtraMoneda: montoGravado3OtraMoneda ?? null,
-            montoExentoOtraMoneda: montoExentoOtraMoneda ?? null,
-            totalItbisOtraMoneda: totalItbisOtraMoneda ?? null,
-            totalItbis1OtraMoneda: totalItbis1OtraMoneda ?? null,
-            totalItbis2OtraMoneda: totalItbis2OtraMoneda ?? null,
-            totalItbis3OtraMoneda: totalItbis3OtraMoneda ?? null,
-            montoImpuestoAdicionalOtraMoneda: montoImpuestoAdicionalOtraMoneda ?? null,
-            impuestosAdicionalesOtraMoneda: impuestosAdicionalesOtraMoneda || null,
-            montoTotalOtraMoneda: montoTotalOtraMoneda ?? null,
+            ...otraMonedaTotals,
+
 
             // Transporte + Info adicional
             ...mapTransporteFields(transporte),
@@ -1595,6 +1834,12 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
                 precioUnitarioReferencia: line.precioUnitarioReferencia,
                 fechaElaboracion: line.fechaElaboracion,
                 fechaVencimientoItem: line.fechaVencimientoItem,
+
+                // DT30 — <OtraMonedaDetalle> (4 campos del ítem)
+                precioOtraMoneda: line.precioOtraMoneda,
+                descuentoOtraMoneda: line.descuentoOtraMoneda,
+                recargoOtraMoneda: line.recargoOtraMoneda,
+                montoItemOtraMoneda: line.montoItemOtraMoneda,
 
                 // DT31
                 additionalCodes: line.additionalCodes,
@@ -1703,7 +1948,7 @@ async function createMyInvoice(companyId, data, reqUser, reqInfo = {}) {
         // y se puede regenerar con updateMyInvoice o un endpoint manual.
         try {
             const { generateAndSaveRFCE } = require('../documents/xml/xml-integrator');
-            await generateAndSaveRFCE(invoice.id, t);
+            await generateAndSaveRFCE(invoice.id, '000000', t);
         } catch (rfceErr) {
             console.error('[createMyInvoice] RFCE generation failed:', rfceErr.message);
         }
@@ -1863,24 +2108,15 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
         );
     }
 
-    // 🔥 Validaciones de negocio que dependen del TIPO real (vive en BD, no en body)
-    //    Joi valida forma; aquí validamos contra el tipo real de la factura.
-
-    // 🔥 NUEVO: indicador 3 (ITBIS3) solo aplica a tipo 46.
-    //    Si el usuario manda items con indicador 3 en un tipo distinto, rechazar.
-    //    (El schema Joi no puede validar esto porque el `type` no viene en el body.)
-    if (updates.items !== undefined && invoice.type !== '46') {
-        for (let i = 0; i < updates.items.length; i++) {
-            const ind = updates.items[i].indicadorFacturacion;
-            if (ind !== undefined && Number(ind) === 3) {
-                throw new AppError(
-                    `Item ${i + 1}: indicadorFacturacion=3 (ITBIS 0% gravado) solo aplica a tipo 46 (exportaciones). Para 0% usa indicadorFacturacion=4 (exento).`,
-                    409,
-                    'INDICADOR_3_ONLY_46'
-                );
-            }
-        }
-    }
+    // indicadorFacturacion=3 (ITBIS 0% gravado) es válido en TODOS los
+    // tipos según la tabla oficial de la DGII. Solo se restringe cuando
+    // el tipo FUERZA un indicador específico:
+    //   - 43, 44, 47 → forzado a 4 (exento)
+    //   - 46 →  forzado a 3 (ITBIS 0% gravado, exportación)
+    // Esa validación vive en el bloque "IndicadorFacturacion forzado
+    // por tipo" más abajo en esta misma función. El caso DGII
+    // E310000000010 incluye un item PAN con indicadorFacturacion=3
+    // en tipo 31, lo cual es válido.
 
 
     // A) Retención por línea: solo 41/47, y obligatoria en ellos
@@ -2353,6 +2589,52 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
             updateData.itbis2Amount = invoiceTotals.itbis2Amount;
             updateData.exemptAmount = invoiceTotals.exemptAmount || null;
 
+            // ═══════════════════════════════════════════════════════════
+            // DT-EXPORT — BUG 39: recalcular itbis3Base/Amount cuando
+            // cambian los items (antes quedaban con el valor viejo).
+            //
+            // ⚠️ CHECK constraint `chk_invoices_46_itbis3`:
+            //    Solo tipo 46 requiere NOT NULL. El resto queda null.
+            // ═══════════════════════════════════════════════════════════
+            updateData.itbis3Base = invoice.type === '46'
+                ? invoiceTotals.itbis3Base
+                : (invoiceTotals.itbis3Base || null);
+            updateData.itbis3Amount = invoice.type === '46'
+                ? invoiceTotals.itbis3Amount
+                : (invoiceTotals.itbis3Amount || null);
+            // ═══════════════════════════════════════════════════════════
+            // DT-EXPORT — Recalcular <OtraMoneda> (detalle + encabezado)
+            // con el tipo de cambio final (body o BD).
+            // ═══════════════════════════════════════════════════════════
+            const tipoCambioFinal = updates.tipoCambio !== undefined
+                ? updates.tipoCambio
+                : invoice.tipoCambio;
+
+            const otraMonedaTotals = calculateOtraMonedaTotals(
+                calculatedLines,
+                tipoCambioFinal,
+                invoiceTotals
+            );
+
+            // Sobrescribir los totales OtraMoneda en el updateData
+            Object.assign(updateData, otraMonedaTotals);
+
+            // DT31-FIX — recalcular totales de retención desde las nuevas líneas
+            if (['41', '47'].includes(invoice.type)) {
+                updateData.totalItbisRetenido = roundMoney(
+                    calculatedLines.reduce(
+                        (s, l) => s + Number(l.retencion?.montoItbisRetenido || 0),
+                        0
+                    )
+                );
+                updateData.totalIsrRetencion = roundMoney(
+                    calculatedLines.reduce(
+                        (s, l) => s + Number(l.retencion?.montoIsrRetenido || 0),
+                        0
+                    )
+                );
+            }
+
             // DT33 — ValorPagar: respetar el body, o calcular Norma1007
             // (solo si el cliente NO lo mandó explícitamente).
             if (updates.valorPagar === undefined) {
@@ -2386,6 +2668,12 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
                     precioUnitarioReferencia: line.precioUnitarioReferencia,
                     fechaElaboracion: line.fechaElaboracion,
                     fechaVencimientoItem: line.fechaVencimientoItem,
+
+                    // DT30 — <OtraMonedaDetalle> (4 campos del ítem)
+                    precioOtraMoneda: line.precioOtraMoneda,
+                    descuentoOtraMoneda: line.descuentoOtraMoneda,
+                    recargoOtraMoneda: line.recargoOtraMoneda,
+                    montoItemOtraMoneda: line.montoItemOtraMoneda,
 
                     // DT31 — Sub-bloques del <Item>
                     additionalCodes: line.additionalCodes,
@@ -2569,6 +2857,68 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
         }
 
 
+        // ═══════════════════════════════════════════════════════════
+        // DT-EXPORT — Recalcular OtraMoneda si cambia tipoCambio
+        // sin cambiar items (caso borde: editar TC en un draft).
+        // ═══════════════════════════════════════════════════════════
+        if (updates.items === undefined && updates.tipoCambio !== undefined) {
+            const currentLines = await InvoiceLine.findAll({
+                where: { invoiceId: invoice.id },
+                order: [['lineNumber', 'ASC']],
+                transaction: t
+            });
+
+            if (currentLines.length > 0) {
+                const calculatedLines = currentLines.map(l => {
+                    const raw = typeof l.toJSON === 'function' ? l.toJSON() : l;
+                    return {
+                        quantity: Number(raw.quantity),
+                        unitPrice: Number(raw.unitPrice),
+                        discount: Number(raw.discount || 0),
+                        recargo: Number(raw.recargo || 0),
+                        itbisRate: Number(raw.itbisRate),
+                        itbisAmount: Number(raw.itbisAmount),
+                        indicadorFacturacion: Number(raw.indicadorFacturacion),
+                        lineBase: roundMoney(
+                            Number(raw.quantity) * Number(raw.unitPrice)
+                            - Number(raw.discount || 0)
+                            + Number(raw.recargo || 0)
+                        ),
+                        total: Number(raw.total),
+                        retencion: raw.retencionIndicador
+                            ? { indicador: Number(raw.retencionIndicador), montoItbisRetenido: Number(raw.montoItbisRetenido || 0), montoIsrRetenido: Number(raw.montoIsrRetenido || 0) }
+                            : null
+                    };
+                });
+
+                const invoiceTotals = calculateInvoiceTotals(calculatedLines);
+
+                const otraMonedaTotals = calculateOtraMonedaTotals(
+                    calculatedLines,
+                    updates.tipoCambio,
+                    invoiceTotals
+                );
+                Object.assign(updateData, otraMonedaTotals);
+
+                // También actualizar las líneas con el nuevo montoItemOtraMoneda
+                for (const line of calculatedLines) {
+                    await InvoiceLine.update(
+                        {
+                            precioOtraMoneda: line.precioOtraMoneda,
+                            montoItemOtraMoneda: line.montoItemOtraMoneda
+                        },
+                        {
+                            where: {
+                                invoiceId: invoice.id,
+                                lineNumber: calculatedLines.indexOf(line) + 1
+                            },
+                            transaction: t
+                        }
+                    );
+                }
+            }
+        }
+
 
 
         // Caso B: NO vienen items, pero SÍ descuentos → recalcular totales
@@ -2598,7 +2948,10 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
                             - Number(raw.discount || 0)
                             + Number(raw.recargo || 0)
                         ),
-                        total: Number(raw.total)
+                        total: Number(raw.total),
+                        // DT31-FIX — para recalcular totales de retención
+                        montoItbisRetenido: Number(raw.montoItbisRetenido || 0),
+                        montoIsrRetenido: Number(raw.montoIsrRetenido || 0)
                     };
                 });
 
@@ -2623,6 +2976,31 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
                 updateData.itbis2Base = invoiceTotals.itbis2Base;
                 updateData.itbis2Amount = invoiceTotals.itbis2Amount;
                 updateData.exemptAmount = invoiceTotals.exemptAmount || null;
+
+                // ⚠️ CHECK constraint `chk_invoices_46_itbis3`:
+                // Solo tipo 46 requiere NOT NULL. El resto queda null.
+                updateData.itbis3Base = invoice.type === '46'
+                    ? invoiceTotals.itbis3Base
+                    : (invoiceTotals.itbis3Base || null);
+                updateData.itbis3Amount = invoice.type === '46'
+                    ? invoiceTotals.itbis3Amount
+                    : (invoiceTotals.itbis3Amount || null);
+
+                // DT31-FIX — recalcular totales de retención desde las líneas de BD
+                if (['41', '47'].includes(invoice.type)) {
+                    updateData.totalItbisRetenido = roundMoney(
+                        calculatedLines.reduce(
+                            (s, l) => s + Number(l.montoItbisRetenido || 0),
+                            0
+                        )
+                    );
+                    updateData.totalIsrRetencion = roundMoney(
+                        calculatedLines.reduce(
+                            (s, l) => s + Number(l.montoIsrRetenido || 0),
+                            0
+                        )
+                    );
+                }
 
                 // DT33 — ValorPagar: respetar el body, o calcular Norma1007
                 if (updates.valorPagar === undefined) {
@@ -2749,6 +3127,68 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
             updateData.indicadorNotaCredito = diffDays > 30 ? 1 : 0;
         }
 
+        // ============================================================
+        // DT-EXPORT — FIX: calcular finalFormasPago y finalTotal
+        //
+        // Bug: el bloque DT40-FIX de más abajo referenciaba variables
+        // `finalFormasPago` y `finalTotal` que no se definían en ningún
+        // lado → ReferenceError en cada update. Las definimos aquí:
+        //   - finalFormasPago: del body si viene, o el de BD si no.
+        //   - finalTotal: de updateData si se recalculó, o el de BD.
+        // ============================================================
+        const finalFormasPago = updates.formasPago !== undefined
+            ? updates.formasPago
+            : (invoice.formasPago || []);
+        const finalTotal = updateData.total ?? invoice.total;
+
+        // ============================================================
+        // DT40-FIX (update) — Validar formasPago vs monto esperado
+        //
+        // REGLA DGII:
+        //   - Tipos 31, 32, 33, 34, 43, 44, 45, 46, 47:
+        //       Σ(montoPago) === MontoTotal
+        //   - Tipo 41 (Comprobante de Compras):
+        //       Σ(montoPago) === MontoTotal − (TotalITBISRetenido + TotalISRRetencion)
+        //
+        // En update, los totales de retención pueden venir de:
+        //   a) updateData (si se recalcularon por items nuevos o descuentos)
+        //   b) invoice (si no se recalcularon, se leen del registro actual)
+        // ============================================================
+        if (Array.isArray(finalFormasPago) && finalFormasPago.length > 0) {
+            const sumaFormasPago = finalFormasPago.reduce(
+                (sum, fp) => sum + Number(fp.montoPago || 0),
+                0
+            );
+
+            let montoEsperado = Number(finalTotal);
+
+            if (invoice.type === '41') {
+                const totalRetenciones =
+                    Number(updateData.totalItbisRetenido ?? invoice.totalItbisRetenido ?? 0) +
+                    Number(updateData.totalIsrRetencion ?? invoice.totalIsrRetencion ?? 0);
+                montoEsperado = roundMoney(montoEsperado - totalRetenciones);
+            } else if (invoice.type === '47') {
+                // En 47: pago neto = total − TotalISRRetencion
+                const totalRetenciones =
+                    Number(updateData.totalIsrRetencion ?? invoice.totalIsrRetencion ?? 0);
+                montoEsperado = roundMoney(montoEsperado - totalRetenciones);
+            }
+
+            const diff = Math.abs(sumaFormasPago - montoEsperado);
+            if (diff > 0.01) {
+                const tipoMsg = invoice.type === '41'
+                    ? `(pago neto esperado en 41 = total ${Number(finalTotal).toFixed(2)} − retenciones ITBIS+ISR ${(Number(updateData.totalItbisRetenido ?? invoice.totalItbisRetenido ?? 0) + Number(updateData.totalIsrRetencion ?? invoice.totalIsrRetencion ?? 0)).toFixed(2)} = ${montoEsperado.toFixed(2)})`
+                    : invoice.type === '47'
+                        ? `(pago neto esperado en 47 = total ${Number(finalTotal).toFixed(2)} − retención ISR ${Number(updateData.totalIsrRetencion ?? invoice.totalIsrRetencion ?? 0).toFixed(2)} = ${montoEsperado.toFixed(2)})`
+                        : '';
+                throw new AppError(
+                    `Suma de formas de pago (${sumaFormasPago.toFixed(2)}) no coincide con el monto esperado (${montoEsperado.toFixed(2)}) ${tipoMsg}. ` +
+                    `Diferencia: ${diff.toFixed(2)}.`,
+                    409,
+                    'FORMAS_PAGO_MISMATCH'
+                );
+            }
+        }
 
         // 4.3. Actualizar la factura
         await invoice.update(updateData, { transaction: t });
@@ -2765,20 +3205,32 @@ async function updateMyInvoice(companyId, invoiceId, updates, reqUser, reqInfo =
         }
 
 
-        // 4.3.6. 🔥 DT39 — Regenerar RFCE si aplica (y si sigue siendo draft)
-        if (invoice.status === 'draft'
-            && invoice.type === '32'
-            && Number(invoice.total) < 250000) {
-            try {
-                const { generateAndSaveRFCE } = require('../documents/xml/xml-integrator');
-                await generateAndSaveRFCE(invoice.id, t);
-            } catch (rfceErr) {
-                console.error('[updateMyInvoice] RFCE regen failed:', rfceErr.message);
+        // 4.3.6. DT39 — Regenerar/eliminar RFCE según si sigue aplicando
+        if (invoice.status === 'draft' && invoice.type === '32') {
+            const currentTotal = Number(invoice.total);
+            if (currentTotal < 250000) {
+                // Aplica → regenerar
+                try {
+                    const { generateAndSaveRFCE } = require('../documents/xml/xml-integrator');
+                    await generateAndSaveRFCE(invoice.id, '000000', t);
+                } catch (rfceErr) {
+                    console.error('[updateMyInvoice] RFCE regen failed:', rfceErr.message);
+                }
+            } else {
+                // Ya NO aplica → borrar el RFCE si existía
+                try {
+                    await RfceDocument.destroy({
+                        where: { invoiceId: invoice.id },
+                        transaction: t
+                    });
+                } catch (err) {
+                    console.error('[updateMyInvoice] RFCE cleanup failed:', err.message);
+                }
             }
         }
 
 
-        // 4.4. Audit log
+
         // 4.4. Audit log (enriquecido con snapshot de descuentos)
         try {
             // Snapshot de descuentos actuales (post-update) para el `after`
@@ -3112,6 +3564,11 @@ async function getInvoiceById(invoiceId) {
                 as: 'descuentosORecargos',
                 separate: true,
                 order: [['numeroLinea', 'ASC']]
+            },
+            {
+                model: RfceDocument,
+                as: 'rfce',
+                required: false
             }
         ]
     });
@@ -3283,6 +3740,260 @@ async function getMyInvoiceXML(companyId, invoiceId, type = 'unsigned') {
     };
 }
 
+
+// ------------------------------------------------------------
+// Obtener el XML del RFCE de una factura (company_admin)
+//
+// El RFCE solo existe para tipo 32 con total < 250,000.
+// type = 'unsigned' → rfce.xmlContent (default)
+// type = 'signed'   → rfce.xmlSigned
+//
+// Devuelve { xml, ncf, type }
+// ------------------------------------------------------------
+async function getMyInvoiceRFCEXML(companyId, invoiceId, type = 'unsigned') {
+    if (!companyId) {
+        throw new AppError('You do not belong to any company', 400, 'NO_COMPANY_ASSIGNED');
+    }
+
+    // 1. Validar tipo
+    if (type !== 'unsigned' && type !== 'signed') {
+        throw new AppError(
+            `Invalid XML type: ${type}. Must be "unsigned" or "signed".`,
+            400,
+            'INVALID_XML_TYPE'
+        );
+    }
+
+    // 2. Buscar la factura (multi-tenant) con su RFCE
+    const invoice = await Invoice.findOne({
+        where: { id: invoiceId, companyId },
+        attributes: ['id', 'ncf', 'type', 'status', 'total'],
+        include: [{
+            model: RfceDocument,
+            as: 'rfce',
+            required: false
+        }]
+    });
+
+    if (!invoice) {
+        throw new AppError('Invoice not found', 404, 'INVOICE_NOT_FOUND');
+    }
+
+    // 3. El RFCE solo aplica a tipo 32 con total < 250,000
+    if (String(invoice.type) !== '32' || Number(invoice.total) >= 250000) {
+        throw new AppError(
+            `RFCE only applies to invoice type 32 with total < 250,000. ` +
+            `This invoice is type ${invoice.type} with total ${invoice.total}.`,
+            409,
+            'RFCE_NOT_APPLICABLE'
+        );
+    }
+
+    // 4. ¿Existe el RFCE?
+    const rfce = invoice.rfce;
+    if (!rfce) {
+        throw new AppError(
+            'RFCE has not been generated for this invoice yet. ' +
+            'Try editing the invoice to regenerate it.',
+            409,
+            'RFCE_NOT_GENERATED'
+        );
+    }
+
+    // 5. Determinar el contenido según el tipo
+    const isSigned = type === 'signed';
+    const xmlFromDb = isSigned ? rfce.xmlSigned : rfce.xmlContent;
+
+    if (!xmlFromDb) {
+        if (isSigned) {
+            throw new AppError(
+                'RFCE has not been signed yet. Cannot download signed RFCE XML.',
+                409,
+                'RFCE_NOT_SIGNED'
+            );
+        } else {
+            throw new AppError(
+                'RFCE has no XML content. Try editing the invoice to regenerate it.',
+                409,
+                'RFCE_XML_EMPTY'
+            );
+        }
+    }
+
+    // 6. Intentar leer del disco (fallback a BD)
+    //    El archivo se guarda como "{ncf}-RFCE.xml" o "{ncf}-RFCE.signed.xml"
+    const { readXMLFromDisk } = require('../documents/storage/xml-storage');
+
+    let xml = null;
+    try {
+        xml = await readXMLFromDisk(
+            { ...invoice.toJSON(), ncf: `${invoice.ncf}-RFCE` },
+            type
+        );
+    } catch (err) {
+        // Si falla la lectura del disco, usar el de BD
+        console.error('[getMyInvoiceRFCEXML] Disk read failed, using DB:', err.message);
+    }
+
+    if (!xml) {
+        xml = xmlFromDb;
+    }
+
+    return {
+        xml,
+        ncf: invoice.ncf,
+        type
+    };
+}
+
+// ------------------------------------------------------------
+// Firmar factura (company_admin)
+// Solo drafts, con xmlContent generado.
+//
+// Flujo:
+//   1. Firmar e-CF → xmlSigned + status='signed'
+//   2. Si type=32 y total<250K: regenerar RFCE con securityCode real
+//      y firmar el RFCE
+//   3. Guardar ambos en disco
+//   4. Audit log
+// ------------------------------------------------------------
+async function signMyInvoice(companyId, invoiceId, reqUser, reqInfo = {}) {
+    if (!companyId) {
+        throw new AppError('You do not belong to any company', 400, 'NO_COMPANY_ASSIGNED');
+    }
+
+    // 1. Cargar invoice + company + líneas + RFCE si existe
+    const invoice = await Invoice.findOne({
+        where: { id: invoiceId, companyId },
+        include: [
+            { model: Company, as: 'company' },
+            { model: InvoiceLine, as: 'lines', separate: true, order: [['lineNumber', 'ASC']] },
+            { model: RfceDocument, as: 'rfce', required: false }
+        ]
+    });
+
+    if (!invoice) throw new AppError('Invoice not found', 404, 'INVOICE_NOT_FOUND');
+    if (invoice.status !== 'draft') {
+        throw new AppError(
+            `Cannot sign invoice with status '${invoice.status}'. Only drafts can be signed.`,
+            409,
+            'INVOICE_NOT_SIGNABLE'
+        );
+    }
+    if (!invoice.xmlContent) {
+        throw new AppError('Invoice has no XML content.', 409, 'XML_NOT_GENERATED');
+    }
+    if (!invoice.company || !invoice.company.certificatePath) {
+        throw new AppError(
+            'Company has no certificate uploaded.',
+            409,
+            'COMPANY_NO_CERTIFICATE'
+        );
+    }
+
+    // 2. Firmar el e-CF
+    const { signInvoiceXml } = require('../documents/sign');
+
+    let signResult;
+    try {
+        signResult = await signInvoiceXml(invoice.xmlContent, invoice.company);
+    } catch (err) {
+        if (err instanceof AppError) throw err;
+        throw new AppError(
+            `Failed to sign invoice: ${err.message}`,
+            500,
+            'INVOICE_SIGN_FAILED'
+        );
+    }
+
+    const { xmlSigned, fechaHoraFirma, securityCode, signedAt } = signResult;
+
+    // 3. Guardar e-CF firmado
+    await invoice.update({
+        xmlSigned,
+        status: 'signed'
+    });
+
+    // 4. Si aplica RFCE: regenerar con securityCode real y firmar
+    let rfceResult = null;
+    const totalNum = Number(invoice.total);
+    const isRFCE = String(invoice.type) === '32' && totalNum < 250000;
+
+    if (isRFCE) {
+        try {
+            const { generateAndSaveRFCE } = require('../documents/xml/xml-integrator');
+
+            // 4.1. Regenerar RFCE con el securityCode del e-CF 32 firmado
+            const rfceRow = await generateAndSaveRFCE(invoice.id, securityCode, null);
+
+            if (rfceRow && rfceRow.xmlContent) {
+                // 4.2. Firmar el RFCE (sin <FechaHoraFirma>)
+                const rfceSign = await signInvoiceXml(rfceRow.xmlContent, invoice.company);
+                await rfceRow.update({
+                    xmlSigned: rfceSign.xmlSigned,
+                    status: 'signed'
+                });
+                rfceResult = {
+                    signed: true,
+                    securityCode
+                };
+            }
+        } catch (rfceErr) {
+            console.error('[signMyInvoice] RFCE signing failed:', rfceErr.message);
+            rfceResult = {
+                signed: false,
+                error: rfceErr.message
+            };
+        }
+    }
+
+    // 5. Guardar en disco (fire-and-forget)
+    try {
+        const { saveSignedXMLToDisk } = require('../documents/storage/xml-storage');
+        saveSignedXMLToDisk(invoice, xmlSigned).catch(err => {
+            console.error('[signMyInvoice] saveSignedXMLToDisk failed:', err.message);
+        });
+    } catch (err) {
+        console.error('[signMyInvoice] Disk storage module error:', err.message);
+    }
+
+    // 6. Audit log
+    try {
+        await AuditLog.create({
+            companyId,
+            userId: reqUser?.id ?? null,
+            action: 'invoice.signed',
+            entity: 'invoice',
+            entityId: invoice.id,
+            before: { status: 'draft' },
+            after: {
+                status: 'signed',
+                fechaHoraFirma,
+                securityCode,
+                certRnc: invoice.company.rnc,
+                rfceSigned: rfceResult ? rfceResult.signed : false
+            },
+            ip: reqInfo.ip || null,
+            userAgent: reqInfo.userAgent || null
+        });
+    } catch (err) { /* silencioso */ }
+
+    // 7. Respuesta
+    return {
+        invoice: {
+            id: invoice.id,
+            ncf: invoice.ncf,
+            type: invoice.type,
+            status: 'signed',
+            fechaHoraFirma,
+            signedAt: signedAt.toISOString(),
+            securityCode,
+            xmlSignedLength: xmlSigned.length
+        },
+        rfce: rfceResult
+    };
+}
+
 module.exports = {
     listMyInvoices,
     getMyInvoiceById,
@@ -3293,6 +4004,8 @@ module.exports = {
     getInvoiceById,
     getMyInvoicePDF,
     getMyInvoiceXML,
+    getMyInvoiceRFCEXML,
+    signMyInvoice,
     // 🔥 NUEVO: helpers reutilizables para internalBilling
     _helpers: {
         assignNextNCF,
@@ -3304,7 +4017,10 @@ module.exports = {
         resolveModifiedInvoice,
         // DT32 — subtotales
         calculateSubtotalsFromLines,
-        assertSubtotalsMatchInvoiceTotal
+        assertSubtotalsMatchInvoiceTotal,
+        // DT-EXPORT — OtraMoneda
+        calculateOtraMonedaTotals,
+        roundMoney4
     }
 };
 

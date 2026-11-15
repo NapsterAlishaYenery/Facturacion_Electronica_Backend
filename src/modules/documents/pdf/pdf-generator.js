@@ -185,26 +185,58 @@ async function buildTemplateData(invoice, lines, company) {
     const hasBuyer = type !== '43';
     const hasRetenciones = type === '41' || type === '47';
 
-    const securityCode = invoice.xmlSigned
-        ? extractSecurityCode(invoice.xmlSigned)
-        : '';
+    // ============================================================
+    // QR: solo se genera si la factura ya fue firmada.
+    // La fuente de verdad de FechaFirma y CodigoSeguridad es el
+    // propio xmlSigned, NO el updatedAt del registro.
+    // ============================================================
+    let qrDataUrl = null;
+    let qrUrl = null;
+    let securityCode = '';
+    let signedAt = null;
 
-    const qrUrl = buildQRCodeData({
-        issuerRnc: invoice.issuerRnc,
-        ncf: invoice.ncf,
-        receiverRnc: invoice.receiverRnc,
-        total: Number(invoice.total),
-        issuedAt: invoice.issuedAt,
-        type,
-        signedAt: invoice.updatedAt,
-        securityCode
-    });
+    if (invoice.xmlSigned) {
+        // 1. Extraer los primeros 6 chars del <SignatureValue>
+        securityCode = extractSecurityCode(invoice.xmlSigned);
 
-    const qrDataUrl = await QRCode.toDataURL(qrUrl, {
-        width: 200,
-        margin: 1,
-        color: { dark: '#000000', light: '#ffffff' }
-    });
+        // 2. Extraer <FechaHoraFirma> del XML firmado (formato DD-MM-YYYY HH:mm:ss)
+        const fechaHoraFirmaMatch = invoice.xmlSigned.match(
+            /<FechaHoraFirma>(.*?)<\/FechaHoraFirma>/
+        );
+
+        if (fechaHoraFirmaMatch) {
+            const fechaHoraFirmaStr = fechaHoraFirmaMatch[1].trim();
+            const [fecha, hora] = fechaHoraFirmaStr.split(' ');
+            const [dd, mm, yyyy] = fecha.split('-');
+            const [hh, mi, ss] = hora.split(':');
+            // Construir Date asumiendo hora RD (UTC-4)
+            signedAt = new Date(`${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}-04:00`);
+        } else {
+            // Fallback defensivo: no debería pasar si el XML está bien firmado
+            signedAt = invoice.updatedAt;
+        }
+
+        // 3. Construir la URL del QR con datos REALES del xmlSigned
+        qrUrl = buildQRCodeData({
+            issuerRnc: invoice.issuerRnc,
+            ncf: invoice.ncf,
+            receiverRnc: invoice.receiverRnc,
+            total: Number(invoice.total),
+            issuedAt: invoice.issuedAt,
+            type,
+            signedAt,
+            securityCode
+        });
+
+        // 4. Generar el PNG del QR (solo si la URL se pudo construir)
+        if (qrUrl) {
+            qrDataUrl = await QRCode.toDataURL(qrUrl, {
+                width: 200,
+                margin: 1,
+                color: { dark: '#000000', light: '#ffffff' }
+            });
+        }
+    }
 
     const typeNames = {
         '31': 'Factura de Crédito Fiscal Electrónica',
@@ -358,6 +390,7 @@ async function buildTemplateData(invoice, lines, company) {
         qrDataUrl,
         qrUrl,
         securityCode,
+        hasQR: !!qrDataUrl,
 
         generatedAt: new Date()
     };

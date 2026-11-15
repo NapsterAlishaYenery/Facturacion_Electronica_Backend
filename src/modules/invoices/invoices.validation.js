@@ -7,6 +7,14 @@ const Joi = require('joi');
 // ============================================================
 // Schemas de query
 // ============================================================
+// En invoices.validation.js
+const invoiceIdParamsSchema = Joi.object({
+    id: Joi.string().uuid({ version: ['uuidv4'] }).required()
+        .messages({
+            'string.guid': 'Invoice ID must be a valid UUID',
+            'any.required': 'Invoice ID is required'
+        })
+});
 
 const listInvoicesQuerySchema = Joi.object({
     status: Joi.string()
@@ -120,6 +128,24 @@ const itemSchema = Joi.object({
         .messages({ 'number.min': 'precioUnitarioReferencia cannot be negative' }),
     fechaElaboracion: Joi.date().iso().optional().allow(null),
     fechaVencimientoItem: Joi.date().iso().optional().allow(null),
+
+    // ═══════════════════════════════════════════════════════════
+    // DT-EXPORT — Campos derivados del <OtraMonedaDetalle>
+    // El sistema los calcula desde unitPrice / tipoCambio
+    // y desde montoItem DOP / tipoCambio. El cliente NO los manda.
+    // ═══════════════════════════════════════════════════════════
+    precioOtraMoneda: Joi.forbidden()
+        .messages({ 'any.unknown': 'precioOtraMoneda se calcula automáticamente (unitPrice / tipoCambio). No lo envíes.' }),
+    montoItemOtraMoneda: Joi.forbidden()
+        .messages({ 'any.unknown': 'montoItemOtraMoneda se calcula automáticamente (montoItem DOP / tipoCambio). No lo envíes.' }),
+
+    // Estos dos siguen siendo input de negocio (descuento/recargo
+    // aplicado en la moneda extranjera). Si en el futuro los quieres
+    // derivar también, cámbialos a forbidden.
+    descuentoOtraMoneda: Joi.number().min(0).optional().allow(null)
+        .messages({ 'number.min': 'descuentoOtraMoneda cannot be negative' }),
+    recargoOtraMoneda: Joi.number().min(0).optional().allow(null)
+        .messages({ 'number.min': 'recargoOtraMoneda cannot be negative' }),
 
     // ---------- DT31 — Subcantidades (hasta 5) ----------
     subcantidades: Joi.array().items(
@@ -325,11 +351,27 @@ const transporteSchema = Joi.object({
     numeroAlbaran: Joi.string().max(20).optional().allow(null, '')
 }).optional().allow(null);
 
-// Informaciones adicionales — SOLO tipo 46 (exportación)
+
+// ============================================================
+// Informaciones adicionales — aplica a 31, 32, 33, 34, 44, 45, 46
+// (excluido en 41, 43, 47 según el PDF DGII v1.0).
+//
+// Incluye TODOS los campos:
+//   - Campos básicos de exportación (46): fechaEmbarque, puertoEmbarque, etc.
+//   - Campos extendidos (31-34, 44-46): numeroReferencia, pesos, bultos.
+//
+// El generador (buildInformacionesAdicionales) ya filtra por perfil
+// de tipo (type-profiles2.js), así que el schema puede ser permisivo
+// y dejar que el perfil decida qué se emite en el XML.
+// ============================================================
 const informacionesAdicionalesSchema = Joi.object({
+    // ---- Campos básicos (todos los tipos que soportan el bloque) ----
     fechaEmbarque: Joi.date().iso().optional().allow(null),
     numeroEmbarque: Joi.string().max(25).optional().allow(null, ''),
     numeroContenedor: Joi.string().max(100).optional().allow(null, ''),
+    numeroReferencia: Joi.string().max(20).optional().allow(null, ''),
+
+    // ---- Campos de exportación (46, opcionales en otros tipos) ----
     nombrePuertoEmbarque: Joi.string().max(40).optional().allow(null, ''),
     condicionesEntrega: Joi.string().max(3).optional().allow(null, ''),
     totalFob: Joi.number().min(0).optional().allow(null),
@@ -339,7 +381,17 @@ const informacionesAdicionalesSchema = Joi.object({
     totalCif: Joi.number().min(0).optional().allow(null),
     regimenAduanero: Joi.string().max(35).optional().allow(null, ''),
     nombrePuertoSalida: Joi.string().max(40).optional().allow(null, ''),
-    nombrePuertoDesembarque: Joi.string().max(40).optional().allow(null, '')
+    nombrePuertoDesembarque: Joi.string().max(40).optional().allow(null, ''),
+
+    // ---- Campos extendidos (pesos, bultos, volumen) ----
+    pesoBruto: Joi.number().min(0).optional().allow(null),
+    pesoNeto: Joi.number().min(0).optional().allow(null),
+    unidadPesoBruto: Joi.number().integer().min(1).max(62).optional().allow(null),
+    unidadPesoNeto: Joi.number().integer().min(1).max(62).optional().allow(null),
+    cantidadBulto: Joi.number().min(0).optional().allow(null),
+    unidadBulto: Joi.number().integer().min(1).max(62).optional().allow(null),
+    volumenBulto: Joi.number().min(0).optional().allow(null),
+    unidadVolumen: Joi.number().integer().min(1).max(62).optional().allow(null)
 }).optional().allow(null);
 
 // ============================================================
@@ -408,19 +460,6 @@ const compradorExtrasSchema = Joi.object({
     codigoInternoComprador: Joi.string().max(20).optional().allow(null, ''),
     responsablePago: Joi.string().max(20).optional().allow(null, ''),
     informacionAdicionalComprador: Joi.string().max(150).optional().allow(null, '')
-});
-
-// InformacionesAdicionales — extendido (pesos, bultos, referencia)
-const infoAdicionalExtrasSchema = Joi.object({
-    numeroReferencia: Joi.string().max(20).optional().allow(null, ''),
-    pesoBruto: Joi.number().min(0).optional().allow(null),
-    pesoNeto: Joi.number().min(0).optional().allow(null),
-    unidadPesoBruto: Joi.number().integer().min(1).max(62).optional().allow(null),
-    unidadPesoNeto: Joi.number().integer().min(1).max(62).optional().allow(null),
-    cantidadBulto: Joi.number().min(0).optional().allow(null),
-    unidadBulto: Joi.number().integer().min(1).max(62).optional().allow(null),
-    volumenBulto: Joi.number().min(0).optional().allow(null),
-    unidadVolumen: Joi.number().integer().min(1).max(62).optional().allow(null)
 });
 
 // Totales — extendido (impuestos adicionales, montos extra)
@@ -605,38 +644,39 @@ const createInvoiceSchema = Joi.object({
         otherwise: Joi.forbidden()
     }),
 
+
     // --- Monto exento (43, 44, 47) ---
-    exemptAmount: Joi.when('type', {
-        is: Joi.valid('43', '44', '47'),
-        then: Joi.number().min(0).optional(),
-        otherwise: Joi.forbidden()
-    }),
+    // DT-EXPORT: derivado de las líneas con indicadorFacturacion=4.
+    // El service lo calcula. El cliente NO lo manda.
+    exemptAmount: Joi.forbidden()
+        .messages({
+            'any.unknown': 'exemptAmount se calcula automáticamente sumando las líneas exentas (indicadorFacturacion=4). No lo envíes.'
+        }),
 
     // --- ITBIS3 (46) ---
-    itbis3Base: Joi.when('type', {
-        is: '46',
-        then: Joi.number().min(0).required()
-            .messages({ 'any.required': 'itbis3Base is required for e-CF 46' }),
-        otherwise: Joi.forbidden()
-    }),
-    itbis3Amount: Joi.when('type', {
-        is: '46',
-        then: Joi.number().min(0).required()
-            .messages({ 'any.required': 'itbis3Amount is required for e-CF 46' }),
-        otherwise: Joi.forbidden()
-    }),
+    // DT-EXPORT: derivado de las líneas con indicadorFacturacion=3.
+    // El service lo calcula. El cliente NO los manda.
+    itbis3Base: Joi.forbidden()
+        .messages({
+            'any.unknown': 'itbis3Base se calcula automáticamente sumando las líneas con indicadorFacturacion=3. No lo envíes.'
+        }),
+    itbis3Amount: Joi.forbidden()
+        .messages({
+            'any.unknown': 'itbis3Amount se calcula automáticamente (ITBIS 0% sobre la base). No lo envíes.'
+        }),
 
     // --- Retención encabezado (41, 47) ---
-    totalItbisRetenido: Joi.when('type', {
-        is: '41',
-        then: Joi.number().min(0).optional(),
-        otherwise: Joi.forbidden()
-    }),
-    totalIsrRetencion: Joi.when('type', {
-        is: '47',
-        then: Joi.number().min(0).optional(),
-        otherwise: Joi.forbidden()
-    }),
+    // DT31 — Estos totales son DERIVADOS: el service los calcula
+    // sumando items[].retencion.montoItbisRetenido / montoIsrRetenido.
+    // El cliente NO debe enviarlos. El XML los toma de BD.
+    totalItbisRetenido: Joi.forbidden()
+        .messages({
+            'any.unknown': 'totalItbisRetenido se calcula automáticamente desde items[].retencion.montoItbisRetenido. No lo envíes.'
+        }),
+    totalIsrRetencion: Joi.forbidden()
+        .messages({
+            'any.unknown': 'totalIsrRetencion se calcula automáticamente desde items[].retencion.montoIsrRetenido. No lo envíes.'
+        }),
 
     // --- Transporte (todos excepto 41, 43) ---
     transporte: Joi.when('type', {
@@ -645,11 +685,12 @@ const createInvoiceSchema = Joi.object({
         otherwise: Joi.forbidden()
     }),
 
-    // --- Informaciones adicionales (solo 46) ---
+    // --- Informaciones adicionales (31, 32, 33, 34, 44, 45, 46) ---
+    // Excluido en 41, 43, 47 según el PDF DGII v1.0.
     informacionesAdicionales: Joi.when('type', {
-        is: '46',
-        then: informacionesAdicionalesSchema,
-        otherwise: Joi.forbidden()
+        is: Joi.valid('41', '43', '47'),
+        then: Joi.forbidden(),
+        otherwise: informacionesAdicionalesSchema
     }),
 
     // ============================================================
@@ -839,78 +880,21 @@ const createInvoiceSchema = Joi.object({
         }),
 
     // ============================================================
-    // DT30 — InformacionesAdicionales extendido (pesos, bultos, ref)
-    // ============================================================
-    numeroReferencia: infoAdicionalExtrasSchema.extract('numeroReferencia')
-        .when('type', {
-            is: Joi.valid('41', '43', '47'),
-            then: Joi.forbidden(),
-            otherwise: Joi.optional().allow(null, '')
-        }),
-    pesoBruto: infoAdicionalExtrasSchema.extract('pesoBruto')
-        .when('type', {
-            is: Joi.valid('41', '43', '47'),
-            then: Joi.forbidden(),
-            otherwise: Joi.optional().allow(null)
-        }),
-    pesoNeto: infoAdicionalExtrasSchema.extract('pesoNeto')
-        .when('type', {
-            is: Joi.valid('41', '43', '47'),
-            then: Joi.forbidden(),
-            otherwise: Joi.optional().allow(null)
-        }),
-    unidadPesoBruto: infoAdicionalExtrasSchema.extract('unidadPesoBruto')
-        .when('type', {
-            is: Joi.valid('41', '43', '47'),
-            then: Joi.forbidden(),
-            otherwise: Joi.optional().allow(null)
-        }),
-    unidadPesoNeto: infoAdicionalExtrasSchema.extract('unidadPesoNeto')
-        .when('type', {
-            is: Joi.valid('41', '43', '47'),
-            then: Joi.forbidden(),
-            otherwise: Joi.optional().allow(null)
-        }),
-    cantidadBulto: infoAdicionalExtrasSchema.extract('cantidadBulto')
-        .when('type', {
-            is: Joi.valid('41', '43', '47'),
-            then: Joi.forbidden(),
-            otherwise: Joi.optional().allow(null)
-        }),
-    unidadBulto: infoAdicionalExtrasSchema.extract('unidadBulto')
-        .when('type', {
-            is: Joi.valid('41', '43', '47'),
-            then: Joi.forbidden(),
-            otherwise: Joi.optional().allow(null)
-        }),
-    volumenBulto: infoAdicionalExtrasSchema.extract('volumenBulto')
-        .when('type', {
-            is: Joi.valid('41', '43', '47'),
-            then: Joi.forbidden(),
-            otherwise: Joi.optional().allow(null)
-        }),
-    unidadVolumen: infoAdicionalExtrasSchema.extract('unidadVolumen')
-        .when('type', {
-            is: Joi.valid('41', '43', '47'),
-            then: Joi.forbidden(),
-            otherwise: Joi.optional().allow(null)
-        }),
-
-    // ============================================================
     // DT30 — Totales extendido
     // ============================================================
-    montoImpuestoAdicional: totalesExtrasSchema.extract('montoImpuestoAdicional')
-        .when('type', {
-            is: Joi.valid('41', '43', '46', '47'),
-            then: Joi.forbidden(),
-            otherwise: Joi.optional().allow(null)
+    // DT-EXPORT: montoImpuestoAdicional e impuestosAdicionales
+    // se derivan de las líneas (que sí los declaran por ítem).
+    // El service los suma y los pone en el encabezado.
+    montoImpuestoAdicional: Joi.forbidden()
+        .messages({
+            'any.unknown': 'montoImpuestoAdicional se calcula automáticamente sumando los impuestos adicionales de las líneas. No lo envíes.'
         }),
-    impuestosAdicionales: totalesExtrasSchema.extract('impuestosAdicionales')
-        .when('type', {
-            is: Joi.valid('41', '43', '46', '47'),
-            then: Joi.forbidden(),
-            otherwise: Joi.optional().allow(null)
+    impuestosAdicionales: Joi.forbidden()
+        .messages({
+            'any.unknown': 'impuestosAdicionales del encabezado se calcula automáticamente desde items[].impuestosAdicionales. No lo envíes.'
         }),
+
+
     montoNoFacturable: totalesExtrasSchema.extract('montoNoFacturable')
         .when('type', {
             is: Joi.valid('41', '43', '47'),
@@ -937,20 +921,41 @@ const createInvoiceSchema = Joi.object({
     // ============================================================
     // DT30 — OtraMoneda (encabezado)
     // ============================================================
+    // ============================================================
+    // DT30 — OtraMoneda (encabezado)
+    //
+    // DT-EXPORT: de todo el bloque, el cliente SOLO manda
+    // tipoMoneda + tipoCambio. Los 12 totales derivados se
+    // calculan automáticamente (total DOP / tipoCambio) para
+    // no acumular errores de redondeo por línea.
+    // ============================================================
     tipoMoneda: otraMonedaSchema.extract('tipoMoneda'),
     tipoCambio: otraMonedaSchema.extract('tipoCambio'),
-    montoGravadoTotalOtraMoneda: otraMonedaSchema.extract('montoGravadoTotalOtraMoneda'),
-    montoGravado1OtraMoneda: otraMonedaSchema.extract('montoGravado1OtraMoneda'),
-    montoGravado2OtraMoneda: otraMonedaSchema.extract('montoGravado2OtraMoneda'),
-    montoGravado3OtraMoneda: otraMonedaSchema.extract('montoGravado3OtraMoneda'),
-    montoExentoOtraMoneda: otraMonedaSchema.extract('montoExentoOtraMoneda'),
-    totalItbisOtraMoneda: otraMonedaSchema.extract('totalItbisOtraMoneda'),
-    totalItbis1OtraMoneda: otraMonedaSchema.extract('totalItbis1OtraMoneda'),
-    totalItbis2OtraMoneda: otraMonedaSchema.extract('totalItbis2OtraMoneda'),
-    totalItbis3OtraMoneda: otraMonedaSchema.extract('totalItbis3OtraMoneda'),
-    montoImpuestoAdicionalOtraMoneda: otraMonedaSchema.extract('montoImpuestoAdicionalOtraMoneda'),
-    impuestosAdicionalesOtraMoneda: otraMonedaSchema.extract('impuestosAdicionalesOtraMoneda'),
-    montoTotalOtraMoneda: otraMonedaSchema.extract('montoTotalOtraMoneda'),
+
+    montoGravadoTotalOtraMoneda: Joi.forbidden()
+        .messages({ 'any.unknown': 'montoGravadoTotalOtraMoneda se calcula automáticamente (montoGravado DOP / tipoCambio). No lo envíes.' }),
+    montoGravado1OtraMoneda: Joi.forbidden()
+        .messages({ 'any.unknown': 'montoGravado1OtraMoneda se calcula automáticamente (itbis1Base DOP / tipoCambio). No lo envíes.' }),
+    montoGravado2OtraMoneda: Joi.forbidden()
+        .messages({ 'any.unknown': 'montoGravado2OtraMoneda se calcula automáticamente (itbis2Base DOP / tipoCambio). No lo envíes.' }),
+    montoGravado3OtraMoneda: Joi.forbidden()
+        .messages({ 'any.unknown': 'montoGravado3OtraMoneda se calcula automáticamente (itbis3Base DOP / tipoCambio). No lo envíes.' }),
+    montoExentoOtraMoneda: Joi.forbidden()
+        .messages({ 'any.unknown': 'montoExentoOtraMoneda se calcula automáticamente (exemptAmount DOP / tipoCambio). No lo envíes.' }),
+    totalItbisOtraMoneda: Joi.forbidden()
+        .messages({ 'any.unknown': 'totalItbisOtraMoneda se calcula automáticamente (itbis DOP / tipoCambio). No lo envíes.' }),
+    totalItbis1OtraMoneda: Joi.forbidden()
+        .messages({ 'any.unknown': 'totalItbis1OtraMoneda se calcula automáticamente (itbis1Amount DOP / tipoCambio). No lo envíes.' }),
+    totalItbis2OtraMoneda: Joi.forbidden()
+        .messages({ 'any.unknown': 'totalItbis2OtraMoneda se calcula automáticamente (itbis2Amount DOP / tipoCambio). No lo envíes.' }),
+    totalItbis3OtraMoneda: Joi.forbidden()
+        .messages({ 'any.unknown': 'totalItbis3OtraMoneda se calcula automáticamente (itbis3Amount DOP / tipoCambio). No lo envíes.' }),
+    montoImpuestoAdicionalOtraMoneda: Joi.forbidden()
+        .messages({ 'any.unknown': 'montoImpuestoAdicionalOtraMoneda se calcula automáticamente. No lo envíes.' }),
+    impuestosAdicionalesOtraMoneda: Joi.forbidden()
+        .messages({ 'any.unknown': 'impuestosAdicionalesOtraMoneda se calcula automáticamente. No lo envíes.' }),
+    montoTotalOtraMoneda: Joi.forbidden()
+        .messages({ 'any.unknown': 'montoTotalOtraMoneda se calcula automáticamente (total DOP / tipoCambio). No lo envíes.' }),
 
     // ============================================================
     // DT32 — Subtotales
@@ -1036,12 +1041,12 @@ const createInvoiceSchema = Joi.object({
                 });
             }
 
-            // 2.b. indicadorFacturacion=3 solo aplica a tipo 46
-            if (indicador === 3 && value.type !== '46') {
-                return helpers.error('any.custom', {
-                    message: `Item ${i + 1}: indicadorFacturacion=3 (ITBIS 0% gravado) solo aplica a tipo 46 (exportaciones). Para 0% usa indicadorFacturacion=4 (exento).`
-                });
-            }
+            // (bloque 2.b eliminado — indicadorFacturacion=3 es válido en
+            // todos los tipos según la tabla oficial de la DGII. Solo los
+            // tipos 43/44/47 lo fuerzan a 4 y el 46 lo fuerza a 3; esa
+            // validación vive en el bloque 10 "IndicadorFacturacion forzado
+            // por tipo". El caso DGII E310000000010 incluye un item PAN con
+            // indicadorFacturacion=3 en tipo 31, lo cual es válido.)
 
             // 2.c. discount no puede superar quantity × unitPrice
             const lineBase = (item.quantity * item.unitPrice) - item.discount;
@@ -1146,14 +1151,15 @@ const createInvoiceSchema = Joi.object({
         }
 
         // 7. 46 requiere itbis3Base y itbis3Amount
-        if (value.type === '46') {
-            if (value.itbis3Base === undefined || value.itbis3Base === null) {
-                return helpers.error('any.custom', { message: 'Type 46 requires itbis3Base' });
-            }
-            if (value.itbis3Amount === undefined || value.itbis3Amount === null) {
-                return helpers.error('any.custom', { message: 'Type 46 requires itbis3Amount' });
-            }
-        }
+        //Elimínalo por completo. Ya no aplica (ahora son forbidden y el service los deriva).
+        // if (value.type === '46') {
+        //     if (value.itbis3Base === undefined || value.itbis3Base === null) {
+        //         return helpers.error('any.custom', { message: 'Type 46 requires itbis3Base' });
+        //     }
+        //     if (value.itbis3Amount === undefined || value.itbis3Amount === null) {
+        //         return helpers.error('any.custom', { message: 'Type 46 requires itbis3Amount' });
+        //     }
+        // }
 
         // ============================================================
         // DT35 — Sección F: <InformacionReferencia>
@@ -1685,16 +1691,6 @@ const updateInvoiceSchema = Joi.object({
     responsablePago: compradorExtrasSchema.extract('responsablePago'),
     informacionAdicionalComprador: compradorExtrasSchema.extract('informacionAdicionalComprador'),
 
-    numeroReferencia: infoAdicionalExtrasSchema.extract('numeroReferencia'),
-    pesoBruto: infoAdicionalExtrasSchema.extract('pesoBruto'),
-    pesoNeto: infoAdicionalExtrasSchema.extract('pesoNeto'),
-    unidadPesoBruto: infoAdicionalExtrasSchema.extract('unidadPesoBruto'),
-    unidadPesoNeto: infoAdicionalExtrasSchema.extract('unidadPesoNeto'),
-    cantidadBulto: infoAdicionalExtrasSchema.extract('cantidadBulto'),
-    unidadBulto: infoAdicionalExtrasSchema.extract('unidadBulto'),
-    volumenBulto: infoAdicionalExtrasSchema.extract('volumenBulto'),
-    unidadVolumen: infoAdicionalExtrasSchema.extract('unidadVolumen'),
-
     montoImpuestoAdicional: totalesExtrasSchema.extract('montoImpuestoAdicional'),
     impuestosAdicionales: totalesExtrasSchema.extract('impuestosAdicionales'),
     montoNoFacturable: totalesExtrasSchema.extract('montoNoFacturable'),
@@ -1707,18 +1703,31 @@ const updateInvoiceSchema = Joi.object({
 
     tipoMoneda: otraMonedaSchema.extract('tipoMoneda'),
     tipoCambio: otraMonedaSchema.extract('tipoCambio'),
-    montoGravadoTotalOtraMoneda: otraMonedaSchema.extract('montoGravadoTotalOtraMoneda'),
-    montoGravado1OtraMoneda: otraMonedaSchema.extract('montoGravado1OtraMoneda'),
-    montoGravado2OtraMoneda: otraMonedaSchema.extract('montoGravado2OtraMoneda'),
-    montoGravado3OtraMoneda: otraMonedaSchema.extract('montoGravado3OtraMoneda'),
-    montoExentoOtraMoneda: otraMonedaSchema.extract('montoExentoOtraMoneda'),
-    totalItbisOtraMoneda: otraMonedaSchema.extract('totalItbisOtraMoneda'),
-    totalItbis1OtraMoneda: otraMonedaSchema.extract('totalItbis1OtraMoneda'),
-    totalItbis2OtraMoneda: otraMonedaSchema.extract('totalItbis2OtraMoneda'),
-    totalItbis3OtraMoneda: otraMonedaSchema.extract('totalItbis3OtraMoneda'),
-    montoImpuestoAdicionalOtraMoneda: otraMonedaSchema.extract('montoImpuestoAdicionalOtraMoneda'),
-    impuestosAdicionalesOtraMoneda: otraMonedaSchema.extract('impuestosAdicionalesOtraMoneda'),
-    montoTotalOtraMoneda: otraMonedaSchema.extract('montoTotalOtraMoneda'),
+    // DT-EXPORT: los 12 totales derivados son forbidden en update
+    montoGravadoTotalOtraMoneda: Joi.forbidden()
+        .messages({ 'any.unknown': 'montoGravadoTotalOtraMoneda se calcula automáticamente. No lo envíes.' }),
+    montoGravado1OtraMoneda: Joi.forbidden()
+        .messages({ 'any.unknown': 'montoGravado1OtraMoneda se calcula automáticamente. No lo envíes.' }),
+    montoGravado2OtraMoneda: Joi.forbidden()
+        .messages({ 'any.unknown': 'montoGravado2OtraMoneda se calcula automáticamente. No lo envíes.' }),
+    montoGravado3OtraMoneda: Joi.forbidden()
+        .messages({ 'any.unknown': 'montoGravado3OtraMoneda se calcula automáticamente. No lo envíes.' }),
+    montoExentoOtraMoneda: Joi.forbidden()
+        .messages({ 'any.unknown': 'montoExentoOtraMoneda se calcula automáticamente. No lo envíes.' }),
+    totalItbisOtraMoneda: Joi.forbidden()
+        .messages({ 'any.unknown': 'totalItbisOtraMoneda se calcula automáticamente. No lo envíes.' }),
+    totalItbis1OtraMoneda: Joi.forbidden()
+        .messages({ 'any.unknown': 'totalItbis1OtraMoneda se calcula automáticamente. No lo envíes.' }),
+    totalItbis2OtraMoneda: Joi.forbidden()
+        .messages({ 'any.unknown': 'totalItbis2OtraMoneda se calcula automáticamente. No lo envíes.' }),
+    totalItbis3OtraMoneda: Joi.forbidden()
+        .messages({ 'any.unknown': 'totalItbis3OtraMoneda se calcula automáticamente. No lo envíes.' }),
+    montoImpuestoAdicionalOtraMoneda: Joi.forbidden()
+        .messages({ 'any.unknown': 'montoImpuestoAdicionalOtraMoneda se calcula automáticamente. No lo envíes.' }),
+    impuestosAdicionalesOtraMoneda: Joi.forbidden()
+        .messages({ 'any.unknown': 'impuestosAdicionalesOtraMoneda se calcula automáticamente. No lo envíes.' }),
+    montoTotalOtraMoneda: Joi.forbidden()
+        .messages({ 'any.unknown': 'montoTotalOtraMoneda se calcula automáticamente. No lo envíes.' }),
 
     // Campos NO editables nunca (identifican el comprobante original)
     modifiedNcf: Joi.forbidden().messages({
@@ -1738,7 +1747,7 @@ const updateInvoiceSchema = Joi.object({
     receiverIdentificadorExtranjero: Joi.forbidden(),
     receiverPais: Joi.forbidden(),
     transporte: Joi.forbidden(),
-    informacionesAdicionales: Joi.forbidden(),
+    informacionesAdicionales: informacionesAdicionalesSchema,
     exemptAmount: Joi.forbidden(),
     itbis3Base: Joi.forbidden(),
     itbis3Amount: Joi.forbidden(),
@@ -2026,7 +2035,21 @@ const downloadXMLQuerySchema = Joi.object({
         })
 });
 
+// ============================================================
+// Schema: descargar XML del RFCE
+// ============================================================
+const downloadRFCEQuerySchema = Joi.object({
+    type: Joi.string()
+        .valid('signed', 'unsigned')
+        .optional()
+        .default('unsigned')
+        .messages({
+            'any.only': 'type must be one of: signed, unsigned'
+        })
+});
+
 module.exports = {
+    invoiceIdParamsSchema,
     listInvoicesQuerySchema,
     createInvoiceSchema,
     updateInvoiceSchema,
@@ -2037,11 +2060,11 @@ module.exports = {
     idDocExtrasSchema,
     emisorExtrasSchema,
     compradorExtrasSchema,
-    infoAdicionalExtrasSchema,
     totalesExtrasSchema,
     otraMonedaSchema,
     // DT32 — Subtotales
     subtotalSchema,
     // DT33 — Descuentos o recargos globales
-    descuentoORecargoSchema
+    descuentoORecargoSchema,
+    downloadRFCEQuerySchema,
 };

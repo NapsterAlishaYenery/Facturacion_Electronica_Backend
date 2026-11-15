@@ -20,7 +20,14 @@ const updateMyCompanySchema = Joi.object({
         }),
     phone: Joi.string().max(30).optional().allow(null, ''),
     address: Joi.string().max(300).optional().allow(null, ''),
-    economicActivity: Joi.string().max(200).optional().allow(null, ''),
+    economicActivity: Joi.string().pattern(/^\d{1,6}$/).optional().allow(null, '')
+        .messages({
+            'string.pattern.base': 'economicActivity must be a 1-6 digit DGII code (e.g. 729201)'
+        }),
+    economicActivityDescription: Joi.string().max(200).optional().allow(null, '')
+        .messages({
+            'string.max': 'economicActivityDescription cannot exceed 200 characters'
+        }),
     provinceDgiiCode: Joi.string().pattern(/^\d{6}$/).optional()
         .messages({
             'string.pattern.base': 'provinceDgiiCode must be exactly 6 digits'
@@ -71,7 +78,14 @@ const updateCompanyByIdSchema = Joi.object({
         }),
     phone: Joi.string().max(30).optional().allow(null, ''),
     address: Joi.string().max(300).optional().allow(null, ''),
-    economicActivity: Joi.string().max(200).optional().allow(null, ''),
+    economicActivity: Joi.string().pattern(/^\d{1,6}$/).optional().allow(null, '')
+        .messages({
+            'string.pattern.base': 'economicActivity must be a 1-6 digit DGII code (e.g. 729201)'
+        }),
+    economicActivityDescription: Joi.string().max(200).optional().allow(null, '')
+        .messages({
+            'string.max': 'economicActivityDescription cannot exceed 200 characters'
+        }),
     // Campos exclusivos del admin
     dgiiEnvironment: Joi.string().valid('testecf', 'production').optional(),
     isActive: Joi.boolean().optional(),

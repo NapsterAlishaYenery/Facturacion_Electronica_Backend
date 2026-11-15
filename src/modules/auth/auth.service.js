@@ -52,6 +52,7 @@ async function registerCompany(data, reqInfo = {}) {
             phone: companyData.phone || null,
             address: companyData.address || null,
             economicActivity: companyData.economicActivity || null,
+            economicActivityDescription: companyData.economicActivityDescription || null,
             dgiiEnvironment: companyData.dgiiEnvironment || 'testecf',
             provinceDgiiCode: companyData.provinceDgiiCode,
             municipalityDgiiCode: companyData.municipalityDgiiCode,
@@ -108,6 +109,8 @@ async function registerCompany(data, reqInfo = {}) {
                 ownerEmail: user.email,
                 provinceDgiiCode: company.provinceDgiiCode,
                 municipalityDgiiCode: company.municipalityDgiiCode,
+                economicActivity: company.economicActivity,
+                economicActivityDescription: company.economicActivityDescription,
                 sucursal: company.sucursal,
                 website: company.website,
                 additionalPhones: company.additionalPhones
@@ -288,7 +291,7 @@ async function getCurrentUser(userId) {
                 as: 'company',
                 attributes: [
                     'id', 'rnc', 'name', 'tradeName', 'dgiiEnvironment', 'isActive',
-                    'provinceDgiiCode', 'municipalityDgiiCode'
+                    'provinceDgiiCode', 'municipalityDgiiCode', 'economicActivity', 'economicActivityDescription'
                 ],
                 include: [
                     { model: Province, as: 'province', attributes: ['dgiiCode', 'name'], required: false },

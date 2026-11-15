@@ -13,7 +13,8 @@ const {
     Subscription,
     Plan,
     SubscriptionPayment,
-    Company
+    Company,
+    RfceDocument
 } = require('../../models');
 const { AppError } = require('../../shared/middlewares/error.middleware');
 
@@ -63,7 +64,8 @@ async function getCompanyStats(companyId, { period = 7 } = {}) {
         invoicesThisMonth,
         billedThisMonth,
         itbisThisMonth,
-        activeProducts
+        activeProducts,
+        rfcesThisMonth
     ] = await Promise.all([
         Invoice.count({
             where: {
@@ -85,6 +87,18 @@ async function getCompanyStats(companyId, { period = 7 } = {}) {
         }),
         Product.count({
             where: { companyId, isActive: true }
+        }),
+        RfceDocument.count({    // ← NUEVO
+            include: [{
+                model: Invoice,
+                as: 'invoice',
+                attributes: [],
+                where: {
+                    companyId,
+                    issuedAt: { [Op.gte]: monthStart }
+                },
+                required: true
+            }]
         })
     ]);
 
@@ -314,7 +328,8 @@ async function getCompanyStats(companyId, { period = 7 } = {}) {
             invoiceLimit: subscription?.plan?.invoicesPerMonth ?? null,
             billedThisMonth: Number(billedThisMonth) || 0,
             itbisThisMonth: Number(itbisThisMonth) || 0,
-            activeProducts
+            activeProducts,
+            rfcesThisMonth 
         },
         salesSeries,
         topProducts: topProducts.map(p => ({
