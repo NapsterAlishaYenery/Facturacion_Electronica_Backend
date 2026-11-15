@@ -2,7 +2,7 @@
 // Comparación exhaustiva: invoices.validation.js (original) vs validation/ (nuevo).
 // Compara error.message byte a byte. Si difieren → imprime OLD y NEW.
 
-const oldV = require('../src/modules/invoices/invoices.validation');
+const oldV = require('../src/modules/invoices/invoices.validation.old');
 const newV = require('../src/modules/invoices/validation');
 
 // ---------- helper ----------

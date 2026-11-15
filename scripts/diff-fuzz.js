@@ -1,5 +1,5 @@
 // scripts/diff-fuzz.js
-const oldV = require('../src/modules/invoices/invoices.validation');
+const oldV = require('../src/modules/invoices/invoices.validation.old');
 const newV = require('../src/modules/invoices/validation');
 
 const TIPOS = ['31', '32', '33', '34', '41', '43', '44', '45', '46', '47'];
