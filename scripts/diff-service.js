@@ -10,7 +10,7 @@
 //   se verificó manualmente en smoke tests).
 // ============================================================
 
-const oldS = require('../src/modules/invoices/invoices.service');
+const oldS = require('../src/modules/invoices/invoices.service.old');
 const newS = require('../src/modules/invoices/service');
 
 let total = 0, passed = 0, failed = 0;
