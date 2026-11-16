@@ -1,44 +1,17 @@
 // ============================================================
-// scripts/diff-service.js
-// Comparación estática + funcional del service original vs el
-// refactorizado (service/).
+// scripts/diff-service.js (versión final)
+// Compara el service original vs el barrel refactorizado.
 //
-// - NO depende del barrel index.js (que se llena al final).
-// - Compara exports de cada *.service.js individual.
+// - Compara exports de primer nivel (11 métodos + _helpers).
+// - Compara _helpers (11 funciones).
+// - Compara firmas de los 11 métodos públicos.
 // - Ejecuta los helpers puros con inputs deterministas.
-//
-// EXCLUYE createMyInvoice y updateMyInvoice.
+// - create/update: solo firma (tocan BD; su comportamiento
+//   se verificó manualmente en smoke tests).
 // ============================================================
 
 const oldS = require('../src/modules/invoices/invoices.service');
-
-// Import directo de cada archivo del service refactorizado
-const listSvc    = require('../src/modules/invoices/service/list.service');
-const getSvc     = require('../src/modules/invoices/service/get.service');
-const deleteSvc  = require('../src/modules/invoices/service/delete.service');
-const pdfSvc     = require('../src/modules/invoices/service/pdf.service');
-const xmlSvc     = require('../src/modules/invoices/service/xml.service');
-const signSvc    = require('../src/modules/invoices/service/sign.service');
-
-// Helpers
-const roundHelpers       = require('../src/modules/invoices/service/helpers/round');
-const constantsHelpers   = require('../src/modules/invoices/service/helpers/constants');
-const transporteMapper   = require('../src/modules/invoices/service/helpers/mappers/transporte.mapper');
-const infoMapper         = require('../src/modules/invoices/service/helpers/mappers/info-adicional.mapper');
-
-// Builders
-const responseBuilder    = require('../src/modules/invoices/service/build/invoice-response.builder');
-const linesBuilder       = require('../src/modules/invoices/service/build/invoice-lines.builder');
-
-// Totals
-const invoiceTotalsMod   = require('../src/modules/invoices/service/totals/invoice-totals');
-const subtotalsMod       = require('../src/modules/invoices/service/totals/subtotals');
-const otraMonedaMod      = require('../src/modules/invoices/service/totals/otra-moneda');
-const descuentosMod      = require('../src/modules/invoices/service/totals/descuentos');
-
-// NCF
-const assignNcfMod       = require('../src/modules/invoices/service/ncf/assign-next-ncf');
-const buildRefMod        = require('../src/modules/invoices/service/ncf/build-reference');
+const newS = require('../src/modules/invoices/service');
 
 let total = 0, passed = 0, failed = 0;
 
@@ -55,65 +28,55 @@ function deepEqual(a, b) {
 }
 
 // ============================================================
-// 1. Métodos públicos: comparar existencia + firma
+// 1. Exports de primer nivel
 // ============================================================
-console.log('\n=== 1. MÉTODOS PÚBLICOS (existen + firma) ===\n');
+console.log('\n=== 1. EXPORTS (primer nivel) ===\n');
 
-const methodMap = {
-    listMyInvoices:      listSvc.listMyInvoices,
-    listAllInvoices:     listSvc.listAllInvoices,
-    getMyInvoiceById:    getSvc.getMyInvoiceById,
-    getInvoiceById:      getSvc.getInvoiceById,
-    deleteMyInvoice:     deleteSvc.deleteMyInvoice,
-    getMyInvoicePDF:     pdfSvc.getMyInvoicePDF,
-    getMyInvoiceXML:     xmlSvc.getMyInvoiceXML,
-    getMyInvoiceRFCEXML: xmlSvc.getMyInvoiceRFCEXML,
-    signMyInvoice:       signSvc.signMyInvoice,
-};
+const oldKeys = Object.keys(oldS).sort();
+const newKeys = Object.keys(newS).sort();
 
-for (const [key, newFn] of Object.entries(methodMap)) {
-    const oldFn = oldS[key];
-    if (typeof oldFn !== 'function') {
-        fail(`${key}: no existe en el original`); continue;
-    }
-    if (typeof newFn !== 'function') {
-        fail(`${key}: no existe en el nuevo`); continue;
-    }
-    if (oldFn.length === newFn.length) {
-        ok(`${key}`, `${oldFn.length} args`);
-    } else {
-        fail(`${key}: firma distinta`, `OLD ${oldFn.length} vs NEW ${newFn.length}`);
-    }
+if (deepEqual(oldKeys, newKeys)) {
+    ok('mismas claves', oldKeys.join(', '));
+} else {
+    fail('claves distintas');
+    console.log('  OLD:', oldKeys);
+    console.log('  NEW:', newKeys);
 }
 
 // ============================================================
-// 2. _helpers: comparar existencia + firma
+// 2. _helpers
 // ============================================================
-console.log('\n=== 2. _helpers (existen + firma) ===\n');
-
-const helperMap = {
-    assignNextNCF:                   assignNcfMod.assignNextNCF,
-    calculateLineTotals:             linesBuilder.calculateLineTotals,
-    calculateInvoiceTotals:          invoiceTotalsMod.calculateInvoiceTotals,
-    buildInvoiceResponse:            responseBuilder.buildInvoiceResponse,
-    mapTransporteFields:             transporteMapper.mapTransporteFields,
-    mapInfoAdicionalFields:          infoMapper.mapInfoAdicionalFields,
-    resolveModifiedInvoice:          buildRefMod.resolveModifiedInvoice,
-    calculateSubtotalsFromLines:     subtotalsMod.calculateSubtotalsFromLines,
-    assertSubtotalsMatchInvoiceTotal:subtotalsMod.assertSubtotalsMatchInvoiceTotal,
-    calculateOtraMonedaTotals:       otraMonedaMod.calculateOtraMonedaTotals,
-    roundMoney4:                     roundHelpers.roundMoney4,
-};
+console.log('\n=== 2. _helpers ===\n');
 
 const oldHelpers = oldS._helpers || {};
+const newHelpers = newS._helpers || {};
 
-for (const [key, newFn] of Object.entries(helperMap)) {
-    const oldFn = oldHelpers[key];
-    if (typeof oldFn !== 'function') {
-        fail(`${key}: no existe en _helpers original`); continue;
-    }
+const oldHelperKeys = Object.keys(oldHelpers).sort();
+const newHelperKeys = Object.keys(newHelpers).sort();
+
+if (deepEqual(oldHelperKeys, newHelperKeys)) {
+    ok('mismas claves en _helpers', oldHelperKeys.join(', '));
+} else {
+    fail('_helpers con claves distintas');
+    console.log('  OLD:', oldHelperKeys);
+    console.log('  NEW:', newHelperKeys);
+}
+
+// ============================================================
+// 3. Firmas de todos los métodos públicos
+// ============================================================
+console.log('\n=== 3. FIRMAS (nº de args) ===\n');
+
+for (const key of oldKeys) {
+    if (key === '_helpers') continue;
+    const oldFn = oldS[key];
+    const newFn = newS[key];
+
+    if (typeof oldFn !== 'function') continue;
+
     if (typeof newFn !== 'function') {
-        fail(`${key}: no existe en el refactor`); continue;
+        fail(`${key}: no es función en el nuevo`);
+        continue;
     }
     if (oldFn.length === newFn.length) {
         ok(`${key}`, `${oldFn.length} args`);
@@ -123,11 +86,31 @@ for (const [key, newFn] of Object.entries(helperMap)) {
 }
 
 // ============================================================
-// 3. Ejecución funcional de helpers puros
+// 4. Firmas de los _helpers
 // ============================================================
-console.log('\n=== 3. HELPERS PUROS (ejecución) ===\n');
+console.log('\n=== 4. FIRMAS _helpers ===\n');
 
-// ---- 3.1 calculateLineTotals ----
+for (const key of oldHelperKeys) {
+    const oldFn = oldHelpers[key];
+    const newFn = newHelpers[key];
+    if (typeof oldFn !== 'function') continue;
+    if (typeof newFn !== 'function') {
+        fail(`${key}: no es función en el nuevo`);
+        continue;
+    }
+    if (oldFn.length === newFn.length) {
+        ok(`${key}`, `${oldFn.length} args`);
+    } else {
+        fail(`${key}: firma distinta`, `OLD ${oldFn.length} vs NEW ${newFn.length}`);
+    }
+}
+
+// ============================================================
+// 5. Ejecución funcional de los helpers puros
+// ============================================================
+console.log('\n=== 5. HELPERS PUROS (ejecución) ===\n');
+
+// ---- 5.1 calculateLineTotals ----
 {
     const inputs = [
         { quantity: 2, unitPrice: 100, discount: 0, recargo: 0, indicadorFacturacion: 1, itbisRate: 18 },
@@ -143,7 +126,7 @@ console.log('\n=== 3. HELPERS PUROS (ejecución) ===\n');
     let allOk = true;
     for (let i = 0; i < inputs.length; i++) {
         const oldOut = oldHelpers.calculateLineTotals(inputs[i]);
-        const newOut = helperMap.calculateLineTotals(inputs[i]);
+        const newOut = newHelpers.calculateLineTotals(inputs[i]);
         if (!deepEqual(oldOut, newOut)) {
             fail(`calculateLineTotals caso ${i + 1}`, 'outputs distintos');
             console.log('  OLD:', JSON.stringify(oldOut));
@@ -154,7 +137,7 @@ console.log('\n=== 3. HELPERS PUROS (ejecución) ===\n');
     if (allOk) ok('calculateLineTotals', `${inputs.length} casos idénticos`);
 }
 
-// ---- 3.2 calculateInvoiceTotals ----
+// ---- 5.2 calculateInvoiceTotals ----
 {
     const cases = [
         [{ indicadorFacturacion: 1, lineBase: 100 }, { indicadorFacturacion: 1, lineBase: 200 }],
@@ -165,7 +148,7 @@ console.log('\n=== 3. HELPERS PUROS (ejecución) ===\n');
     let allOk = true;
     for (let i = 0; i < cases.length; i++) {
         const oldOut = oldHelpers.calculateInvoiceTotals(cases[i]);
-        const newOut = helperMap.calculateInvoiceTotals(cases[i]);
+        const newOut = newHelpers.calculateInvoiceTotals(cases[i]);
         if (!deepEqual(oldOut, newOut)) {
             fail(`calculateInvoiceTotals caso ${i + 1}`, 'outputs distintos');
             allOk = false;
@@ -174,7 +157,7 @@ console.log('\n=== 3. HELPERS PUROS (ejecución) ===\n');
     if (allOk) ok('calculateInvoiceTotals', `${cases.length} casos idénticos`);
 }
 
-// ---- 3.3 buildInvoiceResponse ----
+// ---- 5.3 buildInvoiceResponse ----
 {
     const cases = [
         { toJSON: () => ({ id: 'a', ncf: 'E31', type: '31', status: 'draft', total: 100, trackId: null, xmlContent: '<x/>', xmlSigned: null, rfce: null }) },
@@ -184,7 +167,7 @@ console.log('\n=== 3. HELPERS PUROS (ejecución) ===\n');
     let allOk = true;
     for (let i = 0; i < cases.length; i++) {
         const oldOut = oldHelpers.buildInvoiceResponse(cases[i]);
-        const newOut = helperMap.buildInvoiceResponse(cases[i]);
+        const newOut = newHelpers.buildInvoiceResponse(cases[i]);
         if (!deepEqual(oldOut, newOut)) {
             fail(`buildInvoiceResponse caso ${i + 1}`, 'outputs distintos');
             allOk = false;
@@ -193,11 +176,10 @@ console.log('\n=== 3. HELPERS PUROS (ejecución) ===\n');
     if (allOk) ok('buildInvoiceResponse', `${cases.length} casos idénticos`);
 }
 
-// ---- 3.4 mapTransporteFields ----
+// ---- 5.4 mapTransporteFields ----
 {
     const cases = [
-        null,
-        {},
+        null, {},
         { viaTransporte: '01', paisOrigen: 'DO', paisDestino: 'US' },
         { viaTransporte: '02', paisOrigen: 'DO', direccionDestino: 'X', paisDestino: 'US',
           rncCompaniaTransportista: '123', nombreCompaniaTransportista: 'ABC',
@@ -208,17 +190,16 @@ console.log('\n=== 3. HELPERS PUROS (ejecución) ===\n');
     let allOk = true;
     for (let i = 0; i < cases.length; i++) {
         const oldOut = oldHelpers.mapTransporteFields(cases[i]);
-        const newOut = helperMap.mapTransporteFields(cases[i]);
+        const newOut = newHelpers.mapTransporteFields(cases[i]);
         if (!deepEqual(oldOut, newOut)) { fail(`mapTransporteFields caso ${i + 1}`); allOk = false; }
     }
     if (allOk) ok('mapTransporteFields', `${cases.length} casos idénticos`);
 }
 
-// ---- 3.5 mapInfoAdicionalFields ----
+// ---- 5.5 mapInfoAdicionalFields ----
 {
     const cases = [
-        null,
-        {},
+        null, {},
         { fechaEmbarque: '2026-01-15', numeroEmbarque: 'E1' },
         { fechaEmbarque: '2026-01-15', numeroEmbarque: 'E1', numeroContenedor: 'C1',
           nombrePuertoEmbarque: 'P1', condicionesEntrega: 'FOB', totalFob: 100,
@@ -230,13 +211,13 @@ console.log('\n=== 3. HELPERS PUROS (ejecución) ===\n');
     let allOk = true;
     for (let i = 0; i < cases.length; i++) {
         const oldOut = oldHelpers.mapInfoAdicionalFields(cases[i]);
-        const newOut = helperMap.mapInfoAdicionalFields(cases[i]);
+        const newOut = newHelpers.mapInfoAdicionalFields(cases[i]);
         if (!deepEqual(oldOut, newOut)) { fail(`mapInfoAdicionalFields caso ${i + 1}`); allOk = false; }
     }
     if (allOk) ok('mapInfoAdicionalFields', `${cases.length} casos idénticos`);
 }
 
-// ---- 3.6 calculateSubtotalsFromLines ----
+// ---- 5.6 calculateSubtotalsFromLines ----
 {
     const subtotalesInput = [
         { numeroSubtotal: 1, descripcion: 'A', orden: 1 },
@@ -248,27 +229,27 @@ console.log('\n=== 3. HELPERS PUROS (ejecución) ===\n');
         { subtotalId: 2, indicadorFacturacion: 1, lineBase: 200, itbisAmount: 36, total: 236 },
     ];
     const oldOut = oldHelpers.calculateSubtotalsFromLines(subtotalesInput, calculatedLines);
-    const newOut = helperMap.calculateSubtotalsFromLines(subtotalesInput, calculatedLines);
+    const newOut = newHelpers.calculateSubtotalsFromLines(subtotalesInput, calculatedLines);
     if (deepEqual(oldOut, newOut)) ok('calculateSubtotalsFromLines', '2 subtotales idénticos');
     else { fail('calculateSubtotalsFromLines', 'outputs distintos'); }
 }
 
-// ---- 3.7 assertSubtotalsMatchInvoiceTotal ----
+// ---- 5.7 assertSubtotalsMatchInvoiceTotal ----
 {
     try {
         oldHelpers.assertSubtotalsMatchInvoiceTotal([{ montoSubTotal: 200 }, { montoSubTotal: 204 }], 404);
-        helperMap.assertSubtotalsMatchInvoiceTotal([{ montoSubTotal: 200 }, { montoSubTotal: 204 }], 404);
+        newHelpers.assertSubtotalsMatchInvoiceTotal([{ montoSubTotal: 200 }, { montoSubTotal: 204 }], 404);
         ok('assertSubtotalsMatchInvoiceTotal (OK)');
     } catch (e) { fail('assertSubtotalsMatchInvoiceTotal (OK)', e.message); }
 
     let oldThrew = false, newThrew = false;
     try { oldHelpers.assertSubtotalsMatchInvoiceTotal([{ montoSubTotal: 100 }], 200); } catch (e) { oldThrew = true; }
-    try { helperMap.assertSubtotalsMatchInvoiceTotal([{ montoSubTotal: 100 }], 200); } catch (e) { newThrew = true; }
+    try { newHelpers.assertSubtotalsMatchInvoiceTotal([{ montoSubTotal: 100 }], 200); } catch (e) { newThrew = true; }
     if (oldThrew && newThrew) ok('assertSubtotalsMatchInvoiceTotal (mismatch throws)');
     else fail('assertSubtotalsMatchInvoiceTotal (mismatch)', `old=${oldThrew} new=${newThrew}`);
 }
 
-// ---- 3.8 calculateOtraMonedaTotals ----
+// ---- 5.8 calculateOtraMonedaTotals ----
 {
     const lines = [
         { total: 118, unitPrice: 100, discount: 0, recargo: 0 },
@@ -281,37 +262,42 @@ console.log('\n=== 3. HELPERS PUROS (ejecución) ===\n');
     };
 
     const oldOut1 = oldHelpers.calculateOtraMonedaTotals(lines.map(l => ({ ...l })), 58.5, invoiceTotals);
-    const newOut1 = helperMap.calculateOtraMonedaTotals(lines.map(l => ({ ...l })), 58.5, invoiceTotals);
+    const newOut1 = newHelpers.calculateOtraMonedaTotals(lines.map(l => ({ ...l })), 58.5, invoiceTotals);
     if (deepEqual(oldOut1, newOut1)) ok('calculateOtraMonedaTotals (con TC)');
     else fail('calculateOtraMonedaTotals (con TC)', 'outputs distintos');
 
     const oldOut2 = oldHelpers.calculateOtraMonedaTotals([], null, invoiceTotals);
-    const newOut2 = helperMap.calculateOtraMonedaTotals([], null, invoiceTotals);
+    const newOut2 = newHelpers.calculateOtraMonedaTotals([], null, invoiceTotals);
     if (deepEqual(oldOut2, newOut2)) ok('calculateOtraMonedaTotals (sin TC)');
     else fail('calculateOtraMonedaTotals (sin TC)', 'outputs distintos');
 }
 
-// ---- 3.9 roundMoney4 ----
+// ---- 5.9 roundMoney4 ----
 {
     const cases = [0, 1, 1.0001, 1.0005, 1.00005, 123.45678, -5.5];
     let allOk = true;
     for (const n of cases) {
         const oldOut = oldHelpers.roundMoney4(n);
-        const newOut = helperMap.roundMoney4(n);
+        const newOut = newHelpers.roundMoney4(n);
         if (oldOut !== newOut) { fail(`roundMoney4(${n})`, `OLD ${oldOut} vs NEW ${newOut}`); allOk = false; }
     }
     if (allOk) ok('roundMoney4', `${cases.length} casos idénticos`);
 }
 
 // ============================================================
-// 4. Métodos pendientes (solo existencia; se refactorizan al final)
+// 6. create/update: solo firma (comportamiento verificado en smoke tests)
 // ============================================================
-console.log('\n=== 4. MÉTODOS PENDIENTES (create/update) ===\n');
+console.log('\n=== 6. create/update (firma + existencia) ===\n');
+
 for (const key of ['createMyInvoice', 'updateMyInvoice']) {
-    if (typeof oldS[key] === 'function') {
-        ok(`${key}: existe en original (aún no refactorizado)`);
+    if (typeof oldS[key] === 'function' && typeof newS[key] === 'function') {
+        if (oldS[key].length === newS[key].length) {
+            ok(`${key}: firma OK`, `${oldS[key].length} args`);
+        } else {
+            fail(`${key}: firma distinta`);
+        }
     } else {
-        fail(`${key}: no existe en original`);
+        fail(`${key}: falta en uno de los dos`);
     }
 }
 
